@@ -1,0 +1,249 @@
+experiment_name: audit-yardrat-subset
+suite: audit-yardrat-subset
+manifest_fpath: configs/generated/yardrat.paper_subset.generated.yaml
+selection_count: 22
+num_shards:
+shard_index:
+limit:
+devices: '0'
+tmux_workers: 1
+max_eval_instances: 1000
+model_deployments_fpath: configs/debug/vicuna_no_chat_template.yaml
+include_patterns: []
+exclude_patterns: []
+models:
+- lmsys/vicuna-7b-v1.3
+benchmarks:
+- boolq
+- mmlu
+- narrative_qa
+- quac
+- gsm
+- imdb
+- truthful_qa
+- synthetic_reasoning
+- synthetic_reasoning_natural
+- entity_matching
+- entity_data_imputation
+- lsat_qa
+entries:
+- index: 0
+  run_entry: boolq:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+  benchmark: boolq
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: boolq:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/boolq:model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.boolq_scenario.BoolQScenario
+- index: 1
+  run_entry: entity_data_imputation:dataset=Buy,model=lmsys/vicuna-7b-v1.3
+  benchmark: entity_data_imputation
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: entity_data_imputation:dataset=Buy,model=lmsys/vicuna-7b-v1.3
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_data_imputation:dataset=Buy,model=lmsys_vicuna-7b-v1.3
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.entity_data_imputation_scenario.EntityDataImputationScenario
+- index: 2
+  run_entry: entity_data_imputation:dataset=Restaurant,model=lmsys/vicuna-7b-v1.3
+  benchmark: entity_data_imputation
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: entity_data_imputation:dataset=Restaurant,model=lmsys/vicuna-7b-v1.3
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_data_imputation:dataset=Restaurant,model=lmsys_vicuna-7b-v1.3
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.entity_data_imputation_scenario.EntityDataImputationScenario
+- index: 3
+  run_entry: entity_matching:dataset=Abt_Buy,model=lmsys/vicuna-7b-v1.3
+  benchmark: entity_matching
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: entity_matching:dataset=Abt_Buy,model=lmsys/vicuna-7b-v1.3
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_matching:dataset=Abt_Buy,model=lmsys_vicuna-7b-v1.3
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.entity_matching_scenario.EntityMatchingScenario
+- index: 4
+  run_entry: entity_matching:dataset=Beer,model=lmsys/vicuna-7b-v1.3
+  benchmark: entity_matching
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: entity_matching:dataset=Beer,model=lmsys/vicuna-7b-v1.3
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_matching:dataset=Beer,model=lmsys_vicuna-7b-v1.3
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.entity_matching_scenario.EntityMatchingScenario
+- index: 5
+  run_entry: entity_matching:dataset=Dirty_iTunes_Amazon,model=lmsys/vicuna-7b-v1.3
+  benchmark: entity_matching
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: entity_matching:dataset=Dirty_iTunes_Amazon,model=lmsys/vicuna-7b-v1.3
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_matching:dataset=Dirty_iTunes_Amazon,model=lmsys_vicuna-7b-v1.3
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.entity_matching_scenario.EntityMatchingScenario
+- index: 6
+  run_entry: gsm:model=lmsys/vicuna-7b-v1.3
+  benchmark: gsm
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: gsm:model=lmsys/vicuna-7b-v1.3
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/gsm:model=lmsys_vicuna-7b-v1.3
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.gsm_scenario.GSM8KScenario
+- index: 7
+  run_entry: imdb:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+  benchmark: imdb
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: imdb:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/imdb:model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.imdb_scenario.IMDBScenario
+- index: 8
+  run_entry: lsat_qa:task=all,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3
+  benchmark: lsat_qa
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: lsat_qa:task=all,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/lsat_qa:task=all,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.lsat_qa_scenario.LSATScenario
+- index: 9
+  run_entry: mmlu:subject=abstract_algebra,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+  benchmark: mmlu
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: mmlu:subject=abstract_algebra,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=abstract_algebra,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
+- index: 10
+  run_entry: mmlu:subject=college_chemistry,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+  benchmark: mmlu
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: mmlu:subject=college_chemistry,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=college_chemistry,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
+- index: 11
+  run_entry: mmlu:subject=computer_security,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+  benchmark: mmlu
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: mmlu:subject=computer_security,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=computer_security,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
+- index: 12
+  run_entry: mmlu:subject=econometrics,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+  benchmark: mmlu
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: mmlu:subject=econometrics,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=econometrics,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
+- index: 13
+  run_entry: mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+  benchmark: mmlu
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
+- index: 14
+  run_entry: narrative_qa:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+  benchmark: narrative_qa
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: narrative_qa:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/narrative_qa:model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.narrativeqa_scenario.NarrativeQAScenario
+- index: 15
+  run_entry: quac:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+  benchmark: quac
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: quac:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/quac:model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.quac_scenario.QuACScenario
+- index: 16
+  run_entry: synthetic_reasoning:mode=induction,model=lmsys/vicuna-7b-v1.3
+  benchmark: synthetic_reasoning
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: synthetic_reasoning:mode=induction,model=lmsys/vicuna-7b-v1.3
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning:mode=induction,model=lmsys_vicuna-7b-v1.3
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.synthetic_reasoning_scenario.SyntheticReasoningScenario
+- index: 17
+  run_entry: synthetic_reasoning:mode=pattern_match,model=lmsys/vicuna-7b-v1.3
+  benchmark: synthetic_reasoning
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: synthetic_reasoning:mode=pattern_match,model=lmsys/vicuna-7b-v1.3
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning:mode=pattern_match,model=lmsys_vicuna-7b-v1.3
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.synthetic_reasoning_scenario.SyntheticReasoningScenario
+- index: 18
+  run_entry: synthetic_reasoning:mode=variable_substitution,model=lmsys/vicuna-7b-v1.3
+  benchmark: synthetic_reasoning
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: synthetic_reasoning:mode=variable_substitution,model=lmsys/vicuna-7b-v1.3
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning:mode=variable_substitution,model=lmsys_vicuna-7b-v1.3
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.synthetic_reasoning_scenario.SyntheticReasoningScenario
+- index: 19
+  run_entry: synthetic_reasoning_natural:difficulty=easy,model=lmsys/vicuna-7b-v1.3
+  benchmark: synthetic_reasoning_natural
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: synthetic_reasoning_natural:difficulty=easy,model=lmsys/vicuna-7b-v1.3
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning_natural:difficulty=easy,model=lmsys_vicuna-7b-v1.3
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.synthetic_reasoning_natural_scenario.SRNScenario
+- index: 20
+  run_entry: synthetic_reasoning_natural:difficulty=hard,model=lmsys/vicuna-7b-v1.3
+  benchmark: synthetic_reasoning_natural
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: synthetic_reasoning_natural:difficulty=hard,model=lmsys/vicuna-7b-v1.3
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning_natural:difficulty=hard,model=lmsys_vicuna-7b-v1.3
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.synthetic_reasoning_natural_scenario.SRNScenario
+- index: 21
+  run_entry: truthful_qa:task=mc_single,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+  benchmark: truthful_qa
+  model: lmsys/vicuna-7b-v1.3
+  detail:
+    run_spec_name: truthful_qa:task=mc_single,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
+    run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/truthful_qa:task=mc_single,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
+    max_eval_instances:
+    model: lmsys/vicuna-7b-v1.3
+    scenario_class: helm.benchmark.scenarios.truthful_qa_scenario.TruthfulQAScenario

@@ -1,0 +1,10 @@
+machine_host:
+  aiq-gpu:
+    paper_short: Platform A
+    paper_long: Platform A (4x NVIDIA RTX PRO 6000 Blackwell Max-Q)
+  namek:
+    paper_short: Platform B
+    paper_long: Platform B (1x NVIDIA GeForce RTX 3090)
+  yardrat:
+    paper_short: Platform C
+    paper_long: Platform C (Quadro RTX 8000 + RTX 5000)

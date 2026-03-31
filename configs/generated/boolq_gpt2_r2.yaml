@@ -1,0 +1,18 @@
+schema_version: 1
+experiment_name: audit-boolq-gpt2-r2
+description: Local repeatability run 2 for boolq + gpt2.
+run_entries:
+  - boolq:model=openai/gpt2,data_augmentation=canonical
+max_eval_instances: 200
+suite: audit-boolq-gpt2-r2
+mode: compute_if_missing
+materialize: symlink
+backend: tmux
+devices: 0
+tmux_workers: 1
+local_path: prod_env
+precomputed_root: null
+require_per_instance_stats: true
+model_deployments_fpath: null
+enable_huggingface_models: []
+enable_local_huggingface_models: []

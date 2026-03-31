@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtualenv / packaging
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Generated experiment outputs
+reports/
+results/
+data/
+audit-smoke/
+audit-smoke-apples/
+benchmark_sankeys/
+helm_id_*/
+
+# Misc local scratch
+tmp/
+out.txt
+outputs.json
+run_infos.json
+run_infos.yaml
+rundiff.jsonl
