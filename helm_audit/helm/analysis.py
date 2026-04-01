@@ -4,7 +4,7 @@ Single-run analysis utilities wrapped in an object.
 
 Why this exists
 --------------
-``HelmRun`` (in :mod:`helm_audit.helm.outputs`) is intentionally a *reader*.
+``HelmRun`` (in :mod:`magnet.backends.helm.helm_outputs`) is intentionally a *reader*.
 This module defines :class:`HelmRunAnalysis`, which *wraps* a ``HelmRun`` and
 adds cached analyses / indices that make higher-level tasks (e.g. run diffs)
 much easier to write.
@@ -47,7 +47,7 @@ class HelmRunAnalysis(ub.NiceRepr):
         Optional human-friendly label used in summaries.
 
     Example:
-        >>> from helm_audit.helm.outputs import HelmRun
+        >>> from magnet.backends.helm.helm_outputs import HelmRun
         >>> from helm_audit.helm.analysis import HelmRunAnalysis
         >>> run = HelmRun.demo()
         >>> ana = HelmRunAnalysis(run)

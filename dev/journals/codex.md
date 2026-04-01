@@ -18,3 +18,20 @@ Design takeaways:
 1. In a late refactor pass, treat the filesystem as the canonical architecture document and force docs/entrypoints to conform to it, not the other way around.
 2. For orchestration tooling, “inspect-first” only counts if the final argv differs in a trivially observable way and that difference is tested.
 3. Narrow seams beat pure seams: keeping MAGNeT as the execution boundary is fine if audit/report/indexing ownership stays local and the dependency is explicit.
+
+## 2026-04-01 22:56:11 +0000
+
+Summary of user intent: perform a narrow dependency-pruning pass on the `helm_audit` refactor branch so the repo owns only its audit/report/diff surface and stops carrying copied HELM backend helper modules locally.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This pass was intentionally surgical. The main design choice was to treat MAGNeT’s `helm_outputs` reader classes as the canonical backend and to stop maintaining parallel copies of the same helper machinery in `helm_audit`. That meant rewiring the live import sites in workflows and report modules rather than trying to preserve a compatibility shim. I also removed the local copied utility modules entirely, including the dataframe/msgspec/iterable helpers that were only supporting the retired local reader layer. The tradeoff is a cleaner ownership boundary at the cost of one-time import churn across the report entry points; that churn is worthwhile because it makes future maintenance much less ambiguous.
+
+I was careful not to touch the actual audit logic. `helm_audit.helm.analysis` and `helm_audit.helm.diff` remain the local domain logic, which is the right split: MAGNeT owns the executable HELM pipeline and readers, while `helm_audit` owns the comparison and reporting layer. The main risk I watched for was accidentally leaving behind stale references in docstrings or CLI paths after deleting the modules, because that would create misleading validation failures and make the repo feel half-pruned. I handled that by updating the remaining reader import references to the MAGNeT path before deleting the files.
+
+Confidence is good on the ownership boundary, but I still want to validate the CLI surface and importability carefully. The failure mode here would not be subtle business logic drift; it would be an import path or packaging regression from the module deletions. I’m expecting the check commands to tell us quickly whether any report entry point still depends on the removed local files.
+
+Design takeaways:
+1. When a local module is just a copied backend facade, delete it rather than preserving it as a shim once the replacement import path is stable.
+2. Prune stale docstrings alongside code imports; they are part of the dependency surface during validation.
+3. Keep the local layer focused on domain logic, not reader plumbing, so future refactors have a crisp boundary to preserve.

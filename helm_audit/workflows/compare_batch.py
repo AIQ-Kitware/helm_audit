@@ -16,7 +16,7 @@ from helm_audit.infra.api import (
     experiment_result_dpath,
     load_manifest,
 )
-from helm_audit.helm.outputs import HelmOutputs, HelmRun
+from magnet.backends.helm.helm_outputs import HelmOutputs, HelmRun
 from helm_audit.helm.run_entries import (
     discover_benchmark_output_dirs,
     run_dir_matches_requested,
