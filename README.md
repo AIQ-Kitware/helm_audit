@@ -40,9 +40,14 @@ The stable CLI surface is intentionally small:
 - `helm-audit-compare-pair`
 - `helm-audit-compare-batch`
 - `helm-audit-report-core`
+- `helm-audit-report-aggregate`
+- `helm-audit-rebuild-core`
 - `helm-audit-analyze-experiment`
 
 Additional report-oriented entrypoints are available in `pyproject.toml`.
+
+`helm-audit-run` is inspect-first by default. Use `--run=0` to preview the
+generated `kwdagger` invocation and `--run=1` to execute it intentionally.
 
 ## Reproduce
 
@@ -57,6 +62,9 @@ relying on repo-specific shell glue.
 ## Notes
 
 - `kwdagger` remains the real external scheduling boundary.
+- Runtime execution controls for `kwdagger` are handled in
+  [kwdagger_bridge.py](/home/joncrall/code/helm-reproducibility/helm_audit/integrations/kwdagger_bridge.py)
+  via a small explicit runtime object.
 - HELM diff / analysis ownership now lives in `helm_audit/helm/`.
 - Generic Sankey machinery lives in:
   - [sankey.py](/home/joncrall/code/helm-reproducibility/helm_audit/utils/sankey.py)

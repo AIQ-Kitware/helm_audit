@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,14 +12,21 @@ from helm_audit.infra.paths import experiment_result_dpath
 
 
 @dataclass(frozen=True)
-class KWDaggerScheduleRequest:
-    manifest_fpath: Path
-    manifest: dict[str, Any]
-    result_dpath: Path
+class KWDaggerRuntime:
     queue_name: str
+    root_dpath: Path
     devices: str
     tmux_workers: int
     backend: str
+    run: bool
+    skip_existing: bool = True
+
+
+@dataclass(frozen=True)
+class KWDaggerScheduleRequest:
+    manifest_fpath: Path
+    manifest: dict[str, Any]
+    runtime: KWDaggerRuntime
     params_text: str
 
 
@@ -50,22 +58,43 @@ def build_schedule_params(manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def prepare_schedule_request(manifest_fpath: str | Path) -> KWDaggerScheduleRequest:
+def prepare_schedule_request(
+    manifest_fpath: str | Path,
+    *,
+    run: bool = False,
+    root_dpath: str | Path | None = None,
+    queue_name: str | None = None,
+    devices: str | None = None,
+    tmux_workers: int | None = None,
+    backend: str | None = None,
+) -> KWDaggerScheduleRequest:
     manifest_path = Path(manifest_fpath).expanduser().resolve()
     manifest = load_manifest(manifest_path)
     experiment_name = str(manifest["experiment_name"])
-    queue_name = f"audit-{experiment_name}".translate(
+    runtime_queue_name = (queue_name or f"audit-{experiment_name}").translate(
         str.maketrans({c: "-" for c in " !@#$%^&*()+={}[]|\\:;\"'<>,?/~`"})
     )
     params = build_schedule_params(manifest)
+    runtime = KWDaggerRuntime(
+        queue_name=runtime_queue_name,
+        root_dpath=(
+            Path(root_dpath).expanduser().resolve()
+            if root_dpath is not None
+            else experiment_result_dpath(experiment_name)
+        ),
+        devices=str(devices if devices is not None else manifest.get("devices", "0,1")),
+        tmux_workers=int(
+            tmux_workers
+            if tmux_workers is not None
+            else manifest.get("tmux_workers", 2)
+        ),
+        backend=str(backend if backend is not None else manifest.get("backend", "tmux")),
+        run=bool(run),
+    )
     return KWDaggerScheduleRequest(
         manifest_fpath=manifest_path,
         manifest=manifest,
-        result_dpath=experiment_result_dpath(experiment_name),
-        queue_name=queue_name,
-        devices=str(manifest.get("devices", "0,1")),
-        tmux_workers=int(manifest.get("tmux_workers", 2)),
-        backend=str(manifest.get("backend", "tmux")),
+        runtime=runtime,
         params_text=dump_yaml(params),
     )
 
@@ -76,19 +105,23 @@ def kwdagger_schedule_argv(request: KWDaggerScheduleRequest) -> list[str]:
     return [
         "kwdagger",
         "schedule",
-        f"--queue_name={request.queue_name}",
+        f"--queue_name={request.runtime.queue_name}",
         f"--params={request.params_text}",
-        f"--devices={request.devices}",
-        f"--tmux_workers={request.tmux_workers}",
-        f"--root_dpath={request.result_dpath}",
-        f"--backend={request.backend}",
-        "--skip_existing=1",
-        "--run=1",
+        f"--devices={request.runtime.devices}",
+        f"--tmux_workers={request.runtime.tmux_workers}",
+        f"--root_dpath={request.runtime.root_dpath}",
+        f"--backend={request.runtime.backend}",
+        f"--skip_existing={1 if request.runtime.skip_existing else 0}",
+        f"--run={1 if request.runtime.run else 0}",
     ]
 
 
+def kwdagger_schedule_command_text(request: KWDaggerScheduleRequest) -> str:
+    return shlex.join(kwdagger_schedule_argv(request))
+
+
 def run_kwdagger_schedule(request: KWDaggerScheduleRequest) -> subprocess.CompletedProcess[str]:
-    request.result_dpath.mkdir(parents=True, exist_ok=True)
+    request.runtime.root_dpath.mkdir(parents=True, exist_ok=True)
     return subprocess.run(
         kwdagger_schedule_argv(request),
         check=True,

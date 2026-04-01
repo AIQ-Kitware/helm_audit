@@ -19,3 +19,5 @@ Current scenarios:
 The shell files here are intentionally thin. They are runbook steps, not the
 implementation. Each one should delegate to a `helm_audit` Python CLI such as
 `helm-audit-run`, `helm-audit-index`, or `helm-audit-analyze-experiment`.
+For `helm-audit-run`, preview is the default. Use `--run=1` in runbooks when
+you actually want to execute the scheduled `kwdagger` job.
