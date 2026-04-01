@@ -585,3 +585,110 @@ Current equivalents in this repo:
 
 Unless explicitly stated otherwise, historical paths and commands above should be
 interpreted as pre-split references.
+
+## 2026-04-01 Status Update After Repository Split
+
+The HELM reproducibility / audit workflow has now been split out of
+`aiq-magnet` into its own repository:
+
+- local path: `/home/joncrall/code/helm-reproducibility`
+- GitHub: `AIQ-Kitware/helm-reproducibility`
+
+This new repository is now the primary home for:
+
+- configs
+- shell scripts
+- the packaged Python analysis code
+- reports
+- historical notes and legacy experiment artifacts
+
+`aiq-magnet` should now keep only the reusable upstream-worthy MAGNeT / HELM
+infrastructure changes, not the experiment-specific audit workflow.
+
+### Scientific Baseline At Time Of Split
+
+The project should be framed as asking:
+
+- to what extent are public HELM results independently reproducible under an explicit open-weight local recipe?
+- how should residual differences be interpreted?
+- what subset is fairly runnable and reproducible under the current recipe?
+
+The project should **not** be framed as asking:
+
+- can we reproduce every HELM run exactly?
+
+### Current Positive Result
+
+The corrected Vicuna no-chat recipe remains the strongest positive result.
+
+Current interpretation:
+
+- same-machine repeatability is good
+- cross-machine repeatability is good
+- official-vs-local agreement is good on the key validated subset
+
+This remains the main scientific anchor for the project.
+
+### Current Known Root Cause
+
+An earlier major false alarm was caused by the local HuggingFace Vicuna path
+incorrectly auto-applying a chat template.
+
+The fix is the local no-chat configuration using:
+
+- `apply_chat_template: false`
+
+This was especially important for:
+
+- `narrative_qa`
+
+### Interpretation Rule To Preserve
+
+Do **not** treat every failing large-grid job as evidence that "HELM is irreproducible".
+
+Many failures belong in scope / recipe / environment buckets instead:
+
+- gated datasets
+- missing credentials
+- dataset download failures
+- model packaging or runtime issues
+- resource / OOM / occupancy failures
+- scenarios outside the runnable open local recipe
+
+These should be classified carefully rather than folded into a blanket negative result.
+
+### State Of The New Repository
+
+At the time of this update, `helm-reproducibility` already contains:
+
+- packaged analysis code under `helm_reproducibility/`
+- scripts, configs, reports, and docs
+- imported legacy report artifacts
+- verified end-to-end regeneration of at least one representative core report from:
+  - `/data/crfm-helm-audit`
+  - `/data/crfm-helm-public`
+
+One practical caveat:
+
+- `scripts/analyze_experiment_from_index.sh` is okay
+- for indexing, the safer entrypoint may be the module directly:
+  - `python -m helm_reproducibility.index_results`
+
+### Immediate Working Plan
+
+The next planned sequence is:
+
+1. fix the one failing test in `aiq-magnet` for the upstream-worthy subset of changes
+2. switch focus back to `helm-reproducibility`
+3. inspect failing HELM runs on `aiq-gpu` and classify them properly
+
+### Repo Boundary Reminder
+
+As work continues, the intended split is:
+
+- `helm-reproducibility`:
+  experiment logic, configs, analysis, reporting, documentation, and paper-oriented workflow
+- `aiq-magnet`:
+  reusable MAGNeT / HELM infrastructure that should be upstreamed or maintained as general-purpose support
+
+This boundary should be preserved in future edits.
