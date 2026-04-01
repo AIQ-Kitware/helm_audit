@@ -1,4 +1,4 @@
-"""magnet.backends.helm.helm_hashers
+"""helm_audit.helm.hashers
 
 NOTE: this might be over-engineering. Treat hashes as internal only for now.
 
@@ -11,7 +11,7 @@ These functions provide:
   hash to make diffs easier to scan.
 * Convenience helpers for HELM stat-name objects.
 
-This module was extracted from ``magnet.backends.helm.compare`` to
+This module was extracted from the older HELM compare code to
 avoid duplicating / subtly changing canonicalization + hashing rules.
 
 Implementation notes

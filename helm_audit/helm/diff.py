@@ -1,6 +1,6 @@
-"""magnet.backends.helm.helm_run_diff
+"""helm_audit.helm.diff
 
-Run-to-run comparison built on :class:`~magnet.backends.helm.helm_run_analysis.HelmRunAnalysis`.
+Run-to-run comparison built on :class:`~helm_audit.helm.analysis.HelmRunAnalysis`.
 
 Design goals
 ------------
@@ -14,7 +14,7 @@ and indexing so both single-run and diff views agree on what a "stat" or
 "instance" identity means.
 
 CommandLine:
-    xdoctest -m magnet.backends.helm.helm_run_diff __doc__
+    xdoctest -m helm_audit.helm.diff __doc__
 
 Example:
     >>> import json

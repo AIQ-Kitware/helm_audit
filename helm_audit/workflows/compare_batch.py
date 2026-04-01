@@ -16,12 +16,11 @@ from helm_audit.infra.api import (
     experiment_result_dpath,
     load_manifest,
 )
-# FIXME(magnet): audit still reuses MAGNeT's materialize helper for HELM run
-# discovery and request matching. Keep this seam small until the helper is
-# copied into helm_audit as local infrastructure.
-from magnet.backends.helm.cli.materialize_helm_run import discover_benchmark_output_dirs
-from magnet.backends.helm.cli.materialize_helm_run import run_dir_matches_requested
 from helm_audit.helm.outputs import HelmOutputs, HelmRun
+from helm_audit.helm.run_entries import (
+    discover_benchmark_output_dirs,
+    run_dir_matches_requested,
+)
 from helm_audit.helm.diff import HelmRunDiff
 from helm_audit.utils.sankey import emit_sankey_artifacts
 

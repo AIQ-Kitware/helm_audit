@@ -1,10 +1,10 @@
-"""magnet.backends.helm.helm_run_analysis
+"""helm_audit.helm.analysis
 
 Single-run analysis utilities wrapped in an object.
 
 Why this exists
 --------------
-``HelmRun`` (in :mod:`magnet.helm_outputs`) is intentionally a *reader*.
+``HelmRun`` (in :mod:`helm_audit.helm.outputs`) is intentionally a *reader*.
 This module defines :class:`HelmRunAnalysis`, which *wraps* a ``HelmRun`` and
 adds cached analyses / indices that make higher-level tasks (e.g. run diffs)
 much easier to write.

@@ -61,4 +61,5 @@ relying on repo-specific shell glue.
 - Generic Sankey machinery lives in:
   - [sankey.py](/home/joncrall/code/helm-reproducibility/helm_audit/utils/sankey.py)
   - [sankey_builder.py](/home/joncrall/code/helm-reproducibility/helm_audit/utils/sankey_builder.py)
-- A few MAGNeT seams remain and are marked with `FIXME(magnet)`.
+- One demo-only MAGNeT seam remains in
+  [helm_audit/helm/outputs.py](/home/joncrall/code/helm-reproducibility/helm_audit/helm/outputs.py).

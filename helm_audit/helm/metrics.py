@@ -1,4 +1,4 @@
-"""magnet.backends.helm.helm_metrics
+"""helm_audit.helm.metrics
 
 Shared metric registries + categorization helpers.
 

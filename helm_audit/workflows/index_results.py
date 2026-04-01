@@ -11,10 +11,8 @@ import kwutil
 import pandas as pd
 
 from helm_audit.infra.api import default_report_root, env_defaults
-# FIXME(magnet): audit still reuses MAGNeT's run-entry parser until the
-# materialization helpers are copied over locally.
-from magnet.backends.helm.cli.materialize_helm_run import parse_run_entry_description
 from helm_audit.helm.outputs import HelmOutputs
+from helm_audit.helm.run_entries import parse_run_entry_description
 
 
 def _safe_json_load(fpath: Path) -> dict[str, Any]:

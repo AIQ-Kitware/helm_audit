@@ -21,17 +21,17 @@ single place to restart from if prior chat context is lost.
 
 Read these first for deeper context and provenance:
 
-- `dev/codex/helm-reproduction-agent-brief.md`
-- `dev/codex/helm-reproduction-research-journal.md`
+- `helm-reproduction-agent-brief.md`
+- `helm-reproduction-research-journal.md`
 - `README.md`
-- `dev/codex/reproduce-helm-session-v2.md`
-- `dev/codex/kwdagger-notes.md`
+- `reproduce-helm-session-v2.md`
+- `kwdagger-notes.md`
 
 Important code and experiment roots:
 
 - public historic HELM runs: `/data/crfm-helm-public`
 - local reproduced runs: `/data/crfm-helm-audit`
-- audit workflow: this repository (`configs/`, `scripts/`, `helm_reproducibility/`, `reports/`)
+- audit workflow: this repository (`configs/`, `reproduce/`, `helm_audit/`, `reports/`)
 
 ## Core Research Goal
 
@@ -483,18 +483,18 @@ when the audit code is extracted.
 If starting fresh:
 
 1. Read:
-   - `dev/codex/helm-reproduction-agent-brief.md`
-   - `dev/codex/helm-reproduction-status-checkpoint.md`
-   - `dev/codex/helm-reproduction-research-journal.md`
+   - `helm-reproduction-agent-brief.md`
+   - `helm-reproduction-status-checkpoint.md`
+   - `helm-reproduction-research-journal.md`
 2. Inspect:
    - `README.md`
 3. Confirm data roots:
    - `/data/crfm-helm-public`
    - `/data/crfm-helm-audit`
 4. Rebuild the latest reports from:
-   - `scripts/index_results.sh`
-   - `scripts/analyze_experiment_from_index.sh`
-   - `scripts/aggregate_core_reports.sh`
+   - `reproduce/machine_compare/00_index_results.sh`
+   - `reproduce/machine_compare/10_analyze_experiment.sh`
+   - `reproduce/machine_compare/20_compare_pair.sh`
 5. Review the latest experiment and aggregate summaries in:
    - `reports/`
 6. Continue from the short-term plan above.
@@ -526,7 +526,7 @@ Original context:
 
 Current equivalents in this repo:
 - repo root: `/home/joncrall/code/helm-reproducibility`
-- workflow roots: `configs/`, `scripts/`, `helm_reproducibility/`, `reports/`
+- workflow roots: `configs/`, `reproduce/`, `helm_audit/`, `reports/`
 
 Unless explicitly stated otherwise, historical paths and commands above should be
 interpreted as pre-split references.
@@ -535,4 +535,4 @@ interpreted as pre-split references.
 
 This file contains historical text from before the repository split. When following
 instructions operationally, prefer current repo-local paths in `README.md`, `configs/`,
-`scripts/`, and `helm_reproducibility/` over legacy `aiq-magnet` paths.
+`reproduce/`, and `helm_audit/` over legacy `aiq-magnet` paths.

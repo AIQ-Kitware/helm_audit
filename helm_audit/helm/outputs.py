@@ -21,13 +21,10 @@ try:
 except ImportError:
     from typing_extensions import Self
 
-# FIXME(magnet): msgspec/pandas iterable helpers are still borrowed from MAGNeT.
-# The audit repo now owns HELM output reading, but these utility imports remain
-# the last small shared seam to upstream infrastructure.
-from magnet.utils import util_pandas
-from magnet.utils import util_msgspec
-from magnet.utils.util_iterable import add_length_hint
 from functools import cached_property
+from helm_audit.helm import _dataframes as util_pandas
+from helm_audit.helm import _msgspec as util_msgspec
+from helm_audit.helm._iterables import add_length_hint
 
 # Pre-register msgspec structure variants of the HELM dataclass types
 ScenarioStateStruct = util_msgspec.MSGSPEC_REGISTRY.register(ScenarioState, dict=True)
@@ -235,6 +232,8 @@ class HelmOutputs(ub.NiceRepr):
 
     @classmethod
     def demo(cls, method='compute', **kwargs) -> Self:
+        # This demo helper intentionally reuses MAGNeT's demo-data producer.
+        # Audit/report consumers should not depend on MAGNeT for normal use.
         import magnet
         if method == 'compute':
             dpath = magnet.demo.helm_demodata.ensure_helm_demo_outputs(**kwargs)
@@ -971,7 +970,7 @@ class _HelmRunMsgspecView:
             ScenarioState has a __post_init__
 
         CommandLine:
-            xdoctest -m magnet.backends.helm.helm_outputs _HelmRunMsgspecView.scenario_state
+            xdoctest -m helm_audit.helm.outputs _HelmRunMsgspecView.scenario_state
 
         Example:
             >>> from helm_audit.helm.outputs import *  # NOQA
@@ -981,7 +980,6 @@ class _HelmRunMsgspecView:
             >>> state2 = run.dataclass.scenario_state()
             >>> assert state1.__annotations__.keys() == state2.__annotations__.keys()
         """
-        from magnet.utils import util_msgspec
         data = (self.parent.path / 'scenario_state.json').read_bytes()
         obj = util_msgspec.MSGSPEC_REGISTRY.decode(data, ScenarioStateStruct)
         ScenarioState.__post_init__(obj)  # Hack
