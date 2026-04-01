@@ -92,7 +92,7 @@ Local reproduced runs:
 
 Main audit workflow:
 
-- `configs/`, `scripts/`, `helm_reproducibility/`, and `reports/` in this repo
+- `configs/`, `reproduce/`, `helm_audit/`, and `reports/` in this repo
 
 Research notes:
 
@@ -221,17 +221,17 @@ In practice this likely means:
 
 ### Audit workflow
 
-- `scripts/run_from_manifest.sh`
-- `scripts/compare_batch.sh`
-- `scripts/index_results.sh`
-- `scripts/analyze_experiment_from_index.sh`
-- `scripts/aggregate_core_reports.sh`
+- `reproduce/smoke/20_run.sh`
+- `reproduce/machine_compare/20_compare_pair.sh`
+- `reproduce/machine_compare/00_index_results.sh`
+- `reproduce/machine_compare/10_analyze_experiment.sh`
+- `reproduce/historic_grid/20_rebuild_reports.sh`
 
 ### Manifest building
 
-- `scripts/make_historic_grid_manifest.sh`
-- `scripts/make_machine_subset_manifest.sh`
-- `scripts/make_machine_shard_manifest.sh`
+- `reproduce/historic_grid/00_make_manifest.sh`
+- `reproduce/apples/10_make_manifest.sh`
+- `reproduce/smoke/10_make_manifest.sh`
 
 ### Important note
 
@@ -344,7 +344,7 @@ Original context:
 
 Current equivalents in this repo:
 - repo root: `/home/joncrall/code/helm-reproducibility`
-- workflow roots: `configs/`, `scripts/`, `helm_reproducibility/`, `reports/`
+- workflow roots: `configs/`, `reproduce/`, `helm_audit/`, `reports/`
 
 Unless explicitly stated otherwise, historical paths and commands above should be
 interpreted as pre-split references.
@@ -353,4 +353,4 @@ interpreted as pre-split references.
 
 This file contains historical text from before the repository split. When following
 instructions operationally, prefer current repo-local paths in `README.md`, `configs/`,
-`scripts/`, and `helm_reproducibility/` over legacy `aiq-magnet` paths.
+`reproduce/`, and `helm_audit/` over legacy `aiq-magnet` paths.

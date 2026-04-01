@@ -581,7 +581,7 @@ Original context:
 
 Current equivalents in this repo:
 - repo root: `/home/joncrall/code/helm-reproducibility`
-- workflow roots: `configs/`, `scripts/`, `helm_reproducibility/`, `reports/`
+- workflow roots: `configs/`, `reproduce/`, `helm_audit/`, `reports/`
 
 Unless explicitly stated otherwise, historical paths and commands above should be
 interpreted as pre-split references.
@@ -661,8 +661,8 @@ These should be classified carefully rather than folded into a blanket negative 
 
 At the time of this update, `helm-reproducibility` already contains:
 
-- packaged analysis code under `helm_reproducibility/`
-- scripts, configs, reports, and docs
+- packaged analysis code under `helm_audit/`
+- `reproduce/`, `configs/`, `reports/`, and docs
 - imported legacy report artifacts
 - verified end-to-end regeneration of at least one representative core report from:
   - `/data/crfm-helm-audit`
@@ -670,9 +670,9 @@ At the time of this update, `helm-reproducibility` already contains:
 
 One practical caveat:
 
-- `scripts/analyze_experiment_from_index.sh` is okay
+- `reproduce/machine_compare/10_analyze_experiment.sh` is the preferred runbook step
 - for indexing, the safer entrypoint may be the module directly:
-  - `python -m helm_reproducibility.index_results`
+  - `python -m helm_audit.workflows.index_results`
 
 ### Immediate Working Plan
 
