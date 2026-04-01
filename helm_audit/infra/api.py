@@ -1,0 +1,38 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from helm_audit.infra.env import env_defaults, load_env
+from helm_audit.infra.paths import (
+    experiment_report_dpath as _experiment_report_dpath,
+    experiment_result_dpath as _experiment_result_dpath,
+    reports_root,
+    run_details_fpath,
+    run_specs_fpath,
+)
+from helm_audit.infra.yaml_io import dump_yaml, load_manifest
+
+
+def audit_root() -> Path:
+    return load_env().repo_root
+
+
+def default_report_root() -> Path:
+    return reports_root()
+
+
+def repo_run_specs_fpath() -> Path:
+    return run_specs_fpath()
+
+
+def repo_run_details_fpath() -> Path:
+    return run_details_fpath()
+
+
+def experiment_result_dpath(manifest: dict[str, Any]) -> Path:
+    return _experiment_result_dpath(str(manifest["experiment_name"]))
+
+
+def experiment_report_dpath(manifest: dict[str, Any]) -> Path:
+    return _experiment_report_dpath(str(manifest["experiment_name"]))

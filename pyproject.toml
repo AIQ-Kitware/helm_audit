@@ -3,11 +3,23 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "helm-reproducibility"
+name = "helm-audit"
 version = "0.0.0"
-description = "HELM reproducibility audit workflow and analysis tooling"
+description = "Python-first HELM audit and reproducibility workflow"
 readme = "README.md"
 requires-python = ">=3.10"
 
+[project.scripts]
+helm-audit-check-env = "helm_audit.cli.check_env:main"
+helm-audit-make-manifest = "helm_audit.cli.manifests:main"
+helm-audit-run = "helm_audit.cli.run:main"
+helm-audit-index = "helm_audit.workflows.index_results:main"
+helm-audit-compare-pair = "helm_audit.reports.pair_report:main"
+helm-audit-compare-batch = "helm_audit.workflows.compare_batch:main"
+helm-audit-report-core = "helm_audit.reports.core_metrics:main"
+helm-audit-report-aggregate = "helm_audit.reports.aggregate:main"
+helm-audit-rebuild-core = "helm_audit.workflows.rebuild_core_report:main"
+helm-audit-analyze-experiment = "helm_audit.workflows.analyze_experiment:main"
+
 [tool.setuptools.packages.find]
-include = ["helm_reproducibility*"]
+include = ["helm_audit*"]
