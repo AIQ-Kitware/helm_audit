@@ -1,0 +1,42 @@
+model_deployments:
+  - name: huggingface/vicuna-7b-v1.3
+    model_name: lmsys/vicuna-7b-v1.3
+    tokenizer_name: hf-internal-testing/llama-tokenizer
+    max_sequence_length: 2048
+    client_spec:
+      class_name: "helm.clients.huggingface_client.HuggingFaceClient"
+      args:
+        apply_chat_template: false
+
+  - name: together/qwen2-72b-instruct
+    model_name: qwen/qwen2-72b-instruct
+    tokenizer_name: qwen/qwen2-72b-instruct
+    max_sequence_length: 128000
+    client_spec:
+      class_name: "helm.clients.huggingface_client.HuggingFaceClient"
+      args:
+        pretrained_model_name_or_path: Qwen/Qwen2-72B-Instruct
+        device_map: auto
+        apply_chat_template: true
+
+  - name: together/qwen2.5-7b-instruct-turbo
+    model_name: qwen/qwen2.5-7b-instruct-turbo
+    tokenizer_name: qwen/qwen2.5-7b-instruct
+    max_sequence_length: 128000
+    client_spec:
+      class_name: "helm.clients.huggingface_client.HuggingFaceClient"
+      args:
+        pretrained_model_name_or_path: Qwen/Qwen2.5-7B-Instruct
+        device_map: auto
+        apply_chat_template: true
+
+  - name: together/qwen2.5-72b-instruct-turbo
+    model_name: qwen/qwen2.5-72b-instruct-turbo
+    tokenizer_name: qwen/qwen2.5-7b-instruct
+    max_sequence_length: 128000
+    client_spec:
+      class_name: "helm.clients.huggingface_client.HuggingFaceClient"
+      args:
+        pretrained_model_name_or_path: Qwen/Qwen2.5-72B-Instruct
+        device_map: auto
+        apply_chat_template: true
