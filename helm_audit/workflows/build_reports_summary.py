@@ -307,6 +307,7 @@ def _load_all_repro_rows() -> list[dict[str, Any]]:
                 {"abs_tol": pt["abs_tol"], "agree_ratio": pt["agree_ratio"]}
                 for pt in official_agree_curve
             ],
+            "official_per_metric_agreement": nested_get(official, "instance_level", "per_metric_agreement") or {},
         }
         deduped[(experiment_name, run_entry)] = row
     return list(deduped.values())
@@ -557,14 +558,31 @@ def _build_high_level_readme(
         [
             "",
             "start_here:",
-            "  - open sankey_operational.latest.html for the full pipeline from group to success/failure bucket",
-            "  - open sankey_reproducibility.latest.html for the analyzed subset at strict threshold (abs_tol=0)",
-            "  - open sankey_repro_tol001.latest.html / sankey_repro_tol010.latest.html / sankey_repro_tol050.latest.html",
-            "    to see how reproducibility changes as tolerance is relaxed (0.001 / 0.010 / 0.050)",
-            "  - open sankey_repro_by_metric.latest.html for per-metric drift breakdown (run-level max delta)",
-            "  - read failure_reasons.latest.txt to see why incomplete jobs likely failed",
-            "  - follow next_level/ for tables and breakdown folders",
-            "  - run reproduce.latest.sh to regenerate this report from current data",
+            "",
+            "  understand_upstream_filtering:",
+            "    1. What runs were excluded at Stage 1 (discovery)? Run Stage 1 with --out_report_dpath",
+            "       to see filter_report/sankey_model_filter.latest.html (why runs were rejected).",
+            "    2. Read docs/pipeline.md for the full end-to-end workflow (stages 1-6).",
+            "",
+            "  explore_execution_coverage:",
+            "    1. open sankey_operational.latest.html to see the full pipeline: all runs → outcomes",
+            "    2. open sankey_repro_by_metric.latest.html for per-metric drift breakdown (run-level max delta)",
+            "    3. see benchmark_status.latest.html and coverage_matrix.latest.html for what subsets ran",
+            "",
+            "  understand_reproducibility:",
+            "    1. open sankey_reproducibility.latest.html for analyzed runs at strict threshold (abs_tol=0)",
+            "    2. open agreement_curve.latest.html to see how agreement changes across tolerance thresholds",
+            "    3. open agreement_curve_per_metric.latest.html to see agreement curves per individual metric",
+            "    4. open sankey_repro_tol001/tol010/tol050.latest.html to see relaxed tolerance breakdowns",
+            "",
+            "  diagnose_failures:",
+            "    1. read failure_reasons.latest.txt to see why incomplete jobs failed",
+            "    2. open failure_taxonomy.latest.html to see root-cause breakdown (hardware/data/infra)",
+            "    3. open reproducibility_buckets.latest.html to see agreement distribution",
+            "",
+            "  drill_down_by_dimension:",
+            "    - follow next_level/ for breakdown tables by benchmark, model, suite, machine, experiment",
+            "    - run reproduce.latest.sh to regenerate this report from current data",
             "",
             "default_breakdowns:",
         ]
@@ -591,6 +609,7 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         "benchmark_status.latest.html",
         "reproducibility_buckets.latest.html",
         "agreement_curve.latest.html",
+        "agreement_curve_per_metric.latest.html",
         "coverage_matrix.latest.html",
         "failure_taxonomy.latest.html",
     ]:
@@ -613,6 +632,7 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         "benchmark_status.latest.jpg",
         "reproducibility_buckets.latest.jpg",
         "agreement_curve.latest.jpg",
+        "agreement_curve_per_metric.latest.jpg",
         "coverage_matrix.latest.jpg",
         "failure_taxonomy.latest.jpg",
         "failure_reasons.latest.txt",
@@ -890,6 +910,158 @@ def _write_agreement_curve_plot(
                 jpg_out = str(jpg_fpath)
         except Exception as ex:
             plotly_error = f"unable to write agreement curve: {ex!r}"
+
+    return {"json": str(json_fpath), "html": html_out, "jpg": jpg_out, "plotly_error": plotly_error}
+
+
+def _write_per_metric_agreement_plot(
+    repro_rows: list[dict[str, Any]],
+    enriched_rows: list[dict[str, Any]],
+    stem: Path,
+    title: str,
+    machine_dpath: Path | None = None,
+    interactive_dpath: Path | None = None,
+    static_dpath: Path | None = None,
+) -> dict[str, str | None]:
+    """Per-metric agreement curves: one plot per metric showing agreement across all runs."""
+    bench_lookup = {
+        (str(r.get("experiment_name")), str(r.get("run_entry"))): str(r.get("benchmark") or "unknown")
+        for r in enriched_rows
+    }
+
+    # Collect per-metric data: metric -> [(abs_tol, agree_ratio, run, benchmark), ...]
+    metrics_data: dict[str, list[dict[str, Any]]] = {}
+    for row in repro_rows:
+        key = (str(row.get("experiment_name")), str(row.get("run_entry")))
+        bench = bench_lookup.get(key, "unknown")
+        per_metric = row.get("official_per_metric_agreement") or {}
+        run_label = str(row.get("run_spec_name") or row.get("run_entry") or "unknown")
+
+        for metric, curve_points in per_metric.items():
+            if metric not in metrics_data:
+                metrics_data[metric] = []
+            for pt in (curve_points or []):
+                metrics_data[metric].append({
+                    "metric": metric,
+                    "benchmark": bench,
+                    "run": run_label,
+                    "abs_tol": pt.get("abs_tol", 0),
+                    "agree_ratio": pt.get("agree_ratio", 0),
+                })
+
+    if machine_dpath is not None:
+        machine_dpath.mkdir(parents=True, exist_ok=True)
+        json_fpath = (machine_dpath / stem.name).with_suffix(".json")
+    else:
+        json_fpath = stem.with_suffix(".json")
+    _interactive = interactive_dpath if interactive_dpath is not None else stem.parent
+    _static = static_dpath if static_dpath is not None else stem.parent
+    _interactive.mkdir(parents=True, exist_ok=True)
+    _static.mkdir(parents=True, exist_ok=True)
+    html_fpath = (_interactive / stem.name).with_suffix(".html")
+    jpg_fpath = (_static / stem.name).with_suffix(".jpg")
+    _write_json(metrics_data, json_fpath)
+
+    html_out = None
+    jpg_out = None
+    plotly_error = None
+    if os.environ.get("HELM_AUDIT_SKIP_PLOTLY", "") in {"1", "true", "yes"}:
+        plotly_error = "skipped by configuration"
+    elif not metrics_data:
+        plotly_error = "no per-metric agreement data available"
+    else:
+        try:
+            _configure_plotly_chrome()
+            import plotly.graph_objects as go
+            from plotly.subplots import make_subplots
+
+            metrics = sorted(metrics_data.keys())
+            n_cols = min(3, len(metrics))
+            n_rows = (len(metrics) + n_cols - 1) // n_cols
+
+            # Assign a color per benchmark
+            all_benchmarks = sorted(set(
+                d["benchmark"]
+                for metric_pts in metrics_data.values()
+                for d in metric_pts
+            ))
+            palette = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+                "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+            ]
+            bench_color = {b: palette[i % len(palette)] for i, b in enumerate(all_benchmarks)}
+
+            fig = make_subplots(
+                rows=n_rows,
+                cols=n_cols,
+                subplot_titles=metrics,
+                specs=[[{"secondary_y": False} for _ in range(n_cols)] for _ in range(n_rows)],
+            )
+
+            seen_benchmarks: set[str] = set()
+            for metric_idx, metric in enumerate(metrics):
+                row_idx = (metric_idx // n_cols) + 1
+                col_idx = (metric_idx % n_cols) + 1
+                curve_pts = metrics_data[metric]
+
+                for row in repro_rows:
+                    key = (str(row.get("experiment_name")), str(row.get("run_entry")))
+                    bench = bench_lookup.get(key, "unknown")
+                    run_label = str(row.get("run_spec_name") or row.get("run_entry") or "unknown")
+                    per_metric = row.get("official_per_metric_agreement") or {}
+                    curve = per_metric.get(metric) or []
+                    if not curve:
+                        continue
+
+                    tols = [max(pt.get("abs_tol", 1e-13), 1e-13) for pt in curve]
+                    ratios = [pt.get("agree_ratio", 0) for pt in curve]
+                    show_legend = bench not in seen_benchmarks
+                    seen_benchmarks.add(bench)
+
+                    fig.add_trace(
+                        go.Scatter(
+                            x=tols,
+                            y=ratios,
+                            mode="lines+markers",
+                            name=bench,
+                            legendgroup=bench,
+                            showlegend=show_legend,
+                            line={"color": bench_color[bench], "width": 1.5},
+                            marker={"size": 4},
+                            opacity=0.7,
+                            hovertemplate=(
+                                f"<b>{bench}</b><br>"
+                                "abs_tol=%{x:.2e}<br>"
+                                "agree_ratio=%{y:.3f}<br>"
+                                f"metric={metric}<br>"
+                                f"run={run_label[:50]}<extra></extra>"
+                            ),
+                        ),
+                        row=row_idx,
+                        col=col_idx,
+                    )
+
+            # Update axes
+            for metric_idx, metric in enumerate(metrics):
+                row_idx = (metric_idx // n_cols) + 1
+                col_idx = (metric_idx % n_cols) + 1
+                fig.update_xaxes(title_text="abs_tol", type="log", row=row_idx, col=col_idx)
+                fig.update_yaxes(title_text="agreement", range=[0, 1.05], row=row_idx, col=col_idx)
+
+            fig.update_layout(
+                title=title,
+                height=max(400, 350 * n_rows),
+                showlegend=True,
+                hovermode="closest",
+                legend={"title": "Benchmark"},
+            )
+            fig.write_html(str(html_fpath), include_plotlyjs="cdn")
+            html_out = str(html_fpath)
+            if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
+                fig.write_image(str(jpg_fpath), scale=2.0)
+                jpg_out = str(jpg_fpath)
+        except Exception as ex:
+            plotly_error = f"unable to write per-metric agreement: {ex!r}"
 
     return {"json": str(json_fpath), "html": html_out, "jpg": jpg_out, "plotly_error": plotly_error}
 
@@ -1483,6 +1655,15 @@ def _render_scope_summary(
             interactive_dpath=level_001_interactive,
             static_dpath=level_001_static,
         )
+        per_metric_agreement_plot = _write_per_metric_agreement_plot(
+            repro_rows=repro_rows,
+            enriched_rows=enriched_rows,
+            stem=level_001 / f"agreement_curve_per_metric_{generated_utc}",
+            title=f"Agreement Rate vs Tolerance (per-metric): {scope_title}",
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        )
         coverage_matrix_plot = _write_coverage_matrix_plot(
             enriched_rows=enriched_rows,
             repro_rows=repro_rows,
@@ -1504,6 +1685,7 @@ def _render_scope_summary(
         benchmark_plot = {"json": None, "html": None, "jpg": None, "png": None, "plotly_error": None}
         repro_bucket_plot = {"json": None, "html": None, "jpg": None, "png": None, "plotly_error": None}
         agreement_curve_plot = {"json": None, "html": None, "jpg": None, "plotly_error": None}
+        per_metric_agreement_plot = {"json": None, "html": None, "jpg": None, "plotly_error": None}
         coverage_matrix_plot = {"json": None, "html": None, "jpg": None, "plotly_error": None}
         failure_taxonomy_plot = {"json": None, "html": None, "jpg": None, "plotly_error": None}
 

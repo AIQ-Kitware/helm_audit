@@ -104,6 +104,11 @@ class CompileHelmReproListConfig(scfg.DataConfig):
         help="Where to write detailed output.",
     )
 
+    out_report_dpath = scfg.Value(
+        None,
+        help="If provided, write filter-step analysis (Sankey + text report) to this directory.",
+    )
+
     dedupe = scfg.Value(
         True,
         help="If True, dedupe identical (suite, run_entry, max_eval_instances) rows.",
@@ -133,7 +138,7 @@ class CompileHelmReproListConfig(scfg.DataConfig):
         require_per_instance_stats = config.require_per_instance_stats
         include_max_eval_instances = config.include_max_eval_instances
 
-        runs = gather_runs(
+        runs, n_structurally_incomplete = gather_runs(
             roots=roots,
             suite_pattern=suite_pattern,
             run_pattern=run_pattern,
@@ -269,6 +274,47 @@ class CompileHelmReproListConfig(scfg.DataConfig):
 
         chosen_rows = [r for r in rows if r['model'] in chosen_model_names]
         logger.info('Filter to {} / {} runs', len(chosen_rows), len(rows))
+
+        # Prepare filter-step analysis data (for report generation)
+        model_filter_rows = []  # one dict per model with all failure reasons
+        for r in model_rows:
+            tags = set(r.get('tags', []))
+            is_text_like = bool(tags & SOFT_TEXT_TAGS)
+            has_excluded_tags = bool(tags & EXCLUDE_TAGS)
+            size_ok = (r.get('num_parameters') is None or r['num_parameters'] <= MAX_PARAMS)
+            access_ok = (r.get('access') == 'open')
+            has_local_hf_path = (
+                r.get('has_hf_client', False) or
+                r['name'] in KNOWN_HF_OVERRIDES
+            )
+
+            # Collect ALL failing reasons (not just the first)
+            failure_reasons = []
+            if not is_text_like:
+                failure_reasons.append('not-text-like')
+            if has_excluded_tags:
+                failure_reasons.append('excluded-tags')
+            if not size_ok:
+                failure_reasons.append('too-large')
+            if not access_ok:
+                failure_reasons.append('not-open-access')
+            if not has_local_hf_path:
+                failure_reasons.append('no-hf-deployment')
+
+            eligible = (
+                is_text_like and
+                not has_excluded_tags and
+                size_ok and
+                access_ok and
+                has_local_hf_path
+            )
+
+            model_filter_rows.append({
+                'model': r['name'],
+                'n_runs': model_histo.get(r['name'], 0),
+                'failure_reasons': failure_reasons,
+                'eligible': eligible,
+            })
         # logger.info(f'chosen_rows = {ub.urepr(chosen_rows, nl=1)}')
 
         if 1:
@@ -279,6 +325,79 @@ class CompileHelmReproListConfig(scfg.DataConfig):
             model_histo = ub.udict.sorted_values(model_histo)
             logger.info(f'scenario_histo = {ub.urepr(scenario_histo, nl=1)}')
             logger.info(f'model_histo = {ub.urepr(model_histo, nl=1)}')
+
+        # Generate filter-step report if requested
+        if config.out_report_dpath:
+            from pathlib import Path as PathlibPath
+            from helm_audit.utils.sankey import emit_sankey_artifacts
+
+            report_dpath = PathlibPath(config.out_report_dpath).expanduser().resolve()
+            report_dpath.mkdir(parents=True, exist_ok=True)
+
+            # Build sankey rows: one row per run per filter failure (if failed), or one row per selected run
+            sankey_rows = []
+            for _ in range(n_structurally_incomplete):
+                sankey_rows.append({'filter_reason': 'structurally-incomplete', 'outcome': 'excluded'})
+
+            for mrow in model_filter_rows:
+                n_runs = mrow['n_runs']
+                if mrow['eligible']:
+                    for _ in range(n_runs):
+                        sankey_rows.append({'filter_reason': 'selected', 'outcome': 'selected'})
+                else:
+                    for reason in mrow['failure_reasons']:
+                        for _ in range(n_runs):
+                            sankey_rows.append({'filter_reason': reason, 'outcome': 'excluded'})
+
+            # Emit sankey artifacts
+            emit_sankey_artifacts(
+                rows=sankey_rows,
+                report_dpath=report_dpath,
+                stamp=__import__('datetime').datetime.now(__import__('datetime').UTC).strftime('%Y%m%dT%H%M%SZ'),
+                kind='model_filter',
+                title='Run Selection Filter: Which HELM Runs Were Included',
+                stage_defs={
+                    'filter_reason': [
+                        'selected: model passed all 5 eligibility criteria and had complete run data',
+                        'structurally-incomplete: run directory missing required files (run_spec.json, stats.json, etc)',
+                        'not-text-like: model has no text-compatible tags (vision, audio, or image model)',
+                        'excluded-tags: model tagged as vision/audio/image/code which we exclude',
+                        'too-large: model size exceeds 10 billion parameters (conservative for local execution)',
+                        'not-open-access: model access is not "open" in HELM registry',
+                        'no-hf-deployment: model has no HuggingFace deployment and not in known overrides',
+                    ],
+                    'outcome': [
+                        'selected: run was included in reproduction list',
+                        'excluded: run was excluded from reproduction list',
+                    ],
+                },
+                stage_order=[('filter_reason', 'Exclusion Criterion'), ('outcome', 'Outcome')],
+            )
+
+            # Write text report
+            text_lines = ['Model Selection Filter Report', '']
+            text_lines.append(f'Total discovered runs: {n_structurally_incomplete + len(rows)}')
+            text_lines.append(f'Structurally complete runs: {len(rows)}')
+            text_lines.append(f'Structurally incomplete runs: {n_structurally_incomplete}')
+            text_lines.append('')
+            text_lines.append(f'Total models in complete runs: {len(model_rows)}')
+            text_lines.append(f'Selected models (passed all filters): {len(chosen_model_rows)}')
+            text_lines.append(f'Selected runs: {len(chosen_rows)}')
+            text_lines.append('')
+            text_lines.append('Filter Criteria Statistics:')
+
+            # Count runs affected by each filter
+            filter_counts = {}
+            for mrow in model_filter_rows:
+                for reason in mrow['failure_reasons']:
+                    filter_counts[reason] = filter_counts.get(reason, 0) + mrow['n_runs']
+
+            for reason in sorted(filter_counts.keys()):
+                text_lines.append(f'  {reason}: {filter_counts[reason]} runs')
+
+            report_txt_fpath = report_dpath / 'model_filter_report.txt'
+            report_txt_fpath.write_text('\n'.join(text_lines) + '\n')
+            logger.success('Wrote filter report: {}', report_dpath)
 
         if config.out_detail_fpath:
             text = kwutil.Yaml.dumps(chosen_rows)
@@ -300,7 +419,7 @@ def gather_runs(
     run_pattern: str = "*:*",
     require_per_instance_stats: bool = False,
     include_max_eval_instances: bool = True,
-) -> list[HelmRun]:
+) -> tuple[list[HelmRun], int]:
 
     # Discover all benchmark_output dirs under provided roots
     logger.info('Discover benchmarks')
@@ -310,6 +429,7 @@ def gather_runs(
         logger.warning("No benchmark_output dirs found under roots={}", roots)
 
     runs: list[HelmRun] = []
+    n_structurally_incomplete = 0
     for bo in ub.ProgIter(bo_dirs, desc='Check dirs'):
         try:
             outputs = HelmOutputs.coerce(bo)
@@ -324,15 +444,16 @@ def gather_runs(
 
                 # TODO: if not run.exists():
                 #     ...
-                # Only include if it looks “complete enough”
+                # Only include if it looks "complete enough"
                 if not is_complete_run_dir(run_dir, require_per_instance_stats=require_per_instance_stats):
+                    n_structurally_incomplete += 1
                     continue
 
                 runs.append(run)
 
     # Stable order
     logger.info('Found {} run directories', len(runs))
-    return runs
+    return runs, n_structurally_incomplete
 
 
 def build_run_table(

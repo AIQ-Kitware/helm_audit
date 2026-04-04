@@ -141,3 +141,66 @@ Design takeaways:
 1. When the same function appears in 3+ files with different internal details, the right canonical version is the most defensive one — its extra guards are there because someone hit a real edge case.
 2. Chained `(obj.get('a') or {}).get('b')` patterns should be viewed as a code smell for missing abstraction, not defensive programming — extract a helper the moment they appear in 3+ places.
 3. A god module is best decomposed after tests exist for it, not before; refactoring without tests trades one risk (readability) for another (silent behavioral regression).
+
+## 2026-04-04 04:35:00 +0000
+
+Summary of user intent: Improve end-to-end pipeline visibility and documentation. (1) Add filter-step analysis with Sankey showing what `index_historic_helm_runs.py` kept/dropped and why. (2) Create `docs/pipeline.md` with technical reference covering all 7 stages and troubleshooting. (3) Reorganize all-results README to better guide operators through reports in dependency order. (4) Ensure all plotly HTML outputs have JPG sidecars (already working; `agreement_curve_per_metric` will render on next re-run).
+
+Model and configuration: claude-haiku-4-5-20251001, Claude Code CLI (VSCode extension).
+
+**Filter-Step Analysis**
+
+The key insight was that models may fail multiple filter criteria simultaneously (e.g., size AND no HF deployment). Rather than recording only the "first" failure, the solution expands multi-failure models into one sankey row per failure reason. This means the sankey row count exceeds the model count, which is intentional — it shows the total "count of filter hits" by reason. Operators can immediately see that "too-large" is a bigger contributor than "no-hf-deployment" by the row thickness in the flow.
+
+Added `out_report_dpath` argument to `index_historic_helm_runs.py` (optional, non-breaking). When provided:
+1. Builds `model_filter_rows` list with all failure reasons per model
+2. Expands into `sankey_rows` (one row per model per failure reason)
+3. Calls `emit_sankey_artifacts` with `stage_order=[('filter_reason', ...), ('outcome', ...)]`
+4. Writes text report with count summary
+
+The filter-step Sankey lives alongside `run_specs.yaml` in the `out_report_dpath` directory, making it discoverable by operators running Stage 1 independently. The all-results README now points to this artifact under "understand_upstream_filtering."
+
+**End-to-End Documentation**
+
+Created `docs/pipeline.md` as the canonical technical reference:
+- Stage 0–6 with exact CLI commands, arguments, and outputs
+- Filtering logic spelled out (5 model criteria + structural completeness)
+- Each stage's input/output structure
+- Full runbook example (Qwen scenario)
+- Troubleshooting section
+- Why "agreement_curve_per_metric is missing" (data availability; will fix on re-run)
+
+This document is intended to survive as the primary operator handoff — it is more detailed than reproduce/README.md (which focuses on scenarios) and more focused than dev/journals/ (which is historical context). It answers "what does each stage do" and "why is the output organized this way."
+
+**README Reorganization**
+
+Updated `_build_high_level_readme()` in build_reports_summary.py to restructure "start_here" into four labeled sections:
+- `understand_upstream_filtering`: points to Stage 1 filter report
+- `explore_execution_coverage`: operational sankey, per-metric, coverage
+- `understand_reproducibility`: reproducibility sankeys at different tolerances, agreement curves
+- `diagnose_failures`: failure reasons, taxonomy, bucket distribution
+
+Each section has 1–4 action items ordered by "you should read this first" logic. This is a UX improvement — operators opening the README now see a clear path through the artifacts instead of a flat list.
+
+**JPG Sidecars**
+
+The infrastructure was already correct (all existing plotly functions write JPG when Chrome is available). `agreement_curve_per_metric` is currently missing HTML+JPG because the underlying `per_metric_agreement` data field was added to the code AFTER the most recent Stage 5a run. This is not a bug — it's expected transience. When Stage 5a is re-run, the reports will include `per_metric_agreement`, and Stage 6 will then render the HTML+JPG. Documented this in docs/pipeline.md under "Note on `agreement_curve_per_metric`."
+
+**Risks and Uncertainties**
+
+The filter-step Sankey row expansion (one row per failure reason) is mathematically sound but visually different from "single exit point per model." If an operator expects the total row count in the sankey to equal the model count, they may be confused. Addressed by labeling the stage as "Exclusion Criterion" and documenting in `docs/pipeline.md` that multi-failure models contribute multiple rows.
+
+The `docs/pipeline.md` is long (~350 lines) and assumes familiarity with HELM's run_spec/scenario/model ecosystem. It is not a beginner's introduction; it is a reference for operators who have already run at least one scenario and want to understand the audit machinery around it. Acceptable tradeoff because the reproduce/README.md scenarios still serve as onboarding.
+
+**Testing**
+
+1. `python -m py_compile` passes on index_historic_helm_runs.py and build_reports_summary.py
+2. Reviewed filter-report generation logic: structurally-incomplete counter added, model_filter_rows list building correct, sankey_rows expansion correct (one row per reason)
+3. README restructuring is textual only; no behavioral changes
+
+**Design Takeaways**
+
+1. When filtering logic has multi-criterion failures, show all reasons in the output, not just the first — it surfaces the full picture of what stopped a run.
+2. Documentation for a multi-stage pipeline should have three layers: scenario-based runbooks (reproduce/), stage-by-stage technical reference (docs/pipeline.md), and detailed design history (journal/). Each has a different reader.
+3. Reorganizing human-facing output (README) by logical "sections the operator cares about" is higher-value than reorganizing by artifact type — operators follow question paths, not file listings.
+
