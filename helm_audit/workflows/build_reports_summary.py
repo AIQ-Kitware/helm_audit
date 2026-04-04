@@ -15,6 +15,7 @@ import kwutil
 
 from helm_audit.infra.api import audit_root, default_report_root
 from helm_audit.infra.fs_publish import stamped_history_dir, symlink_to, write_latest_alias
+from helm_audit.utils.numeric import nested_get
 from helm_audit.utils.sankey import emit_sankey_artifacts
 
 
@@ -277,10 +278,9 @@ def _load_all_repro_rows() -> list[dict[str, Any]]:
         repeat = _find_pair(report, "kwdagger_repeat") or {}
         official_diag = official.get("diagnosis", {}) or {}
         repeat_diag = repeat.get("diagnosis", {}) or {}
-        agree_0 = _find_curve_value(
-            ((official.get("instance_level") or {}).get("agreement_vs_abs_tol") or []),
-            0.0,
-        )
+        official_instance_level = official.get("instance_level") or {}
+        official_agree_curve = official_instance_level.get("agreement_vs_abs_tol") or []
+        agree_0 = _find_curve_value(official_agree_curve, 0.0)
         row = {
             "experiment_name": experiment_name,
             "run_entry": run_entry,
@@ -293,28 +293,19 @@ def _load_all_repro_rows() -> list[dict[str, Any]]:
             "official_primary_reasons": official_diag.get("primary_reason_names") or [],
             "official_instance_agree_0": agree_0,
             "official_instance_agree_bucket": _bucket_agreement(agree_0),
-            "official_instance_agree_01": _find_curve_value(
-                ((official.get("instance_level") or {}).get("agreement_vs_abs_tol") or []),
-                0.1,
-            ),
-            "official_runlevel_abs_max": ((((official.get("run_level") or {}).get("overall_quantiles") or {}).get("abs_delta") or {}).get("max")),
-            "official_runlevel_abs_p90": ((((official.get("run_level") or {}).get("overall_quantiles") or {}).get("abs_delta") or {}).get("p90")),
-            "official_instance_agree_001": _find_curve_value(
-                ((official.get("instance_level") or {}).get("agreement_vs_abs_tol") or []),
-                0.001,
-            ),
-            "official_instance_agree_005": _find_curve_value(
-                ((official.get("instance_level") or {}).get("agreement_vs_abs_tol") or []),
-                0.05,
-            ),
+            "official_instance_agree_01": _find_curve_value(official_agree_curve, 0.1),
+            "official_runlevel_abs_max": nested_get(official, "run_level", "overall_quantiles", "abs_delta", "max"),
+            "official_runlevel_abs_p90": nested_get(official, "run_level", "overall_quantiles", "abs_delta", "p90"),
+            "official_instance_agree_001": _find_curve_value(official_agree_curve, 0.001),
+            "official_instance_agree_005": _find_curve_value(official_agree_curve, 0.05),
             "core_metrics": official.get("core_metrics") or [],
             "official_runlevel_metric_max_deltas": {
-                m["metric"]: (m.get("abs_delta") or {}).get("max")
-                for m in ((official.get("run_level") or {}).get("by_metric") or [])
+                m["metric"]: nested_get(m, "abs_delta", "max")
+                for m in (nested_get(official, "run_level", "by_metric") or [])
             },
             "official_instance_agree_curve": [
                 {"abs_tol": pt["abs_tol"], "agree_ratio": pt["agree_ratio"]}
-                for pt in ((official.get("instance_level") or {}).get("agreement_vs_abs_tol") or [])
+                for pt in official_agree_curve
             ],
         }
         deduped[(experiment_name, run_entry)] = row

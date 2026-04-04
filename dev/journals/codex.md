@@ -102,3 +102,42 @@ Design takeaways:
 1. Separate machine-readable data from human-readable views at the directory level, not just the file level — it changes the first-open experience from “where is the HTML?” to “obviously here.”
 2. When a visualization figure's color/axis encoding carries an implicit assumption (threshold, comparison direction, etc.), put that assumption in the title or axis label, not just in a key file. Readers look at figures before reading keys.
 3. Failure taxonomy charts are most useful when categories are defined by *what action fixes them*, not by symptom. “Hardware timeout,” “data access barrier,” and “missing credentials” each suggest a different next step for an operator.
+
+## 2026-04-04 03:14:22 +0000
+
+Summary of user intent: identify and implement high-value refactors to reduce technical debt, improve code readability, and make the codebase easier to reason about and extend.
+
+Model and configuration: claude-sonnet-4-6, Claude Code CLI (VSCode extension).
+
+**Analysis**
+
+Before touching anything, I did a full codebase audit using the Explore subagent. The two highest-impact categories of debt were: (1) the same small utility functions copy-pasted across three modules with subtle drift between versions, and (2) deeply nested `(((obj.get('a') or {}).get('b') or {}).get('c') or {}).get('d')` chains that appeared verbatim across `build_reports_summary.py`, `analyze_experiment.py`, and `aggregate.py`, making the data access intent completely opaque.
+
+**Duplicate utility consolidation**
+
+`_safe_float` existed in three files — `helm/analysis.py`, `helm/diff.py`, and `reports/core_metrics.py` — and had silently diverged. The `analysis.py` version was the most defensive: it included a `math.isnan()` guard that the other two lacked. Left unaddressed, any bug fix to one copy would not propagate to the others. Similarly, `_quantile` appeared in `diff.py` and `core_metrics.py`; the `core_metrics.py` version sorted its input internally while `diff.py`'s assumed pre-sorted input (callers in `diff.py` happened to sort first, so both worked, but the inconsistency was a trap for anyone adding a new call site).
+
+The fix: create `helm_audit/utils/numeric.py` with canonical, documented implementations of `safe_float`, `quantile` (sorts internally, the safer choice), and `nested_get` (new). Each file that previously defined these locally now imports from `utils.numeric` using a private alias (`_safe_float = safe_float`) so call sites need zero changes. The `analysis.py`'s version was adopted as canonical since it was most defensive; callers in `diff.py` that happened to pre-sort still work correctly since sorting an already-sorted list is a no-op.
+
+**nested_get helper**
+
+The 4-level `.get()` chains appear in dict-heavy report assembly code where HELM's JSON payload has a fixed schema but where callers defensively handle missing keys at every level. These chains are correct but deeply unfriendly: a 120-character line like `((((official.get("run_level") or {}).get("overall_quantiles") or {}).get("abs_delta") or {}).get("max"))` encodes a simple "give me `official['run_level']['overall_quantiles']['abs_delta']['max']` or None" intent behind 5 layers of syntactic noise.
+
+`nested_get(obj, *keys, default=None)` replaces all of these. It stops at the first missing or non-dict step and returns `default`. The replacement is semantically identical because the original `or {}` pattern also stops propagating at a missing key (it just does so via an empty dict sentinel). One subtle case to watch: if an intermediate value is legitimately present but is `None` (e.g., a field explicitly set to `null` in the JSON), `nested_get` correctly returns `default` because `None` fails the `isinstance(obj, dict)` check — same behavior as the original `(value or {}).get(...)` pattern.
+
+Applied to 16 sites across `build_reports_summary.py`, `analyze_experiment.py`, and `aggregate.py`. In `build_reports_summary.py`, I also extracted `official_instance_level` and `official_agree_curve` as named locals, eliminating the repeated `.get("instance_level")` traversal inside a single dict comprehension block and making the loop structure cleaner.
+
+**What was not done**
+
+The god-module problem in `build_reports_summary.py` (1694 LOC, 36+ functions covering data loading, visualization, and export) is a real issue but a higher-risk refactor that should come after better test coverage. Left as-is with a note in this journal. Similarly, the CLI argument parsing inconsistency (raw `argparse` vs. `scriptconfig`) was deferred because it has no behavioral impact and the risk of accidentally changing CLI behavior outweighs the benefit at this point.
+
+**Testing**
+
+All 13 existing tests pass. Doctests in `utils/numeric.py` pass. All module imports clean after the changes.
+
+Risks: the `nested_get` semantics differ from the original chains only in the "explicitly None intermediate" edge case, which shouldn't occur in real HELM payloads but isn't tested. Worth adding a test if this bites.
+
+Design takeaways:
+1. When the same function appears in 3+ files with different internal details, the right canonical version is the most defensive one — its extra guards are there because someone hit a real edge case.
+2. Chained `(obj.get('a') or {}).get('b')` patterns should be viewed as a code smell for missing abstraction, not defensive programming — extract a helper the moment they appear in 3+ places.
+3. A god module is best decomposed after tests exist for it, not before; refactoring without tests trades one risk (readability) for another (silent behavioral regression).

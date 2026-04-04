@@ -62,36 +62,12 @@ from dataclasses import dataclass
 from helm_audit.helm import hashers as helm_hashers
 from helm_audit.helm import metrics as helm_metrics
 from helm_audit.helm.analysis import HelmRunAnalysis
+from helm_audit.utils.numeric import safe_float as _safe_float, quantile as _quantile
 from typing import Any, Callable, Iterable
 
 
 def _format_bool(ok: bool) -> str:
     return '✅' if ok else '❌'
-
-
-def _safe_float(x: Any) -> float | None:
-    try:
-        if x is None:
-            return None
-        return float(x)
-    except Exception:
-        return None
-
-
-def _quantile(values: list[float], q: float) -> float | None:
-    if not values:
-        return None
-    if q <= 0:
-        return values[0]
-    if q >= 1:
-        return values[-1]
-    pos = (len(values) - 1) * q
-    lo = math.floor(pos)
-    hi = math.ceil(pos)
-    if lo == hi:
-        return values[lo]
-    alpha = pos - lo
-    return values[lo] * (1 - alpha) + values[hi] * alpha
 
 
 def _walker_diff(a: Any, b: Any, *, max_paths: int = 12) -> dict[str, Any]:

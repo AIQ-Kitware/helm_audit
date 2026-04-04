@@ -25,7 +25,6 @@ Notes
 
 from __future__ import annotations
 
-import math
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -34,6 +33,7 @@ import ubelt as ub
 
 from helm_audit.helm import hashers as helm_hashers
 from helm_audit.helm import metrics as helm_metrics
+from helm_audit.utils.numeric import safe_float as _safe_float
 
 
 class HelmRunAnalysis(ub.NiceRepr):
@@ -264,18 +264,6 @@ class HelmRunAnalysis(ub.NiceRepr):
         if assert_assumptions:
             tbl.assert_assumptions()
         return tbl
-
-
-def _safe_float(x: Any) -> float | None:
-    try:
-        if x is None:
-            return None
-        y = float(x)
-        if math.isnan(y):
-            return None
-        return y
-    except Exception:
-        return None
 
 
 @dataclass(frozen=True)

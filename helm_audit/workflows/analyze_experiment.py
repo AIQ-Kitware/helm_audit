@@ -12,6 +12,7 @@ import pandas as pd
 
 from helm_audit.reports.aggregate import _find_curve_value, _find_pair
 from helm_audit.infra.api import audit_root, default_report_root
+from helm_audit.utils.numeric import nested_get
 from helm_audit.infra.fs_publish import write_latest_alias
 from helm_audit.reports import pair_report
 from helm_audit.reports.paper_labels import load_paper_label_manager
@@ -198,17 +199,17 @@ def main(argv: list[str] | None = None) -> None:
             'report_dir': str(report_dir),
             'generated_utc': report.get('generated_utc'),
             'diagnostic_flags': report.get('diagnostic_flags', []),
-            'kwdagger_a_empty_completion_rate': (((report.get('run_diagnostics') or {}).get('kwdagger_a') or {}).get('empty_completion_rate')),
-            'kwdagger_a_mean_output_tokens': ((((report.get('run_diagnostics') or {}).get('kwdagger_a') or {}).get('output_token_count') or {}).get('mean')),
-            'official_empty_completion_rate': (((report.get('run_diagnostics') or {}).get('official') or {}).get('empty_completion_rate')),
-            'official_mean_output_tokens': ((((report.get('run_diagnostics') or {}).get('official') or {}).get('output_token_count') or {}).get('mean')),
+            'kwdagger_a_empty_completion_rate': nested_get(report, 'run_diagnostics', 'kwdagger_a', 'empty_completion_rate'),
+            'kwdagger_a_mean_output_tokens': nested_get(report, 'run_diagnostics', 'kwdagger_a', 'output_token_count', 'mean'),
+            'official_empty_completion_rate': nested_get(report, 'run_diagnostics', 'official', 'empty_completion_rate'),
+            'official_mean_output_tokens': nested_get(report, 'run_diagnostics', 'official', 'output_token_count', 'mean'),
             'repeat_instance_agree_0': _find_curve_value(repeat.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.0),
             'official_instance_agree_0': _find_curve_value(official.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.0),
             'official_instance_agree_01': _find_curve_value(official.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.1),
             'official_instance_agree_025': _find_curve_value(official.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.25),
             'official_instance_agree_05': _find_curve_value(official.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.5),
-            'official_runlevel_p90': (((official.get('run_level') or {}).get('overall_quantiles') or {}).get('abs_delta') or {}).get('p90'),
-            'official_runlevel_max': (((official.get('run_level') or {}).get('overall_quantiles') or {}).get('abs_delta') or {}).get('max'),
+            'official_runlevel_p90': nested_get(official, 'run_level', 'overall_quantiles', 'abs_delta', 'p90'),
+            'official_runlevel_max': nested_get(official, 'run_level', 'overall_quantiles', 'abs_delta', 'max'),
         })
 
     paper_labels = load_paper_label_manager(style='paper_short')
@@ -275,10 +276,10 @@ def main(argv: list[str] | None = None) -> None:
             'primary_reason_names': cross_diag.get('primary_reason_names'),
             'run_level_agree_ratio': cross_overall.get('agree_ratio'),
             'instance_level_agree_ratio': cross_means.get('agree_ratio'),
-            'run_level_abs_p90': ((((cross_payload.get('distance_summary') or {}).get('run_level') or {}).get('overall') or {}).get('abs_delta') or {}).get('p90'),
-            'run_level_abs_max': ((((cross_payload.get('distance_summary') or {}).get('run_level') or {}).get('overall') or {}).get('abs_delta') or {}).get('max'),
-            'instance_level_abs_p90': ((((cross_payload.get('distance_summary') or {}).get('instance_level') or {}).get('overall') or {}).get('abs_delta') or {}).get('p90'),
-            'instance_level_abs_max': ((((cross_payload.get('distance_summary') or {}).get('instance_level') or {}).get('overall') or {}).get('abs_delta') or {}).get('max'),
+            'run_level_abs_p90': nested_get(cross_payload, 'distance_summary', 'run_level', 'overall', 'abs_delta', 'p90'),
+            'run_level_abs_max': nested_get(cross_payload, 'distance_summary', 'run_level', 'overall', 'abs_delta', 'max'),
+            'instance_level_abs_p90': nested_get(cross_payload, 'distance_summary', 'instance_level', 'overall', 'abs_delta', 'p90'),
+            'instance_level_abs_max': nested_get(cross_payload, 'distance_summary', 'instance_level', 'overall', 'abs_delta', 'max'),
             'latest_links': latest_links,
         }
         summary_row['cross_machine_aiq_gpu'] = row
