@@ -423,760 +423,370 @@
   max_eval_instances:
   model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
-- run_spec_name: babi_qa:task=15,model=eleutherai/pythia-1b-v0
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/babi_qa:task=15,model=eleutherai_pythia-1b-v0
-  max_eval_instances:
-  model: eleutherai/pythia-1b-v0
-  scenario_class: helm.benchmark.scenarios.babi_qa_scenario.BabiQAScenario
-- run_spec_name: babi_qa:task=15,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/babi_qa:task=15,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.babi_qa_scenario.BabiQAScenario
 - run_spec_name: babi_qa:task=15,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/babi_qa:task=15,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.babi_qa_scenario.BabiQAScenario
-- run_spec_name: babi_qa:task=19,model=eleutherai/pythia-1b-v0
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/babi_qa:task=19,model=eleutherai_pythia-1b-v0
-  max_eval_instances:
-  model: eleutherai/pythia-1b-v0
-  scenario_class: helm.benchmark.scenarios.babi_qa_scenario.BabiQAScenario
-- run_spec_name: babi_qa:task=19,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/babi_qa:task=19,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.babi_qa_scenario.BabiQAScenario
 - run_spec_name: babi_qa:task=19,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/babi_qa:task=19,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.babi_qa_scenario.BabiQAScenario
-- run_spec_name: babi_qa:task=3,model=eleutherai/pythia-1b-v0
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/babi_qa:task=3,model=eleutherai_pythia-1b-v0
-  max_eval_instances:
-  model: eleutherai/pythia-1b-v0
-  scenario_class: helm.benchmark.scenarios.babi_qa_scenario.BabiQAScenario
-- run_spec_name: babi_qa:task=3,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/babi_qa:task=3,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.babi_qa_scenario.BabiQAScenario
 - run_spec_name: babi_qa:task=3,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/babi_qa:task=3,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.babi_qa_scenario.BabiQAScenario
-- run_spec_name: babi_qa:task=all,model=eleutherai/pythia-1b-v0
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/babi_qa:task=all,model=eleutherai_pythia-1b-v0
-  max_eval_instances:
-  model: eleutherai/pythia-1b-v0
-  scenario_class: helm.benchmark.scenarios.babi_qa_scenario.BabiQAScenario
-- run_spec_name: babi_qa:task=all,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/babi_qa:task=all,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.babi_qa_scenario.BabiQAScenario
 - run_spec_name: babi_qa:task=all,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/babi_qa:task=all,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.babi_qa_scenario.BabiQAScenario
-- run_spec_name: boolq:model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/boolq:model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.boolq_scenario.BoolQScenario
 - run_spec_name: boolq:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/boolq:model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.boolq_scenario.BoolQScenario
-- run_spec_name: civil_comments:demographic=LGBTQ,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=LGBTQ,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
 - run_spec_name: civil_comments:demographic=LGBTQ,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=LGBTQ,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
-- run_spec_name: civil_comments:demographic=all,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=all,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
 - run_spec_name: civil_comments:demographic=all,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=all,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
-- run_spec_name: civil_comments:demographic=black,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=black,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
 - run_spec_name: civil_comments:demographic=black,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=black,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
-- run_spec_name: civil_comments:demographic=christian,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=christian,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
 - run_spec_name: civil_comments:demographic=christian,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=christian,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
-- run_spec_name: civil_comments:demographic=female,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=female,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
 - run_spec_name: civil_comments:demographic=female,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=female,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
-- run_spec_name: civil_comments:demographic=male,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=male,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
 - run_spec_name: civil_comments:demographic=male,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=male,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
-- run_spec_name: civil_comments:demographic=muslim,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=muslim,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
 - run_spec_name: civil_comments:demographic=muslim,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=muslim,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
-- run_spec_name: civil_comments:demographic=other_religions,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=other_religions,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
 - run_spec_name: civil_comments:demographic=other_religions,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=other_religions,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
-- run_spec_name: civil_comments:demographic=white,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=white,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
 - run_spec_name: civil_comments:demographic=white,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/civil_comments:demographic=white,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.civil_comments_scenario.CivilCommentsScenario
-- run_spec_name: dyck_language_np=3:model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/dyck_language_np=3:model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.dyck_language_scenario.DyckLanguageScenario
 - run_spec_name: dyck_language_np=3:model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/dyck_language_np=3:model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.dyck_language_scenario.DyckLanguageScenario
-- run_spec_name: entity_data_imputation:dataset=Buy,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_data_imputation:dataset=Buy,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.entity_data_imputation_scenario.EntityDataImputationScenario
 - run_spec_name: entity_data_imputation:dataset=Buy,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_data_imputation:dataset=Buy,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.entity_data_imputation_scenario.EntityDataImputationScenario
-- run_spec_name: entity_data_imputation:dataset=Restaurant,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_data_imputation:dataset=Restaurant,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.entity_data_imputation_scenario.EntityDataImputationScenario
 - run_spec_name: entity_data_imputation:dataset=Restaurant,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_data_imputation:dataset=Restaurant,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.entity_data_imputation_scenario.EntityDataImputationScenario
-- run_spec_name: entity_matching:dataset=Abt_Buy,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_matching:dataset=Abt_Buy,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.entity_matching_scenario.EntityMatchingScenario
 - run_spec_name: entity_matching:dataset=Abt_Buy,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_matching:dataset=Abt_Buy,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.entity_matching_scenario.EntityMatchingScenario
-- run_spec_name: entity_matching:dataset=Beer,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_matching:dataset=Beer,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.entity_matching_scenario.EntityMatchingScenario
 - run_spec_name: entity_matching:dataset=Beer,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_matching:dataset=Beer,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.entity_matching_scenario.EntityMatchingScenario
-- run_spec_name: entity_matching:dataset=Dirty_iTunes_Amazon,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_matching:dataset=Dirty_iTunes_Amazon,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.entity_matching_scenario.EntityMatchingScenario
 - run_spec_name: entity_matching:dataset=Dirty_iTunes_Amazon,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/entity_matching:dataset=Dirty_iTunes_Amazon,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.entity_matching_scenario.EntityMatchingScenario
-- run_spec_name: gsm:model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/gsm:model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.gsm_scenario.GSM8KScenario
 - run_spec_name: gsm:model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/gsm:model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.gsm_scenario.GSM8KScenario
-- run_spec_name: imdb:model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/imdb:model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.imdb_scenario.IMDBScenario
 - run_spec_name: imdb:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/imdb:model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.imdb_scenario.IMDBScenario
-- run_spec_name: legal_support,method=multiple_choice_joint:model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/legal_support,method=multiple_choice_joint:model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.legal_support_scenario.LegalSupportScenario
 - run_spec_name: legal_support,method=multiple_choice_joint:model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/legal_support,method=multiple_choice_joint:model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.legal_support_scenario.LegalSupportScenario
-- run_spec_name: lsat_qa:task=all,method=multiple_choice_joint,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/lsat_qa:task=all,method=multiple_choice_joint,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.lsat_qa_scenario.LSATScenario
 - run_spec_name: lsat_qa:task=all,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/lsat_qa:task=all,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.lsat_qa_scenario.LSATScenario
-- run_spec_name: math:subject=algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=algebra,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=algebra,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=algebra,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=algebra,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=counting_and_probability,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=counting_and_probability,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=counting_and_probability,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=counting_and_probability,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=counting_and_probability,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=counting_and_probability,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=counting_and_probability,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=counting_and_probability,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=geometry,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=geometry,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=geometry,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=geometry,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=geometry,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=geometry,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=geometry,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=geometry,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=intermediate_algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=intermediate_algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=intermediate_algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=intermediate_algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=intermediate_algebra,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=intermediate_algebra,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=intermediate_algebra,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=intermediate_algebra,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=number_theory,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=number_theory,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=number_theory,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=number_theory,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=number_theory,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=number_theory,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=number_theory,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=number_theory,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=prealgebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=prealgebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=prealgebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=prealgebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=prealgebra,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=prealgebra,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=prealgebra,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=prealgebra,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=precalculus,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=precalculus,level=1,use_official_examples=False,use_chain_of_thought=True,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=precalculus,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=precalculus,level=1,use_official_examples=False,use_chain_of_thought=True,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=precalculus,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=precalculus,level=1,use_official_examples=True,use_chain_of_thought=False,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
 - run_spec_name: math:subject=precalculus,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/math:subject=precalculus,level=1,use_official_examples=True,use_chain_of_thought=False,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: mmlu:subject=abstract_algebra,method=multiple_choice_joint,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=abstract_algebra,method=multiple_choice_joint,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
 - run_spec_name: mmlu:subject=abstract_algebra,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=abstract_algebra,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: mmlu:subject=college_chemistry,method=multiple_choice_joint,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=college_chemistry,method=multiple_choice_joint,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
 - run_spec_name: mmlu:subject=college_chemistry,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=college_chemistry,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: mmlu:subject=computer_security,method=multiple_choice_joint,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=computer_security,method=multiple_choice_joint,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
 - run_spec_name: mmlu:subject=computer_security,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=computer_security,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: mmlu:subject=econometrics,method=multiple_choice_joint,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=econometrics,method=multiple_choice_joint,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
 - run_spec_name: mmlu:subject=econometrics,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=econometrics,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
 - run_spec_name: mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: narrative_qa:model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/narrative_qa:model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.narrativeqa_scenario.NarrativeQAScenario
 - run_spec_name: narrative_qa:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/narrative_qa:model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.narrativeqa_scenario.NarrativeQAScenario
-- run_spec_name: natural_qa:mode=closedbook,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/natural_qa:mode=closedbook,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.natural_qa_scenario.NaturalQAScenario
 - run_spec_name: natural_qa:mode=closedbook,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/natural_qa:mode=closedbook,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.natural_qa_scenario.NaturalQAScenario
-- run_spec_name: natural_qa:mode=openbook_longans,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/natural_qa:mode=openbook_longans,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.natural_qa_scenario.NaturalQAScenario
 - run_spec_name: natural_qa:mode=openbook_longans,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/natural_qa:mode=openbook_longans,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.natural_qa_scenario.NaturalQAScenario
-- run_spec_name: quac:model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/quac:model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.quac_scenario.QuACScenario
 - run_spec_name: quac:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/quac:model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.quac_scenario.QuACScenario
-- run_spec_name: raft:subset=ade_corpus_v2,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=ade_corpus_v2,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
 - run_spec_name: raft:subset=ade_corpus_v2,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=ade_corpus_v2,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
-- run_spec_name: raft:subset=banking_77,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=banking_77,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
 - run_spec_name: raft:subset=banking_77,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=banking_77,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
-- run_spec_name: raft:subset=neurips_impact_statement_risks,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=neurips_impact_statement_risks,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
 - run_spec_name: raft:subset=neurips_impact_statement_risks,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=neurips_impact_statement_risks,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
-- run_spec_name: raft:subset=one_stop_english,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=one_stop_english,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
 - run_spec_name: raft:subset=one_stop_english,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=one_stop_english,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
-- run_spec_name: raft:subset=overruling,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=overruling,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
 - run_spec_name: raft:subset=overruling,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=overruling,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
-- run_spec_name: raft:subset=semiconductor_org_types,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=semiconductor_org_types,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
 - run_spec_name: raft:subset=semiconductor_org_types,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=semiconductor_org_types,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
-- run_spec_name: raft:subset=systematic_review_inclusion,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=systematic_review_inclusion,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
 - run_spec_name: raft:subset=systematic_review_inclusion,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=systematic_review_inclusion,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
-- run_spec_name: raft:subset=tai_safety_research,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=tai_safety_research,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
 - run_spec_name: raft:subset=tai_safety_research,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=tai_safety_research,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
-- run_spec_name: raft:subset=terms_of_service,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=terms_of_service,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
 - run_spec_name: raft:subset=terms_of_service,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=terms_of_service,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
-- run_spec_name: raft:subset=tweet_eval_hate,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=tweet_eval_hate,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
 - run_spec_name: raft:subset=tweet_eval_hate,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=tweet_eval_hate,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
-- run_spec_name: raft:subset=twitter_complaints,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=twitter_complaints,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
 - run_spec_name: raft:subset=twitter_complaints,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/raft:subset=twitter_complaints,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.raft_scenario.RAFTScenario
-- run_spec_name: synthetic_reasoning:mode=induction,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning:mode=induction,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.synthetic_reasoning_scenario.SyntheticReasoningScenario
 - run_spec_name: synthetic_reasoning:mode=induction,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning:mode=induction,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.synthetic_reasoning_scenario.SyntheticReasoningScenario
-- run_spec_name: synthetic_reasoning:mode=pattern_match,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning:mode=pattern_match,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.synthetic_reasoning_scenario.SyntheticReasoningScenario
 - run_spec_name: synthetic_reasoning:mode=pattern_match,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning:mode=pattern_match,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.synthetic_reasoning_scenario.SyntheticReasoningScenario
-- run_spec_name: synthetic_reasoning:mode=variable_substitution,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning:mode=variable_substitution,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.synthetic_reasoning_scenario.SyntheticReasoningScenario
 - run_spec_name: synthetic_reasoning:mode=variable_substitution,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning:mode=variable_substitution,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.synthetic_reasoning_scenario.SyntheticReasoningScenario
-- run_spec_name: synthetic_reasoning_natural:difficulty=easy,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning_natural:difficulty=easy,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.synthetic_reasoning_natural_scenario.SRNScenario
 - run_spec_name: synthetic_reasoning_natural:difficulty=easy,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning_natural:difficulty=easy,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.synthetic_reasoning_natural_scenario.SRNScenario
-- run_spec_name: synthetic_reasoning_natural:difficulty=hard,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning_natural:difficulty=hard,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.synthetic_reasoning_natural_scenario.SRNScenario
 - run_spec_name: synthetic_reasoning_natural:difficulty=hard,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning_natural:difficulty=hard,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.synthetic_reasoning_natural_scenario.SRNScenario
-- run_spec_name: truthful_qa:task=mc_single,method=multiple_choice_joint,model=eleutherai/pythia-6.9b,data_augmentation=canonical
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/truthful_qa:task=mc_single,method=multiple_choice_joint,model=eleutherai_pythia-6.9b,data_augmentation=canonical
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.truthful_qa_scenario.TruthfulQAScenario
 - run_spec_name: truthful_qa:task=mc_single,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/truthful_qa:task=mc_single,method=multiple_choice_joint,model=lmsys_vicuna-7b-v1.3,data_augmentation=canonical
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.truthful_qa_scenario.TruthfulQAScenario
-- run_spec_name: wikifact:k=5,subject=author,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=author,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
 - run_spec_name: wikifact:k=5,subject=author,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=author,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
-- run_spec_name: wikifact:k=5,subject=currency,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=currency,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
 - run_spec_name: wikifact:k=5,subject=currency,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=currency,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
-- run_spec_name: wikifact:k=5,subject=discoverer_or_inventor,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=discoverer_or_inventor,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
 - run_spec_name: wikifact:k=5,subject=discoverer_or_inventor,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=discoverer_or_inventor,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
-- run_spec_name: wikifact:k=5,subject=instance_of,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=instance_of,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
 - run_spec_name: wikifact:k=5,subject=instance_of,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=instance_of,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
-- run_spec_name: wikifact:k=5,subject=medical_condition_treated,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=medical_condition_treated,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
 - run_spec_name: wikifact:k=5,subject=medical_condition_treated,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=medical_condition_treated,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
-- run_spec_name: wikifact:k=5,subject=part_of,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=part_of,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
 - run_spec_name: wikifact:k=5,subject=part_of,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=part_of,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
-- run_spec_name: wikifact:k=5,subject=place_of_birth,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=place_of_birth,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
 - run_spec_name: wikifact:k=5,subject=place_of_birth,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=place_of_birth,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
-- run_spec_name: wikifact:k=5,subject=plaintiff,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=plaintiff,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
 - run_spec_name: wikifact:k=5,subject=plaintiff,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=plaintiff,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
   scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
-- run_spec_name: wikifact:k=5,subject=position_held,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=position_held,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
-  scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
 - run_spec_name: wikifact:k=5,subject=position_held,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=position_held,model=lmsys_vicuna-7b-v1.3
   max_eval_instances:
   model: lmsys/vicuna-7b-v1.3
-  scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
-- run_spec_name: wikifact:k=5,subject=symptoms_and_signs,model=eleutherai/pythia-6.9b
-  run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=symptoms_and_signs,model=eleutherai_pythia-6.9b
-  max_eval_instances:
-  model: eleutherai/pythia-6.9b
   scenario_class: helm.benchmark.scenarios.wikifact_scenario.WIKIFactScenario
 - run_spec_name: wikifact:k=5,subject=symptoms_and_signs,model=lmsys/vicuna-7b-v1.3
   run_dir: /data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/wikifact:k=5,subject=symptoms_and_signs,model=lmsys_vicuna-7b-v1.3
@@ -1738,283 +1348,3 @@
   max_eval_instances:
   model: qwen/qwen2.5-72b-instruct-turbo
   scenario_class: helm.benchmark.scenarios.winogrande_afr_scenario.Winogrande_Afr_Scenario
-- run_spec_name: commonsense:dataset=openbookqa,method=multiple_choice_joint,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/commonsense:dataset=openbookqa,method=multiple_choice_joint,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.commonsense_scenario.OpenBookQA
-- run_spec_name: commonsense:dataset=openbookqa,method=multiple_choice_joint,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/commonsense:dataset=openbookqa,method=multiple_choice_joint,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.commonsense_scenario.OpenBookQA
-- run_spec_name: gsm:model=qwen/qwen2.5-72b-instruct-turbo,stop=none
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/gsm:model=qwen_qwen2.5-72b-instruct-turbo,stop=none
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.gsm_scenario.GSM8KScenario
-- run_spec_name: gsm:model=qwen/qwen2.5-7b-instruct-turbo,stop=none
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/gsm:model=qwen_qwen2.5-7b-instruct-turbo,stop=none
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.gsm_scenario.GSM8KScenario
-- run_spec_name: legalbench:subset=abercrombie,model=qwen/qwen2.5-72b-instruct-turbo,stop=none
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/legalbench:subset=abercrombie,model=qwen_qwen2.5-72b-instruct-turbo,stop=none
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.legalbench_scenario.LegalBenchScenario
-- run_spec_name: legalbench:subset=abercrombie,model=qwen/qwen2.5-7b-instruct-turbo,stop=none
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/legalbench:subset=abercrombie,model=qwen_qwen2.5-7b-instruct-turbo,stop=none
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.legalbench_scenario.LegalBenchScenario
-- run_spec_name: legalbench:subset=corporate_lobbying,model=qwen/qwen2.5-72b-instruct-turbo,stop=none
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/legalbench:subset=corporate_lobbying,model=qwen_qwen2.5-72b-instruct-turbo,stop=none
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.legalbench_scenario.LegalBenchScenario
-- run_spec_name: legalbench:subset=corporate_lobbying,model=qwen/qwen2.5-7b-instruct-turbo,stop=none
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/legalbench:subset=corporate_lobbying,model=qwen_qwen2.5-7b-instruct-turbo,stop=none
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.legalbench_scenario.LegalBenchScenario
-- run_spec_name: legalbench:subset=function_of_decision_section,model=qwen/qwen2.5-72b-instruct-turbo,stop=none
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/legalbench:subset=function_of_decision_section,model=qwen_qwen2.5-72b-instruct-turbo,stop=none
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.legalbench_scenario.LegalBenchScenario
-- run_spec_name: legalbench:subset=function_of_decision_section,model=qwen/qwen2.5-7b-instruct-turbo,stop=none
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/legalbench:subset=function_of_decision_section,model=qwen_qwen2.5-7b-instruct-turbo,stop=none
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.legalbench_scenario.LegalBenchScenario
-- run_spec_name: legalbench:subset=international_citizenship_questions,model=qwen/qwen2.5-72b-instruct-turbo,stop=none
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/legalbench:subset=international_citizenship_questions,model=qwen_qwen2.5-72b-instruct-turbo,stop=none
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.legalbench_scenario.LegalBenchScenario
-- run_spec_name: legalbench:subset=international_citizenship_questions,model=qwen/qwen2.5-7b-instruct-turbo,stop=none
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/legalbench:subset=international_citizenship_questions,model=qwen_qwen2.5-7b-instruct-turbo,stop=none
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.legalbench_scenario.LegalBenchScenario
-- run_spec_name: legalbench:subset=proa,model=qwen/qwen2.5-72b-instruct-turbo,stop=none
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/legalbench:subset=proa,model=qwen_qwen2.5-72b-instruct-turbo,stop=none
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.legalbench_scenario.LegalBenchScenario
-- run_spec_name: legalbench:subset=proa,model=qwen/qwen2.5-7b-instruct-turbo,stop=none
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/legalbench:subset=proa,model=qwen_qwen2.5-7b-instruct-turbo,stop=none
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.legalbench_scenario.LegalBenchScenario
-- run_spec_name: math:subject=algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=counting_and_probability,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=counting_and_probability,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=counting_and_probability,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=counting_and_probability,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=geometry,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=geometry,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=geometry,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=geometry,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=intermediate_algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=intermediate_algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=intermediate_algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=intermediate_algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=number_theory,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=number_theory,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=number_theory,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=number_theory,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=prealgebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=prealgebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=prealgebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=prealgebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=precalculus,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=precalculus,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: math:subject=precalculus,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/math:subject=precalculus,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.math_scenario.MATHScenario
-- run_spec_name: med_qa:model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/med_qa:model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.med_qa_scenario.MedQAScenario
-- run_spec_name: med_qa:model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/med_qa:model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.med_qa_scenario.MedQAScenario
-- run_spec_name: mmlu:subject=abstract_algebra,method=multiple_choice_joint,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/mmlu:subject=abstract_algebra,method=multiple_choice_joint,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: mmlu:subject=abstract_algebra,method=multiple_choice_joint,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/mmlu:subject=abstract_algebra,method=multiple_choice_joint,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: mmlu:subject=college_chemistry,method=multiple_choice_joint,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/mmlu:subject=college_chemistry,method=multiple_choice_joint,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: mmlu:subject=college_chemistry,method=multiple_choice_joint,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/mmlu:subject=college_chemistry,method=multiple_choice_joint,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: mmlu:subject=computer_security,method=multiple_choice_joint,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/mmlu:subject=computer_security,method=multiple_choice_joint,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: mmlu:subject=computer_security,method=multiple_choice_joint,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/mmlu:subject=computer_security,method=multiple_choice_joint,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: mmlu:subject=econometrics,method=multiple_choice_joint,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/mmlu:subject=econometrics,method=multiple_choice_joint,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: mmlu:subject=econometrics,method=multiple_choice_joint,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/mmlu:subject=econometrics,method=multiple_choice_joint,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.mmlu_scenario.MMLUScenario
-- run_spec_name: narrative_qa:model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/narrative_qa:model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.narrativeqa_scenario.NarrativeQAScenario
-- run_spec_name: narrative_qa:model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/narrative_qa:model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.narrativeqa_scenario.NarrativeQAScenario
-- run_spec_name: natural_qa:mode=closedbook,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/natural_qa:mode=closedbook,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.natural_qa_scenario.NaturalQAScenario
-- run_spec_name: natural_qa:mode=closedbook,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/natural_qa:mode=closedbook,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.natural_qa_scenario.NaturalQAScenario
-- run_spec_name: natural_qa:mode=openbook_longans,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/natural_qa:mode=openbook_longans,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.natural_qa_scenario.NaturalQAScenario
-- run_spec_name: natural_qa:mode=openbook_longans,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/natural_qa:mode=openbook_longans,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.natural_qa_scenario.NaturalQAScenario
-- run_spec_name: wmt_14:language_pair=cs-en,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/wmt_14:language_pair=cs-en,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.wmt_14_scenario.WMT14Scenario
-- run_spec_name: wmt_14:language_pair=cs-en,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/wmt_14:language_pair=cs-en,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.wmt_14_scenario.WMT14Scenario
-- run_spec_name: wmt_14:language_pair=de-en,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/wmt_14:language_pair=de-en,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.wmt_14_scenario.WMT14Scenario
-- run_spec_name: wmt_14:language_pair=de-en,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/wmt_14:language_pair=de-en,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.wmt_14_scenario.WMT14Scenario
-- run_spec_name: wmt_14:language_pair=fr-en,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/wmt_14:language_pair=fr-en,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.wmt_14_scenario.WMT14Scenario
-- run_spec_name: wmt_14:language_pair=fr-en,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/wmt_14:language_pair=fr-en,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.wmt_14_scenario.WMT14Scenario
-- run_spec_name: wmt_14:language_pair=hi-en,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/wmt_14:language_pair=hi-en,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.wmt_14_scenario.WMT14Scenario
-- run_spec_name: wmt_14:language_pair=hi-en,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/wmt_14:language_pair=hi-en,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.wmt_14_scenario.WMT14Scenario
-- run_spec_name: wmt_14:language_pair=ru-en,model=qwen/qwen2.5-72b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/wmt_14:language_pair=ru-en,model=qwen_qwen2.5-72b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-72b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.wmt_14_scenario.WMT14Scenario
-- run_spec_name: wmt_14:language_pair=ru-en,model=qwen/qwen2.5-7b-instruct-turbo
-  run_dir: /data/crfm-helm-public/tmp/lite/benchmark_output/runs/v1.9.0/wmt_14:language_pair=ru-en,model=qwen_qwen2.5-7b-instruct-turbo
-  max_eval_instances:
-  model: qwen/qwen2.5-7b-instruct-turbo
-  scenario_class: helm.benchmark.scenarios.wmt_14_scenario.WMT14Scenario

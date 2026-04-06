@@ -349,8 +349,13 @@ class CompileHelmReproListConfig(scfg.DataConfig):
                         for _ in range(n_runs):
                             sankey_rows.append({'filter_reason': reason, 'outcome': 'excluded'})
 
+            # Create subdirectories for artifacts
+            interactive_dpath = report_dpath / 'interactive'
+            static_dpath = report_dpath / 'static'
+            machine_dpath = report_dpath / 'machine'
+
             # Emit sankey artifacts
-            emit_sankey_artifacts(
+            sankey_result = emit_sankey_artifacts(
                 rows=sankey_rows,
                 report_dpath=report_dpath,
                 stamp=__import__('datetime').datetime.now(__import__('datetime').UTC).strftime('%Y%m%dT%H%M%SZ'),
@@ -372,7 +377,16 @@ class CompileHelmReproListConfig(scfg.DataConfig):
                     ],
                 },
                 stage_order=[('filter_reason', 'Exclusion Criterion'), ('outcome', 'Outcome')],
+                machine_dpath=machine_dpath,
+                interactive_dpath=interactive_dpath,
+                static_dpath=static_dpath,
             )
+            if sankey_result.get('plotly_error'):
+                logger.warning('Sankey rendering error: {}', sankey_result.get('plotly_error'))
+            if sankey_result.get('html'):
+                logger.info('Wrote sankey HTML: {}', sankey_result.get('html'))
+            if sankey_result.get('jpg'):
+                logger.info('Wrote sankey JPG: {}', sankey_result.get('jpg'))
 
             # Write text report
             text_lines = ['Model Selection Filter Report', '']
@@ -395,9 +409,10 @@ class CompileHelmReproListConfig(scfg.DataConfig):
             for reason in sorted(filter_counts.keys()):
                 text_lines.append(f'  {reason}: {filter_counts[reason]} runs')
 
-            report_txt_fpath = report_dpath / 'model_filter_report.txt'
+            static_dpath.mkdir(parents=True, exist_ok=True)
+            report_txt_fpath = static_dpath / 'model_filter_report.txt'
             report_txt_fpath.write_text('\n'.join(text_lines) + '\n')
-            logger.success('Wrote filter report: {}', report_dpath)
+            logger.success('Wrote filter report to: {}', report_dpath)
 
         if config.out_detail_fpath:
             text = kwutil.Yaml.dumps(chosen_rows)
