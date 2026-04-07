@@ -6,6 +6,7 @@ import datetime as datetime_mod
 import json
 import os
 import resource
+import shlex
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -13,12 +14,13 @@ from typing import Any
 
 import kwutil
 
-from helm_audit.infra.api import audit_root, default_index_root
+from helm_audit.infra.api import audit_root, default_index_root, default_store_root
 from helm_audit.infra.plotly_env import configure_plotly_chrome
 from helm_audit.infra.fs_publish import stamped_history_dir, symlink_to, write_latest_alias
 from helm_audit.infra.report_layout import aggregate_summary_reports_root, core_run_reports_root
 from helm_audit.utils.numeric import nested_get
 from helm_audit.utils.sankey import emit_sankey_artifacts
+from helm_audit.utils import sankey_builder
 
 from loguru import logger
 
@@ -92,6 +94,32 @@ def _is_truthy_text(value: Any) -> bool:
     return _normalize_text(value) in {"true", "1", "yes"}
 
 
+def _coerce_float(value: Any) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float("-inf")
+
+
+def _default_filter_inventory_json() -> Path:
+    return default_store_root() / "analysis" / "filter_inventory.json"
+
+
+def _load_filter_inventory_rows(filter_inventory_json: Path | None) -> list[dict[str, Any]]:
+    path = filter_inventory_json if filter_inventory_json is not None else _default_filter_inventory_json()
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text())
+    except Exception:
+        logger.warning(f"Unable to load filter inventory: {path}")
+        return []
+    if not isinstance(payload, list):
+        logger.warning(f"Filter inventory is not a list: {path}")
+        return []
+    return [row for row in payload if isinstance(row, dict)]
+
+
 def _bucket_agreement(agree_ratio: float | None) -> str:
     if agree_ratio is None:
         return "not_analyzed"
@@ -104,6 +132,440 @@ def _bucket_agreement(agree_ratio: float | None) -> str:
     if agree_ratio > 0.0:
         return "low_agreement_0.00+"
     return "zero_agreement"
+
+
+FILTER_SELECTION_EXCLUDED_LABEL = "not selected for attempted runs"
+FILTER_SELECTION_SELECTED_LABEL = "selected for attempted runs"
+ATTEMPTED_LABEL = "attempted run"
+NOT_ATTEMPTED_LABEL = "selected but not attempted"
+
+
+def _primary_filter_reason(row: dict[str, Any]) -> str:
+    reasons = [str(r) for r in (row.get("failure_reasons") or []) if str(r)]
+    if row.get("selection_status") == "selected":
+        return "selected"
+    if row.get("is_structurally_incomplete"):
+        return "structurally_incomplete"
+    if reasons:
+        return reasons[0]
+    return "excluded_unknown"
+
+
+def _classify_filter_pool(row: dict[str, Any]) -> str:
+    if row.get("is_structurally_incomplete"):
+        return "structurally_incomplete"
+    return str(row.get("candidate_pool") or "unknown_pool")
+
+
+def _classify_filter_outcome(row: dict[str, Any]) -> str:
+    if row.get("selection_status") == "selected":
+        return "selected_for_attempt"
+    return f"excluded::{_primary_filter_reason(row)}"
+
+
+def _group_scope_rows_by_run_entry(scope_rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in scope_rows:
+        run_entry = str(row.get("run_entry") or "").strip()
+        if run_entry:
+            grouped[run_entry].append(row)
+    return grouped
+
+
+def _group_repro_rows_by_run_entry(repro_rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in repro_rows:
+        run_entry = str(row.get("run_entry") or "").strip()
+        if run_entry:
+            grouped[run_entry].append(row)
+    return grouped
+
+
+def _classify_execution_stage(scope_rows_for_entry: list[dict[str, Any]]) -> str:
+    if not scope_rows_for_entry:
+        return "not_run_in_scope"
+    if any(_is_truthy_text(row.get("has_run_spec")) for row in scope_rows_for_entry):
+        return "completed_with_run_artifacts"
+    statuses = {_normalize_text(row.get("status")) for row in scope_rows_for_entry}
+    if statuses & {"running", "queued"}:
+        return "attempted_not_finished"
+    return "attempted_failed_or_incomplete"
+
+
+def _classify_analysis_stage(
+    row: dict[str, Any],
+    scope_rows_for_entry: list[dict[str, Any]],
+    repro_rows_for_entry: list[dict[str, Any]],
+) -> str:
+    if row.get("selection_status") != "selected":
+        return "stopped_after_filter"
+    execution_stage = _classify_execution_stage(scope_rows_for_entry)
+    if execution_stage != "completed_with_run_artifacts":
+        return execution_stage
+    if repro_rows_for_entry:
+        return "analyzed"
+    return "completed_not_yet_analyzed"
+
+
+def _choose_repro_row_for_run_entry(
+    repro_rows_for_entry: list[dict[str, Any]],
+    scope_rows_by_key: dict[tuple[str, str], list[dict[str, Any]]],
+) -> dict[str, Any] | None:
+    if not repro_rows_for_entry:
+        return None
+    decorated = []
+    for row in repro_rows_for_entry:
+        key = (str(row.get("experiment_name") or ""), str(row.get("run_entry") or ""))
+        matching_scope_rows = scope_rows_by_key.get(key, [])
+        manifest_ts = max((_coerce_float(item.get("manifest_timestamp")) for item in matching_scope_rows), default=float("-inf"))
+        decorated.append((manifest_ts, str(row.get("experiment_name") or ""), row))
+    decorated.sort(reverse=True)
+    return decorated[0][2]
+
+
+def _classify_reproduction_stage(
+    row: dict[str, Any],
+    scope_rows_for_entry: list[dict[str, Any]],
+    repro_rows_for_entry: list[dict[str, Any]],
+    *,
+    tol_key: str,
+    scope_rows_by_key: dict[tuple[str, str], list[dict[str, Any]]],
+) -> str:
+    if row.get("selection_status") != "selected":
+        return "stopped_after_filter"
+    execution_stage = _classify_execution_stage(scope_rows_for_entry)
+    if execution_stage != "completed_with_run_artifacts":
+        return execution_stage
+    repro_row = _choose_repro_row_for_run_entry(repro_rows_for_entry, scope_rows_by_key)
+    if repro_row is None:
+        return "not_analyzed_yet"
+    return _bucket_agreement(repro_row.get(tol_key))
+
+
+def _build_end_to_end_funnel_rows(
+    filter_inventory_rows: list[dict[str, Any]],
+    scope_rows: list[dict[str, Any]],
+    repro_rows: list[dict[str, Any]],
+    *,
+    tol_key: str,
+) -> list[dict[str, str]]:
+    scope_rows_by_run_entry = _group_scope_rows_by_run_entry(scope_rows)
+    repro_rows_by_run_entry = _group_repro_rows_by_run_entry(repro_rows)
+    scope_rows_by_key: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in scope_rows:
+        key = (str(row.get("experiment_name") or ""), str(row.get("run_entry") or ""))
+        scope_rows_by_key[key].append(row)
+
+    sankey_rows = []
+    for row in filter_inventory_rows:
+        run_entry = str(row.get("run_spec_name") or "")
+        scope_rows_for_entry = scope_rows_by_run_entry.get(run_entry, [])
+        repro_rows_for_entry = repro_rows_by_run_entry.get(run_entry, [])
+        reasons = {str(r) for r in (row.get("failure_reasons") or []) if str(r)}
+        flow: dict[str, str] = {}
+        if row.get("is_structurally_incomplete"):
+            flow["structural_gate"] = "excluded: structurally incomplete"
+            sankey_rows.append(flow)
+            continue
+        flow["structural_gate"] = "kept: structurally complete"
+        if "not-open-access" in reasons:
+            flow["open_weight_gate"] = "excluded: not open weight"
+            sankey_rows.append(flow)
+            continue
+        flow["open_weight_gate"] = "kept: open weight"
+        if ("excluded-tags" in reasons) or ("not-text-like" in reasons):
+            flow["tag_gate"] = "excluded: unsuitable text/modality tags"
+            sankey_rows.append(flow)
+            continue
+        flow["tag_gate"] = "kept: suitable text tags"
+        if "no-hf-deployment" in reasons:
+            flow["deployment_gate"] = "excluded: no runnable local deployment"
+            sankey_rows.append(flow)
+            continue
+        flow["deployment_gate"] = "kept: runnable local deployment"
+        if "too-large" in reasons:
+            flow["size_gate"] = "excluded: exceeds size budget"
+            sankey_rows.append(flow)
+            continue
+        flow["size_gate"] = "kept: within size budget"
+        if row.get("selection_status") != "selected":
+            flow["selection_gate"] = FILTER_SELECTION_EXCLUDED_LABEL
+            sankey_rows.append(flow)
+            continue
+        flow["selection_gate"] = FILTER_SELECTION_SELECTED_LABEL
+        execution_stage = _classify_execution_stage(scope_rows_for_entry)
+        flow["execution_stage"] = execution_stage
+        if execution_stage != "completed_with_run_artifacts":
+            sankey_rows.append(flow)
+            continue
+        repro_row = _choose_repro_row_for_run_entry(repro_rows_for_entry, scope_rows_by_key)
+        if repro_row is None:
+            flow["analysis_stage"] = "completed_not_yet_analyzed"
+            sankey_rows.append(flow)
+            continue
+        flow["analysis_stage"] = "analyzed"
+        flow["reproduction_stage"] = _bucket_agreement(repro_row.get(tol_key))
+        sankey_rows.append(flow)
+    return sankey_rows
+
+
+def _build_filter_to_attempt_rows(
+    filter_inventory_rows: list[dict[str, Any]],
+    scope_rows: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    scope_rows_by_run_entry = _group_scope_rows_by_run_entry(scope_rows)
+    sankey_rows = []
+    for row in filter_inventory_rows:
+        run_entry = str(row.get("run_spec_name") or "")
+        scope_rows_for_entry = scope_rows_by_run_entry.get(run_entry, [])
+        reasons = {str(r) for r in (row.get("failure_reasons") or []) if str(r)}
+        flow: dict[str, str] = {}
+        if row.get("is_structurally_incomplete"):
+            flow["structural_gate"] = "excluded: structurally incomplete"
+            sankey_rows.append(flow)
+            continue
+        flow["structural_gate"] = "kept: structurally complete"
+        if "not-open-access" in reasons:
+            flow["open_weight_gate"] = "excluded: not open weight"
+            sankey_rows.append(flow)
+            continue
+        flow["open_weight_gate"] = "kept: open weight"
+        if ("excluded-tags" in reasons) or ("not-text-like" in reasons):
+            flow["tag_gate"] = "excluded: unsuitable text/modality tags"
+            sankey_rows.append(flow)
+            continue
+        flow["tag_gate"] = "kept: suitable text tags"
+        if "no-hf-deployment" in reasons:
+            flow["deployment_gate"] = "excluded: no runnable local deployment"
+            sankey_rows.append(flow)
+            continue
+        flow["deployment_gate"] = "kept: runnable local deployment"
+        if "too-large" in reasons:
+            flow["size_gate"] = "excluded: exceeds size budget"
+            sankey_rows.append(flow)
+            continue
+        flow["size_gate"] = "kept: within size budget"
+        if row.get("selection_status") != "selected":
+            flow["selection_gate"] = FILTER_SELECTION_EXCLUDED_LABEL
+            sankey_rows.append(flow)
+            continue
+        flow["selection_gate"] = FILTER_SELECTION_SELECTED_LABEL
+        execution_stage = _classify_execution_stage(scope_rows_for_entry)
+        flow["attempt_stage"] = ATTEMPTED_LABEL if execution_stage != "not_run_in_scope" else NOT_ATTEMPTED_LABEL
+        sankey_rows.append(flow)
+    return sankey_rows
+
+
+def _build_attempted_to_repro_rows(
+    filter_inventory_rows: list[dict[str, Any]],
+    scope_rows: list[dict[str, Any]],
+    repro_rows: list[dict[str, Any]],
+    *,
+    tol_key: str,
+) -> list[dict[str, str]]:
+    scope_rows_by_run_entry = _group_scope_rows_by_run_entry(scope_rows)
+    repro_rows_by_run_entry = _group_repro_rows_by_run_entry(repro_rows)
+    scope_rows_by_key: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in scope_rows:
+        key = (str(row.get("experiment_name") or ""), str(row.get("run_entry") or ""))
+        scope_rows_by_key[key].append(row)
+
+    sankey_rows = []
+    for row in filter_inventory_rows:
+        if row.get("selection_status") != "selected":
+            continue
+        run_entry = str(row.get("run_spec_name") or "")
+        scope_rows_for_entry = scope_rows_by_run_entry.get(run_entry, [])
+        execution_stage = _classify_execution_stage(scope_rows_for_entry)
+        if execution_stage == "not_run_in_scope":
+            continue
+        repro_rows_for_entry = repro_rows_by_run_entry.get(run_entry, [])
+        flow: dict[str, str] = {"execution_stage": execution_stage}
+        if execution_stage != "completed_with_run_artifacts":
+            sankey_rows.append(flow)
+            continue
+        repro_row = _choose_repro_row_for_run_entry(repro_rows_for_entry, scope_rows_by_key)
+        if repro_row is None:
+            flow["analysis_stage"] = "completed_not_yet_analyzed"
+            sankey_rows.append(flow)
+            continue
+        flow["analysis_stage"] = "analyzed"
+        flow["reproduction_stage"] = _bucket_agreement(repro_row.get(tol_key))
+        sankey_rows.append(flow)
+    return sankey_rows
+
+
+def _build_filter_to_attempt_root() -> tuple[sankey_builder.Root, list[str], dict[str, list[str]]]:
+    root = sankey_builder.Root(label="All discovered historic HELM runs")
+    structural = root.group(by="structural_gate", name="Structural Gate")
+    structural["excluded: structurally incomplete"].connect(None)
+    open_weight = structural["kept: structurally complete"].group(by="open_weight_gate", name="Open-Weight Gate")
+    open_weight["excluded: not open weight"].connect(None)
+    tag = open_weight["kept: open weight"].group(by="tag_gate", name="Tag Gate")
+    tag["excluded: unsuitable text/modality tags"].connect(None)
+    deployment = tag["kept: suitable text tags"].group(by="deployment_gate", name="Deployment Gate")
+    deployment["excluded: no runnable local deployment"].connect(None)
+    size = deployment["kept: runnable local deployment"].group(by="size_gate", name="Size Gate")
+    size["excluded: exceeds size budget"].connect(None)
+    selection = size["kept: within size budget"].connect(
+        sankey_builder.Group(name="Selection", by="selection_gate")
+    )
+    assert isinstance(selection, sankey_builder.Group)
+    selection[FILTER_SELECTION_EXCLUDED_LABEL].connect(None)
+    selection[FILTER_SELECTION_SELECTED_LABEL].group(by="attempt_stage", name="Attempt")
+
+    stage_names = [
+        "Structural Gate",
+        "Open-Weight Gate",
+        "Tag Gate",
+        "Deployment Gate",
+        "Size Gate",
+        "Selection",
+        "Attempt",
+    ]
+    stage_defs = {
+        "Structural Gate": [
+            "excluded: structurally incomplete",
+            "kept: structurally complete",
+        ],
+        "Open-Weight Gate": [
+            "excluded: not open weight",
+            "kept: open weight",
+        ],
+        "Tag Gate": [
+            "excluded: unsuitable text/modality tags",
+            "kept: suitable text tags",
+        ],
+        "Deployment Gate": [
+            "excluded: no runnable local deployment",
+            "kept: runnable local deployment",
+        ],
+        "Size Gate": [
+            "excluded: exceeds size budget",
+            "kept: within size budget",
+        ],
+        "Selection": [
+            FILTER_SELECTION_SELECTED_LABEL,
+            FILTER_SELECTION_EXCLUDED_LABEL,
+        ],
+        "Attempt": [
+            ATTEMPTED_LABEL,
+            NOT_ATTEMPTED_LABEL,
+        ],
+    }
+    return root, stage_names, stage_defs
+
+
+def _build_attempted_to_repro_root() -> tuple[sankey_builder.Root, list[str], dict[str, list[str]]]:
+    root = sankey_builder.Root(label="Attempted reproduction runs")
+    execution = root.group(by="execution_stage", name="Execution")
+    execution["attempted_not_finished"].connect(None)
+    execution["attempted_failed_or_incomplete"].connect(None)
+    analysis = execution["completed_with_run_artifacts"].group(by="analysis_stage", name="Analysis")
+    analysis["completed_not_yet_analyzed"].connect(None)
+    analysis["analyzed"].group(by="reproduction_stage", name="Reproduction")
+    stage_names = ["Execution", "Analysis", "Reproduction"]
+    stage_defs = {
+        "Execution": [
+            "attempted_not_finished",
+            "attempted_failed_or_incomplete",
+            "completed_with_run_artifacts",
+        ],
+        "Analysis": [
+            "completed_not_yet_analyzed",
+            "analyzed",
+        ],
+        "Reproduction": [
+            "exact_or_near_exact",
+            "high_agreement_0.95+",
+            "moderate_agreement_0.80+",
+            "low_agreement_0.00+",
+            "zero_agreement",
+        ],
+    }
+    return root, stage_names, stage_defs
+
+
+def _build_end_to_end_funnel_root() -> tuple[sankey_builder.Root, list[str], dict[str, list[str]]]:
+    root = sankey_builder.Root(label="All discovered historic HELM runs")
+    structural = root.group(by="structural_gate", name="Structural Gate")
+    structural["excluded: structurally incomplete"].connect(None)
+    open_weight = structural["kept: structurally complete"].group(by="open_weight_gate", name="Open-Weight Gate")
+    open_weight["excluded: not open weight"].connect(None)
+    tag = open_weight["kept: open weight"].group(by="tag_gate", name="Tag Gate")
+    tag["excluded: unsuitable text/modality tags"].connect(None)
+    deployment = tag["kept: suitable text tags"].group(by="deployment_gate", name="Deployment Gate")
+    deployment["excluded: no runnable local deployment"].connect(None)
+    size = deployment["kept: runnable local deployment"].group(by="size_gate", name="Size Gate")
+    size["excluded: exceeds size budget"].connect(None)
+    selection = size["kept: within size budget"].connect(
+        sankey_builder.Group(name="Selection", by="selection_gate")
+    )
+    assert isinstance(selection, sankey_builder.Group)
+    selection[FILTER_SELECTION_EXCLUDED_LABEL].connect(None)
+    execution = selection[FILTER_SELECTION_SELECTED_LABEL].group(by="execution_stage", name="Execution")
+    execution["not_run_in_scope"].connect(None)
+    execution["attempted_not_finished"].connect(None)
+    execution["attempted_failed_or_incomplete"].connect(None)
+    analysis = execution["completed_with_run_artifacts"].group(by="analysis_stage", name="Analysis")
+    analysis["completed_not_yet_analyzed"].connect(None)
+    analysis["analyzed"].group(by="reproduction_stage", name="Reproduction")
+
+    stage_names = [
+        "Structural Gate",
+        "Open-Weight Gate",
+        "Tag Gate",
+        "Deployment Gate",
+        "Size Gate",
+        "Selection",
+        "Execution",
+        "Analysis",
+        "Reproduction",
+    ]
+    stage_defs = {
+        "Structural Gate": [
+            "excluded: structurally incomplete",
+            "kept: structurally complete",
+        ],
+        "Open-Weight Gate": [
+            "excluded: not open weight",
+            "kept: open weight",
+        ],
+        "Tag Gate": [
+            "excluded: unsuitable text/modality tags",
+            "kept: suitable text tags",
+        ],
+        "Deployment Gate": [
+            "excluded: no runnable local deployment",
+            "kept: runnable local deployment",
+        ],
+        "Size Gate": [
+            "excluded: exceeds size budget",
+            "kept: within size budget",
+        ],
+        "Selection": [
+            FILTER_SELECTION_SELECTED_LABEL,
+            FILTER_SELECTION_EXCLUDED_LABEL,
+        ],
+        "Execution": [
+            "not_run_in_scope",
+            "attempted_not_finished",
+            "attempted_failed_or_incomplete",
+            "completed_with_run_artifacts",
+        ],
+        "Analysis": [
+            "completed_not_yet_analyzed",
+            "analyzed",
+        ],
+        "Reproduction": [
+            "exact_or_near_exact",
+            "high_agreement_0.95+",
+            "moderate_agreement_0.80+",
+            "low_agreement_0.00+",
+            "zero_agreement",
+        ],
+    }
+    return root, stage_names, stage_defs
 
 
 def _read_log_tail(job_dpath: Path, max_chars: int = 40000) -> str:
@@ -548,8 +1010,11 @@ def _build_high_level_readme(
             "",
             "  explore_execution_coverage:",
             "    1. open sankey_operational.latest.html to see the full pipeline: all runs → outcomes",
-            "    2. open sankey_repro_by_metric.latest.html for per-metric drift breakdown (run-level max delta)",
-            "    3. see benchmark_status.latest.html and coverage_matrix.latest.html for what subsets ran",
+            "    2. open sankey_filter_to_attempt.latest.html to see how Stage 1 filters narrow to the runs we attempted",
+            "    3. open sankey_attempted_to_repro.latest.html to follow attempted runs into analysis and reproduction",
+            "    4. open sankey_end_to_end.latest.html to connect filtering, execution, analysis, and reproduction in one view",
+            "    5. open sankey_repro_by_metric.latest.html for per-metric drift breakdown (run-level max delta)",
+            "    6. see benchmark_status.latest.html and coverage_matrix.latest.html for what subsets ran",
             "",
             "  understand_reproducibility:",
             "    1. open sankey_reproducibility.latest.html for analyzed runs at strict threshold (abs_tol=0)",
@@ -583,6 +1048,15 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
     level_002_static = level_002 / "static"
     for src_name in [
         "sankey_operational.latest.html",
+        "sankey_filter_to_attempt.latest.html",
+        "sankey_attempted_to_repro.latest.html",
+        "sankey_attempted_to_repro_tol001.latest.html",
+        "sankey_attempted_to_repro_tol010.latest.html",
+        "sankey_attempted_to_repro_tol050.latest.html",
+        "sankey_end_to_end.latest.html",
+        "sankey_end_to_end_tol001.latest.html",
+        "sankey_end_to_end_tol010.latest.html",
+        "sankey_end_to_end_tol050.latest.html",
         "sankey_reproducibility.latest.html",
         "sankey_repro_tol001.latest.html",
         "sankey_repro_tol010.latest.html",
@@ -601,6 +1075,24 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
     for src_name in [
         "sankey_operational.latest.jpg",
         "sankey_operational.latest.txt",
+        "sankey_filter_to_attempt.latest.jpg",
+        "sankey_filter_to_attempt.latest.txt",
+        "sankey_attempted_to_repro.latest.jpg",
+        "sankey_attempted_to_repro.latest.txt",
+        "sankey_attempted_to_repro_tol001.latest.jpg",
+        "sankey_attempted_to_repro_tol001.latest.txt",
+        "sankey_attempted_to_repro_tol010.latest.jpg",
+        "sankey_attempted_to_repro_tol010.latest.txt",
+        "sankey_attempted_to_repro_tol050.latest.jpg",
+        "sankey_attempted_to_repro_tol050.latest.txt",
+        "sankey_end_to_end.latest.jpg",
+        "sankey_end_to_end.latest.txt",
+        "sankey_end_to_end_tol001.latest.jpg",
+        "sankey_end_to_end_tol001.latest.txt",
+        "sankey_end_to_end_tol010.latest.jpg",
+        "sankey_end_to_end_tol010.latest.txt",
+        "sankey_end_to_end_tol050.latest.jpg",
+        "sankey_end_to_end_tol050.latest.txt",
         "sankey_reproducibility.latest.jpg",
         "sankey_reproducibility.latest.txt",
         "sankey_repro_tol001.latest.jpg",
@@ -639,6 +1131,9 @@ def _render_breakdown_scopes(
     *,
     enriched_rows: list[dict[str, Any]],
     all_repro_rows: list[dict[str, Any]],
+    filter_inventory_rows: list[dict[str, Any]],
+    filter_inventory_json: Path | None,
+    index_fpath: Path,
     breakdown_dims: list[str],
     level_002: Path,
     max_items_per_breakdown: int,
@@ -675,6 +1170,9 @@ def _render_breakdown_scopes(
                 scope_value=value,
                 scope_rows=child_rows,
                 repro_rows=child_repro,
+                filter_inventory_rows=filter_inventory_rows,
+                filter_inventory_json=filter_inventory_json,
+                index_fpath=index_fpath,
                 summary_root=child_root,
                 breakdown_dims=[],
                 max_items_per_breakdown=max_items_per_breakdown,
@@ -1311,12 +1809,18 @@ def _write_reproduce_sh(
     fpath: Path,
     scope_kind: str,
     scope_value: str | None,
+    index_path: Path | None = None,
+    filter_inventory_json: Path | None = None,
 ) -> None:
     repo_root = str(audit_root())
     python_exe = sys.executable
     cmd = f"PYTHONPATH={repo_root} {python_exe} -m helm_audit.workflows.build_reports_summary"
     if scope_kind not in ("all_results", None) and scope_value:
         cmd += f" --experiment-name {scope_value}"
+    if index_path is not None:
+        cmd += f" --index-fpath {shlex.quote(str(index_path))}"
+    if filter_inventory_json is not None:
+        cmd += f" --filter-inventory-json {shlex.quote(str(filter_inventory_json))}"
     lines = [
         "#!/usr/bin/env bash",
         "# Regenerate this summary report from the current index and analysis data.",
@@ -1336,6 +1840,9 @@ def _render_scope_summary(
     scope_value: str | None,
     scope_rows: list[dict[str, Any]],
     repro_rows: list[dict[str, Any]],
+    filter_inventory_rows: list[dict[str, Any]],
+    filter_inventory_json: Path | None,
+    index_fpath: Path,
     summary_root: Path,
     breakdown_dims: list[str],
     max_items_per_breakdown: int,
@@ -1453,6 +1960,58 @@ def _render_scope_summary(
     repro_tol010_rows = _build_repro_sankey_rows_at_tol(repro_rows, enriched_rows, "official_instance_agree_01")
     repro_tol050_rows = _build_repro_sankey_rows_at_tol(repro_rows, enriched_rows, "official_instance_agree_005")
     metric_sankey_rows = _expand_repro_rows_by_metric(repro_rows, enriched_rows)
+    filter_to_attempt_rows = _build_filter_to_attempt_rows(
+        filter_inventory_rows,
+        scope_rows,
+    )
+    attempted_to_repro_exact_rows = _build_attempted_to_repro_rows(
+        filter_inventory_rows,
+        scope_rows,
+        repro_rows,
+        tol_key="official_instance_agree_0",
+    )
+    attempted_to_repro_tol001_rows = _build_attempted_to_repro_rows(
+        filter_inventory_rows,
+        scope_rows,
+        repro_rows,
+        tol_key="official_instance_agree_001",
+    )
+    attempted_to_repro_tol010_rows = _build_attempted_to_repro_rows(
+        filter_inventory_rows,
+        scope_rows,
+        repro_rows,
+        tol_key="official_instance_agree_01",
+    )
+    attempted_to_repro_tol050_rows = _build_attempted_to_repro_rows(
+        filter_inventory_rows,
+        scope_rows,
+        repro_rows,
+        tol_key="official_instance_agree_005",
+    )
+    end_to_end_exact_rows = _build_end_to_end_funnel_rows(
+        filter_inventory_rows,
+        scope_rows,
+        repro_rows,
+        tol_key="official_instance_agree_0",
+    )
+    end_to_end_tol001_rows = _build_end_to_end_funnel_rows(
+        filter_inventory_rows,
+        scope_rows,
+        repro_rows,
+        tol_key="official_instance_agree_001",
+    )
+    end_to_end_tol010_rows = _build_end_to_end_funnel_rows(
+        filter_inventory_rows,
+        scope_rows,
+        repro_rows,
+        tol_key="official_instance_agree_01",
+    )
+    end_to_end_tol050_rows = _build_end_to_end_funnel_rows(
+        filter_inventory_rows,
+        scope_rows,
+        repro_rows,
+        tol_key="official_instance_agree_005",
+    )
 
     scope_title = _scope_label(scope_kind, scope_value)
     if include_visuals:
@@ -1589,6 +2148,135 @@ def _render_scope_summary(
             interactive_dpath=level_001_interactive,
             static_dpath=level_001_static,
         )
+        filter_to_attempt_root, filter_to_attempt_stage_names, filter_to_attempt_stage_defs = _build_filter_to_attempt_root()
+        filter_to_attempt_art = emit_sankey_artifacts(
+            rows=filter_to_attempt_rows,
+            report_dpath=level_001,
+            stamp=generated_utc,
+            kind="filter_to_attempt",
+            title=f"Filter Funnel to Attempted Runs: {scope_title}",
+            stage_defs=filter_to_attempt_stage_defs,
+            stage_order=[],
+            root=filter_to_attempt_root,
+            explicit_stage_names=filter_to_attempt_stage_names,
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        ) if filter_to_attempt_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
+        attempted_to_repro_root, attempted_to_repro_stage_names, attempted_to_repro_stage_defs = _build_attempted_to_repro_root()
+        attempted_to_repro_art = emit_sankey_artifacts(
+            rows=attempted_to_repro_exact_rows,
+            report_dpath=level_001,
+            stamp=generated_utc,
+            kind="attempted_to_repro",
+            title=f"Attempted Runs to Reproducibility at abs_tol=0: {scope_title}",
+            stage_defs=attempted_to_repro_stage_defs,
+            stage_order=[],
+            root=attempted_to_repro_root,
+            explicit_stage_names=attempted_to_repro_stage_names,
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        ) if attempted_to_repro_exact_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no attempted rows available"}
+        attempted_to_repro_tol001_art = emit_sankey_artifacts(
+            rows=attempted_to_repro_tol001_rows,
+            report_dpath=level_001,
+            stamp=generated_utc,
+            kind="attempted_to_repro_tol001",
+            title=f"Attempted Runs to Reproducibility at abs_tol=0.001: {scope_title}",
+            stage_defs=attempted_to_repro_stage_defs,
+            stage_order=[],
+            root=attempted_to_repro_root,
+            explicit_stage_names=attempted_to_repro_stage_names,
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        ) if attempted_to_repro_tol001_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no attempted rows available"}
+        attempted_to_repro_tol010_art = emit_sankey_artifacts(
+            rows=attempted_to_repro_tol010_rows,
+            report_dpath=level_001,
+            stamp=generated_utc,
+            kind="attempted_to_repro_tol010",
+            title=f"Attempted Runs to Reproducibility at abs_tol=0.010: {scope_title}",
+            stage_defs=attempted_to_repro_stage_defs,
+            stage_order=[],
+            root=attempted_to_repro_root,
+            explicit_stage_names=attempted_to_repro_stage_names,
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        ) if attempted_to_repro_tol010_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no attempted rows available"}
+        attempted_to_repro_tol050_art = emit_sankey_artifacts(
+            rows=attempted_to_repro_tol050_rows,
+            report_dpath=level_001,
+            stamp=generated_utc,
+            kind="attempted_to_repro_tol050",
+            title=f"Attempted Runs to Reproducibility at abs_tol=0.050: {scope_title}",
+            stage_defs=attempted_to_repro_stage_defs,
+            stage_order=[],
+            root=attempted_to_repro_root,
+            explicit_stage_names=attempted_to_repro_stage_names,
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        ) if attempted_to_repro_tol050_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no attempted rows available"}
+        end_to_end_root, end_to_end_stage_names, end_to_end_stage_defs = _build_end_to_end_funnel_root()
+        end_to_end_art = emit_sankey_artifacts(
+            rows=end_to_end_exact_rows,
+            report_dpath=level_001,
+            stamp=generated_utc,
+            kind="end_to_end",
+            title=f"End-to-End Coverage and Reproducibility at abs_tol=0: {scope_title}",
+            stage_defs=end_to_end_stage_defs,
+            stage_order=[],
+            root=end_to_end_root,
+            explicit_stage_names=end_to_end_stage_names,
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        ) if end_to_end_exact_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
+        end_to_end_tol001_art = emit_sankey_artifacts(
+            rows=end_to_end_tol001_rows,
+            report_dpath=level_001,
+            stamp=generated_utc,
+            kind="end_to_end_tol001",
+            title=f"End-to-End Coverage and Reproducibility at abs_tol=0.001: {scope_title}",
+            stage_defs=end_to_end_stage_defs,
+            stage_order=[],
+            root=end_to_end_root,
+            explicit_stage_names=end_to_end_stage_names,
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        ) if end_to_end_tol001_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
+        end_to_end_tol010_art = emit_sankey_artifacts(
+            rows=end_to_end_tol010_rows,
+            report_dpath=level_001,
+            stamp=generated_utc,
+            kind="end_to_end_tol010",
+            title=f"End-to-End Coverage and Reproducibility at abs_tol=0.010: {scope_title}",
+            stage_defs=end_to_end_stage_defs,
+            stage_order=[],
+            root=end_to_end_root,
+            explicit_stage_names=end_to_end_stage_names,
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        ) if end_to_end_tol010_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
+        end_to_end_tol050_art = emit_sankey_artifacts(
+            rows=end_to_end_tol050_rows,
+            report_dpath=level_001,
+            stamp=generated_utc,
+            kind="end_to_end_tol050",
+            title=f"End-to-End Coverage and Reproducibility at abs_tol=0.050: {scope_title}",
+            stage_defs=end_to_end_stage_defs,
+            stage_order=[],
+            root=end_to_end_root,
+            explicit_stage_names=end_to_end_stage_names,
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        ) if end_to_end_tol050_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
     else:
         operational_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
         repro_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
@@ -1596,6 +2284,15 @@ def _render_scope_summary(
         repro_tol010_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
         repro_tol050_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
         repro_metric_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
+        filter_to_attempt_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
+        attempted_to_repro_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
+        attempted_to_repro_tol001_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
+        attempted_to_repro_tol010_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
+        attempted_to_repro_tol050_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
+        end_to_end_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
+        end_to_end_tol001_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
+        end_to_end_tol010_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
+        end_to_end_tol050_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
 
     failure_table = _write_table_artifacts(failed_rows, level_001 / f"failure_runs_{generated_utc}", machine_dpath=level_001_machine, static_dpath=level_001_static)
     failure_reason_table = _write_table_artifacts(failure_reason_rows, level_001 / f"failure_reasons_{generated_utc}", machine_dpath=level_001_machine, static_dpath=level_001_static)
@@ -1754,6 +2451,15 @@ def _render_scope_summary(
         "n_analyzed": n_analyzed,
         "breakdown_dims": breakdown_dims,
         "operational_sankey": operational_art,
+        "filter_to_attempt_sankey": filter_to_attempt_art,
+        "attempted_to_repro_sankey": attempted_to_repro_art,
+        "attempted_to_repro_sankey_tol001": attempted_to_repro_tol001_art,
+        "attempted_to_repro_sankey_tol010": attempted_to_repro_tol010_art,
+        "attempted_to_repro_sankey_tol050": attempted_to_repro_tol050_art,
+        "end_to_end_sankey": end_to_end_art,
+        "end_to_end_sankey_tol001": end_to_end_tol001_art,
+        "end_to_end_sankey_tol010": end_to_end_tol010_art,
+        "end_to_end_sankey_tol050": end_to_end_tol050_art,
         "reproducibility_sankey": repro_art,
         "reproducibility_sankey_tol001": repro_tol001_art,
         "reproducibility_sankey_tol010": repro_tol010_art,
@@ -1770,7 +2476,13 @@ def _render_scope_summary(
     write_latest_alias(manifest_fpath, level_001_machine, "summary_manifest.latest.json")
 
     reproduce_sh_fpath = level_001 / f"reproduce_{generated_utc}.sh"
-    _write_reproduce_sh(reproduce_sh_fpath, scope_kind, scope_value)
+    _write_reproduce_sh(
+        reproduce_sh_fpath,
+        scope_kind,
+        scope_value,
+        index_path=index_fpath,
+        filter_inventory_json=filter_inventory_json,
+    )
     write_latest_alias(reproduce_sh_fpath, level_001, "reproduce.latest.sh")
     write_latest_alias(reproduce_sh_fpath, level_001, "reproduce.sh")
 
@@ -1787,6 +2499,9 @@ def _render_scope_summary(
         _render_breakdown_scopes(
             enriched_rows=enriched_rows,
             all_repro_rows=repro_rows,
+            filter_inventory_rows=filter_inventory_rows,
+            filter_inventory_json=filter_inventory_json,
+            index_fpath=index_fpath,
             breakdown_dims=breakdown_dims,
             level_002=level_002,
             max_items_per_breakdown=max_items_per_breakdown,
@@ -1800,6 +2515,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--experiment-name", default=None)
     parser.add_argument("--index-fpath", default=None)
     parser.add_argument("--index-dpath", default=str(default_index_root()))
+    parser.add_argument("--filter-inventory-json", default=None)
     parser.add_argument("--summary-root", default=str(aggregate_summary_reports_root()))
     parser.add_argument(
         "--breakdown-dims",
@@ -1814,7 +2530,13 @@ def main(argv: list[str] | None = None) -> None:
         if args.index_fpath
         else latest_index_csv(Path(args.index_dpath).expanduser().resolve())
     )
+    filter_inventory_json = (
+        Path(args.filter_inventory_json).expanduser().resolve()
+        if args.filter_inventory_json
+        else None
+    )
     rows = load_rows(index_fpath)
+    filter_inventory_rows = _load_filter_inventory_rows(filter_inventory_json)
     _raise_fd_limit()  # Note: this probably is not necessary, as fd limits are usually due to a VM issue.
     configure_plotly_chrome()
     all_repro_rows = _load_all_repro_rows()
@@ -1836,11 +2558,19 @@ def main(argv: list[str] | None = None) -> None:
         Path(args.summary_root).expanduser().resolve(),
         _scope_slug(scope_kind, scope_value),
     )
+    filter_inventory_path_for_repro = (
+        filter_inventory_json
+        if filter_inventory_json is not None
+        else (_default_filter_inventory_json() if _default_filter_inventory_json().exists() else None)
+    )
     _render_scope_summary(
         scope_kind=scope_kind,
         scope_value=scope_value,
         scope_rows=scope_rows,
         repro_rows=repro_rows,
+        filter_inventory_rows=filter_inventory_rows,
+        filter_inventory_json=filter_inventory_path_for_repro,
+        index_fpath=index_fpath,
         summary_root=scope_root,
         breakdown_dims=list(args.breakdown_dims),
         max_items_per_breakdown=args.max_items_per_breakdown,

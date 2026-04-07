@@ -10,3 +10,7 @@ I'm also looking into VLLM for running these local results, which HELM seems to 
 A challenge is going to be that VLLM doesn't seem to support switching models,
 you load one up at init time. So when running benchmarks we can only run
 batches of the same model. And then we need to switch out models.
+
+
+
+Would this repo be better if we converted the HELM results to every-eval-ever and then performed the aggregation logic over that format? 

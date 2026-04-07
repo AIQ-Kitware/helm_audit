@@ -21,6 +21,8 @@ def emit_sankey_artifacts(
     title: str,
     stage_defs: dict[str, list[str]],
     stage_order: list[tuple[str, str]],
+    root: sankey_builder.Root | None = None,
+    explicit_stage_names: list[str] | None = None,
     machine_dpath: Path | None = None,
     interactive_dpath: Path | None = None,
     static_dpath: Path | None = None,
@@ -32,15 +34,18 @@ def emit_sankey_artifacts(
     for d in {_machine, _interactive, _static}:
         d.mkdir(parents=True, exist_ok=True)
 
-    root = sankey_builder.Root(label=f"{title} n={len(rows)}")
-    node = root
-    stage_names: list[str] = []
-    for key, name in stage_order:
-        values = {row.get(key, None) for row in rows}
-        if len(values) <= 1:
-            continue
-        node = node.group(by=key, name=name)
-        stage_names.append(name)
+    if root is None:
+        root = sankey_builder.Root(label=f"{title} n={len(rows)}")
+        node = root
+        stage_names: list[str] = []
+        for key, name in stage_order:
+            values = {row.get(key, None) for row in rows}
+            if len(values) <= 1:
+                continue
+            node = node.group(by=key, name=name)
+            stage_names.append(name)
+    else:
+        stage_names = list(explicit_stage_names or [name for _, name in stage_order])
 
     graph = root.build_sankey(rows, label_fmt="{name}: {value}")
     graph_summary = graph.summarize(max_edges=300)

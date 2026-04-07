@@ -280,6 +280,86 @@ helm-audit-index \
 
 **Purpose:** Compare pairs of runs (e.g., official vs. local, repeat vs. local) and compute core metric agreement at multiple tolerance thresholds.
 
+If you already have run outputs under `/data/crfm-helm-audit` and want to rebuild the full reporting stack from existing data, the practical path is:
+1. rebuild the index in `$AUDIT_STORE_ROOT/indexes`
+2. rebuild experiment-level core reports with `helm-audit-analyze-experiment`
+3. rebuild the aggregate summary from those Stage 5 outputs
+
+### Analysis-Only Rebuild From Existing Data
+
+Use this when the benchmark runs already exist on disk and you want to regenerate the current analysis products without rerunning HELM:
+
+```bash
+export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
+export AUDIT_RESULTS_ROOT="${AUDIT_RESULTS_ROOT:-/data/crfm-helm-audit}"
+export EXPERIMENT_NAME="${EXPERIMENT_NAME:-audit-historic-grid}"
+
+helm-audit-index \
+  --results-root "$AUDIT_RESULTS_ROOT" \
+  --report-dpath "$AUDIT_STORE_ROOT/indexes"
+
+helm-audit-analyze-experiment \
+  --experiment-name "$EXPERIMENT_NAME" \
+  --index-dpath "$AUDIT_STORE_ROOT/indexes" \
+  --allow-single-repeat
+
+python -m helm_audit.workflows.build_reports_summary \
+  --experiment-name "$EXPERIMENT_NAME" \
+  --index-dpath "$AUDIT_STORE_ROOT/indexes" \
+  --filter-inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
+```
+
+That sequence rebuilds:
+- the latest timestamped index under `$AUDIT_STORE_ROOT/indexes/`
+- per-run core reports under `reports/core-run-analysis/experiment-analysis-<slug>/`
+- aggregate summary views under `reports/aggregate-summary/`
+
+### Analysis-Only Rebuild For Every Experiment In The Latest Index
+
+Use this when you want to rebuild Stage 5b for every experiment currently present in the latest index, then refresh the all-results aggregate summary:
+
+```bash
+export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
+export AUDIT_RESULTS_ROOT="${AUDIT_RESULTS_ROOT:-/data/crfm-helm-audit}"
+export PYTHON_BIN="${PYTHON_BIN:-/home/agent/.local/uv/envs/uvpy3.13.2/bin/python}"
+
+helm-audit-index \
+  --results-root "$AUDIT_RESULTS_ROOT" \
+  --report-dpath "$AUDIT_STORE_ROOT/indexes"
+
+LATEST_INDEX="$(
+  ls -1 "$AUDIT_STORE_ROOT"/indexes/audit_results_index_*.csv | sort | tail -n 1
+)"
+
+for EXPERIMENT_NAME in $(
+  "$PYTHON_BIN" - <<'PY'
+import csv
+import glob
+import os
+
+paths = sorted(glob.glob(os.path.join(os.environ["AUDIT_STORE_ROOT"], "indexes", "audit_results_index_*.csv")))
+latest = paths[-1]
+names = []
+with open(latest, newline="") as file:
+    for row in csv.DictReader(file):
+        name = (row.get("experiment_name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+print(" ".join(names))
+PY
+)
+do
+  helm-audit-analyze-experiment \
+    --experiment-name "$EXPERIMENT_NAME" \
+    --index-fpath "$LATEST_INDEX" \
+    --allow-single-repeat
+done
+
+python -m helm_audit.workflows.build_reports_summary \
+  --index-fpath "$LATEST_INDEX" \
+  --filter-inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
+```
+
 ### 5a. Rebuild/Analyze Core Metrics
 
 **Command:**
@@ -309,7 +389,8 @@ helm-audit-rebuild-core \
 export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 helm-audit-analyze-experiment \
   --experiment-name audit-historic-grid \
-  --index-dpath "$AUDIT_STORE_ROOT/indexes"
+  --index-dpath "$AUDIT_STORE_ROOT/indexes" \
+  --allow-single-repeat
 ```
 
 **Outputs:**
@@ -325,15 +406,20 @@ helm-audit-analyze-experiment \
 
 **Purpose:** Load all per-run reports, synthesize findings into operator-facing views, and generate publication-ready artifacts.
 
+This stage is safe to rerun while `helm-audit-analyze-experiment` is still in progress. It snapshots whatever Stage 5 reports currently exist on disk, so intermediate rebuilds are useful. Runs that have completed execution but are not yet analyzed will appear in the high-level summaries as `completed_not_yet_analyzed` or `not_analyzed_yet`, then move downstream on the next rebuild.
+
 **Command:**
 ```bash
 export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 python -m helm_audit.workflows.build_reports_summary \
-  --index-dpath "$AUDIT_STORE_ROOT/indexes"
+  --experiment-name audit-historic-grid \
+  --index-dpath "$AUDIT_STORE_ROOT/indexes" \
+  --filter-inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
 ```
 
 **Key Arguments:**
 - `--experiment-name`: optional drill-down for a single experiment; omit for the default `all-results` scope.
+- `--filter-inventory-json`: optional Stage 1 inventory used for the end-to-end Sankey family; defaults to `$AUDIT_STORE_ROOT/analysis/filter_inventory.json` when present.
 - `--summary-root`: override the aggregate report family root (default: `reports/aggregate-summary`).
 - `--breakdown-dims`: optional list of breakdown dimensions to materialize.
 
@@ -341,29 +427,39 @@ python -m helm_audit.workflows.build_reports_summary \
 
 1. **Load all reproducibility rows** from `reports/core-run-analysis/experiment-analysis-*/core-reports/*/core_metric_report.latest.json`
 2. **Build enriched rows** (job-level metadata + reproducibility status)
-3. **Emit six Sankey diagrams:**
+3. **Emit end-to-end Sankey diagrams** linking:
+   - all discovered historic HELM runs
+   - Stage 1 filter pool and final filter outcome
+   - execution coverage in the current scope
+   - analysis coverage
+   - reproducibility bucket at the chosen tolerance
+4. **Emit additional Sankey diagrams focused on execution and reproducibility only:**
    - `sankey_operational.{html,jpg}`: Full pipeline (group → lifecycle → outcome)
+   - `sankey_end_to_end.{html,jpg}`: Stage 1 filtering through exact-match reproducibility (`abs_tol=0`)
+   - `sankey_end_to_end_tol001.{html,jpg}`: same end-to-end flow at `abs_tol=0.001`
+   - `sankey_end_to_end_tol010.{html,jpg}`: same end-to-end flow at `abs_tol=0.01`
+   - `sankey_end_to_end_tol050.{html,jpg}`: same end-to-end flow at `abs_tol=0.05`
    - `sankey_reproducibility.{html,jpg}`: Analyzed jobs only, at `abs_tol=0` (exact match)
    - `sankey_repro_tol001.{html,jpg}`: at `abs_tol=0.001`
    - `sankey_repro_tol010.{html,jpg}`: at `abs_tol=0.01`
    - `sankey_repro_tol050.{html,jpg}`: at `abs_tol=0.05`
    - `sankey_repro_by_metric.{html,jpg}`: Per-metric drift breakdown (run-level max delta)
-4. **Emit four diagnostic plots:**
+5. **Emit four diagnostic plots:**
    - `benchmark_status.{html,jpg}`: Coverage by benchmark and analysis status
    - `reproducibility_buckets.{html,jpg}`: Distribution across agreement buckets
    - `agreement_curve.{html,jpg}`: Agreement ratio vs. tolerance (all runs)
    - `agreement_curve_per_metric.{html,jpg}`: Agreement per metric (NEW; one subplot per metric)
    - `coverage_matrix.{html,jpg}`: Model × Benchmark heatmap (best status across runs)
    - `failure_taxonomy.{html,jpg}`: Root-cause breakdown (hardware / data access / infra / unknown)
-5. **Generate breakdown dimensions** (5 default: experiment_name, model, benchmark, suite, machine_host)
+6. **Generate breakdown dimensions** (5 default: experiment_name, model, benchmark, suite, machine_host)
    - For each dimension value, create a subscope with tables only (no visuals)
    - Recursively nest: level_002 → breakdowns → by_<dim> → <value> → level_001 (tables) → level_002 (drill)
-6. **Write READMEs** with:
+7. **Write READMEs** with:
    - Executive summary (counts, key takeaways)
    - Artifact directory structure
    - Links to all plots and tables
-7. **Create symlinks** (`*.latest.*`) for easy access at scope root
-8. **Write `reproduce.latest.sh`** so aggregate views can be regenerated independently of rerunning experiments
+8. **Create symlinks** (`*.latest.*`) for easy access at scope root
+9. **Write `reproduce.latest.sh`** so aggregate views can be regenerated independently of rerunning experiments
 
 **Output Structure:**
 ```
@@ -401,7 +497,8 @@ Use this when you already have Stage 5 reports and want to iterate on directory 
 ```bash
 export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 PYTHONPATH=. python -m helm_audit.workflows.build_reports_summary \
-  --index-dpath "$AUDIT_STORE_ROOT/indexes"
+  --index-dpath "$AUDIT_STORE_ROOT/indexes" \
+  --filter-inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
 ```
 
 This step is independent of recomputing model executions. It only reads existing Stage 5 reports from `reports/core-run-analysis/experiment-analysis-*/`.
@@ -468,7 +565,8 @@ helm-audit-analyze-experiment \
 
 # Stage 6: Build aggregate reports
 python -m helm_audit.workflows.build_reports_summary \
-  --index-dpath "$AUDIT_STORE_ROOT/indexes"
+  --index-dpath "$AUDIT_STORE_ROOT/indexes" \
+  --filter-inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
 
 # Open reports
 firefox reports/aggregate-summary/all-results/README.latest.txt

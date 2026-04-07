@@ -27,7 +27,6 @@ def configure_plotly_chrome() -> Path | None:
             os.environ.setdefault("BROWSER_PATH", str(cand))
             os.environ.setdefault("PLOTLY_CHROME_PATH", str(cand))
             return cand
-    os.environ.setdefault("HELM_AUDIT_SKIP_STATIC_IMAGES", "1")
     return None
 
 
