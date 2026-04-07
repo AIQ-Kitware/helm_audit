@@ -7,8 +7,9 @@ This repo now treats the experiment as its own product:
 
 - `helm_audit/` is the package
 - `reproduce/` is the human-readable runbook layer
-- `configs/` holds checked-in manifests and overrides
-- `reports/` holds generated lightweight analysis artifacts
+- `configs/` holds checked-in manifests and overrides only
+- `/data/crfm-helm-audit-store` (or `$AUDIT_STORE_ROOT`) holds generated manifests, selection files, inventories, and indexes
+- `reports/` holds generated lightweight analysis artifacts we still want to browse in-repo
 
 ## Layout
 
@@ -71,6 +72,12 @@ Generated reports are converging on a family layout under [`reports/`](reports):
 - `reports/filtering/`
 - `reports/core-run-analysis/`
 - `reports/aggregate-summary/`
+
+Generated machine-readable workflow state now defaults to:
+- `$AUDIT_STORE_ROOT/configs/run_specs.yaml`
+- `$AUDIT_STORE_ROOT/configs/run_details.yaml`
+- `$AUDIT_STORE_ROOT/configs/manifests/`
+- `$AUDIT_STORE_ROOT/indexes/`
 
 ## Notes
 

@@ -12,6 +12,7 @@ class AuditEnv:
     aiq_python: str
     helm_precomputed_root: Path
     audit_results_root: Path
+    audit_store_root: Path
     default_max_eval_instances: int
     default_tmux_workers: int
 
@@ -33,6 +34,9 @@ def load_env() -> AuditEnv:
         audit_results_root=Path(
             os.environ.get("AUDIT_RESULTS_ROOT", "/data/crfm-helm-audit")
         ).expanduser().resolve(),
+        audit_store_root=Path(
+            os.environ.get("AUDIT_STORE_ROOT", "/data/crfm-helm-audit-store")
+        ).expanduser().resolve(),
         default_max_eval_instances=int(
             os.environ.get("AUDIT_DEFAULT_MAX_EVAL_INSTANCES", "100")
         ),
@@ -49,6 +53,7 @@ def env_defaults() -> dict[str, str]:
         "AIQ_PYTHON": env.aiq_python,
         "HELM_PRECOMPUTED_ROOT": str(env.helm_precomputed_root),
         "AUDIT_RESULTS_ROOT": str(env.audit_results_root),
+        "AUDIT_STORE_ROOT": str(env.audit_store_root),
         "AUDIT_DEFAULT_MAX_EVAL_INSTANCES": str(env.default_max_eval_instances),
         "AUDIT_DEFAULT_TMUX_WORKERS": str(env.default_tmux_workers),
     }

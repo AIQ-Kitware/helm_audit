@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from loguru import logger
 
 from helm_audit.reports.aggregate import _find_curve_value, _find_pair
-from helm_audit.infra.api import audit_root, default_report_root
+from helm_audit.infra.api import audit_root, default_index_root
 from helm_audit.utils.numeric import nested_get
 from helm_audit.infra.fs_publish import write_latest_alias
 from helm_audit.infra.report_layout import core_run_reports_root, write_reproduce_script
@@ -140,7 +141,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--experiment-name', required=True)
     parser.add_argument('--index-fpath', default=None)
-    parser.add_argument('--index-dpath', default=str(default_report_root() / 'indexes'))
+    parser.add_argument('--index-dpath', default=str(default_index_root()))
     parser.add_argument('--allow-single-repeat', action='store_true')
     args = parser.parse_args(argv)
 
@@ -311,6 +312,7 @@ def main(argv: list[str] | None = None) -> None:
         'rows': summary_rows,
     }
     json_fpath.write_text(json.dumps(payload, indent=2))
+    logger.debug(f'Write to: {json_fpath}')
     table.to_csv(csv_fpath, index=False)
 
     lines = []
@@ -379,6 +381,7 @@ def main(argv: list[str] | None = None) -> None:
         lines.append(f"    official_runlevel_p90: {row['official_runlevel_p90']}")
         lines.append(f"    official_runlevel_max: {row['official_runlevel_max']}")
     txt_fpath.write_text('\n'.join(lines) + '\n')
+    logger.debug(f'Write to: {txt_fpath}')
 
     write_latest_alias(json_fpath, out_dpath, 'experiment_summary.latest.json')
     write_latest_alias(csv_fpath, out_dpath, 'experiment_summary.latest.csv')

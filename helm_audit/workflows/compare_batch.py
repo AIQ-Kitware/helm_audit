@@ -24,6 +24,8 @@ from helm_audit.helm.run_entries import (
 from helm_audit.helm.diff import HelmRunDiff
 from helm_audit.utils.sankey import emit_sankey_artifacts
 
+from loguru import logger
+
 
 def parse_helm_run_dir(run_dir: str) -> dict[str, str]:
     p = ub.Path(run_dir)
@@ -483,6 +485,7 @@ def write_summary_text(
             lines.append(
                 f"  [{item.get('severity', 'info')}] {item.get('label')}: {item.get('summary')}"
             )
+    logger.debug(f'Write to: {out_fpath}')
     out_fpath.write_text("\n".join(lines) + "\n")
 
 
@@ -508,6 +511,8 @@ def write_management_summary(
     lines.append("Key findings:")
     for item in findings:
         lines.append(f"- [{item.get('severity', 'info').upper()}] {item.get('summary')}")
+
+    logger.debug(f'Write to: {out_fpath}')
     out_fpath.write_text("\n".join(lines) + "\n")
 
 

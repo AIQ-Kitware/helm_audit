@@ -6,7 +6,7 @@ from pathlib import Path
 
 import kwutil
 
-from helm_audit.infra.api import dump_yaml, env_defaults, repo_run_specs_fpath
+from helm_audit.infra.api import default_manifest_root, dump_yaml, env_defaults, repo_run_specs_fpath
 from helm_audit.manifests.models import ManifestSpec
 
 
@@ -46,7 +46,7 @@ def _build_manifest(
     missing = _validate_entries_exist(run_entries)
     if missing:
         raise RuntimeError(
-            "Manifest entries were not found in run_specs.yaml: "
+            f"Manifest entries were not found in {fpath}: "
             + kwutil.Json.dumps(missing)
         )
     return ManifestSpec(
@@ -182,7 +182,10 @@ def main(argv: list[str] | None = None) -> None:
         default="smoke",
         choices=["smoke", "apples", "single", "vicuna_nochat"],
     )
-    parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--output",
+        default=str(default_manifest_root() / "smoke_manifest.generated.yaml"),
+    )
     parser.add_argument("--experiment-name", default="audit-smoke")
     parser.add_argument("--suite", default="audit-smoke")
     parser.add_argument("--max-eval-instances", type=int, default=None)

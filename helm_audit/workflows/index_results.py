@@ -11,9 +11,10 @@ import kwutil
 import pandas as pd
 
 from helm_audit.compat.helm_outputs import HelmOutputs
-from helm_audit.infra.api import default_report_root, env_defaults
+from helm_audit.infra.api import default_index_root, env_defaults
 from helm_audit.helm.run_entries import parse_run_entry_description
 
+from loguru import logger
 
 def _safe_json_load(fpath: Path) -> dict[str, Any]:
     if not fpath.exists():
@@ -144,15 +145,17 @@ def _write_summary(rows: list[dict[str, Any]], out_fpath: Path) -> None:
     lines.append('model_counts:')
     for key, val in sorted(model_counts.items()):
         lines.append(f'  {key}: {val}')
+    logger.debug(f'Write to: {out_fpath}')
     out_fpath.write_text('\n'.join(lines) + '\n')
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--results-root', default=env_defaults()['AUDIT_RESULTS_ROOT'])
-    parser.add_argument('--report-dpath', default=str(default_report_root() / 'indexes'))
+    parser.add_argument('--report-dpath', default=str(default_index_root()))
     parser.add_argument('--fallback-host', default=None)
     args = parser.parse_args(argv)
+    logger.debug('Start index results')
 
     results_root = Path(args.results_root).expanduser().resolve()
     report_dpath = Path(args.report_dpath).expanduser().resolve()
@@ -160,6 +163,7 @@ def main(argv: list[str] | None = None) -> None:
     stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime('%Y%m%dT%H%M%SZ')
 
     rows = []
+    logger.debug(f'Globbing {results_root}')
     for job_config_fpath in sorted(results_root.rglob('job_config.json')):
         try:
             rows.append(_row_for_job(job_config_fpath, args.fallback_host))
@@ -175,7 +179,7 @@ def main(argv: list[str] | None = None) -> None:
     jsonl_fpath = report_dpath / f'audit_results_index_{stamp}.jsonl'
     csv_fpath = report_dpath / f'audit_results_index_{stamp}.csv'
     summary_fpath = report_dpath / f'audit_results_index_{stamp}.txt'
-
+    logger.debug(f'Writing to to: {jsonl_fpath}')
     with jsonl_fpath.open('w') as file:
         for row in rows:
             file.write(json.dumps(kwutil.Json.ensure_serializable(row)) + '\n')
@@ -192,9 +196,9 @@ def main(argv: list[str] | None = None) -> None:
     table.to_csv(csv_fpath, index=False)
     _write_summary(rows, summary_fpath)
 
-    print(f'Wrote jsonl index: {jsonl_fpath}')
-    print(f'Wrote csv index: {csv_fpath}')
-    print(f'Wrote summary: {summary_fpath}')
+    logger.info(f'Wrote jsonl index: {jsonl_fpath}')
+    logger.info(f'Wrote csv index: {csv_fpath}')
+    logger.info(f'Wrote summary: {summary_fpath}')
 
 
 if __name__ == '__main__':

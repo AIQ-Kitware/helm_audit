@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from helm_audit.infra.api import audit_root, default_report_root, env_defaults
+from helm_audit.infra.api import audit_root, default_index_root, env_defaults
 from helm_audit.infra.fs_publish import safe_unlink, symlink_to, write_latest_alias
 from helm_audit.infra.report_layout import core_run_reports_root, write_reproduce_script
 from helm_audit.reports import core_metrics, pair_samples
@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--run-entry', required=True)
     parser.add_argument('--index-fpath', default=None)
-    parser.add_argument('--index-dpath', default=str(default_report_root() / 'indexes'))
+    parser.add_argument('--index-dpath', default=str(default_index_root()))
     parser.add_argument('--precomputed-root', default=env_defaults()['HELM_PRECOMPUTED_ROOT'])
     parser.add_argument('--report-dpath', default=None)
     parser.add_argument('--left-label', default='kwdagger_repeat')

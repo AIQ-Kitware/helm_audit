@@ -13,16 +13,32 @@ def reports_root() -> Path:
     return repo_root() / "reports"
 
 
+def audit_store_root() -> Path:
+    return load_env().audit_store_root
+
+
 def configs_root() -> Path:
     return repo_root() / "configs"
 
 
+def generated_configs_root() -> Path:
+    return audit_store_root() / "configs"
+
+
+def generated_manifests_root() -> Path:
+    return generated_configs_root() / "manifests"
+
+
+def generated_indexes_root() -> Path:
+    return audit_store_root() / "indexes"
+
+
 def run_specs_fpath() -> Path:
-    return repo_root() / "run_specs.yaml"
+    return generated_configs_root() / "run_specs.yaml"
 
 
 def run_details_fpath() -> Path:
-    return repo_root() / "run_details.yaml"
+    return generated_configs_root() / "run_details.yaml"
 
 
 def experiment_result_dpath(experiment_name: str) -> Path:

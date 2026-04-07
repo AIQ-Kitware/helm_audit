@@ -12,9 +12,9 @@ Ignore:
 
     ls /data/crfm-helm-public/thaiexam/benchmark_output/runs/v1.1.0/thai_exam:exam=tpat1,method=multiple_choice_joint,model=aisingapore_llama3-8b-cpt-sea-lionv2.1-instruct
 
-    python -m helm_audit.cli.index_historic_helm_runs /data/crfm-helm-public --out_fpath run_specs.yaml --out_detail_fpath run_details.yaml --out_inventory_json filter_inventory.json
+    python -m helm_audit.cli.index_historic_helm_runs /data/crfm-helm-public --out_fpath /data/crfm-helm-audit-store/configs/run_specs.yaml --out_detail_fpath /data/crfm-helm-audit-store/configs/run_details.yaml --out_inventory_json /data/crfm-helm-audit-store/analysis/filter_inventory.json
 
-    cat run_specs.yaml | grep -v together > run_specs2.yaml
+    cat /data/crfm-helm-audit-store/configs/run_specs.yaml | grep -v together > run_specs2.yaml
 
     python ~/code/aiq-magnet/dev/poc/inspect_historic_helm_runs.py /data/Public/AIQ/crfm-helm-public/
 
@@ -55,6 +55,7 @@ import scriptconfig as scfg
 from loguru import logger
 
 from magnet.backends.helm.helm_outputs import HelmOutputs, HelmRun
+from helm_audit.infra.api import repo_run_details_fpath, repo_run_specs_fpath
 
 # Reuse your existing discovery + inference logic
 from magnet.backends.helm.cli.materialize_helm_run import (
@@ -97,13 +98,13 @@ class CompileHelmReproListConfig(scfg.DataConfig):
     )
 
     out_fpath = scfg.Value(
-        None,
-        help="Where to write output. If omitted, prints to stdout.",
+        str(repo_run_specs_fpath()),
+        help="Where to write selected run specs. Defaults to $AUDIT_STORE_ROOT/configs/run_specs.yaml.",
     )
 
     out_detail_fpath = scfg.Value(
-        None,
-        help="Where to write detailed output.",
+        str(repo_run_details_fpath()),
+        help="Where to write detailed rows. Defaults to $AUDIT_STORE_ROOT/configs/run_details.yaml.",
     )
 
     out_report_dpath = scfg.Value(
@@ -225,7 +226,7 @@ class CompileHelmReproListConfig(scfg.DataConfig):
             'qwen/qwen2-72b-instruct',
             'qwen/qwen2.5-72b-instruct-turbo',
         }
-        
+
         chosen_model_rows = []
         for r in model_rows:
             tags = set(r.get('tags', []))
@@ -344,18 +345,19 @@ class CompileHelmReproListConfig(scfg.DataConfig):
                     default=str,
                 ) + '\n'
             )
-            logger.success("Wrote {}", inventory_fpath)
+            logger.success("Wrote ⚙ {}", inventory_fpath)
 
         if config.out_detail_fpath:
             text = kwutil.Yaml.dumps(chosen_rows)
+            ub.Path(config.out_detail_fpath).parent.ensuredir()
             Path(config.out_detail_fpath).write_text(text)
-            logger.success("Wrote {}", config.out_detail_fpath)
+            logger.success("Wrote ⚙ {}", config.out_detail_fpath)
 
         run_spec_names = [r["run_spec_name"] for r in chosen_rows]
         text = kwutil.Yaml.dumps(run_spec_names)
         if config.out_fpath:
             Path(config.out_fpath).write_text(text)
-            logger.success("Wrote {}", config.out_fpath)
+            logger.success("Wrote ⚙ {}", config.out_fpath)
         else:
             print(text, end="")
 

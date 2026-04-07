@@ -9,9 +9,39 @@ This document covers the complete reproducibility audit pipeline: from discoveri
 
 ---
 
+## Storage Layout
+
+Generated artifacts are now split across two roots:
+
+```text
+/data/crfm-helm-audit-store/   ← canonical writable machine-readable store
+  configs/
+    run_specs.yaml
+    run_details.yaml
+    manifests/
+  indexes/
+  analysis/
+
+reports/                       ← repo-local browsable report surface
+  filtering/
+  core-run-analysis/
+  aggregate-summary/
+```
+
+Use `AUDIT_STORE_ROOT` to override `/data/crfm-helm-audit-store`. The intent is:
+- keep checked-in `configs/` for curated source-controlled inputs and overrides only
+- keep generated manifests, run selections, inventories, and indexes out of the repo
+- keep `reports/` in the repo because it is a convenient browsing surface
+
+Each report family keeps human-facing `*.latest.*` links in the visible directories and hides stamped history under `.history/`. Each generated report root should also contain:
+- `reproduce.latest.sh`: rerun the full computation that produced that report root
+- `rebuild_analysis.latest.sh` when the plotting/aggregation step can be rebuilt from saved machine-readable inputs without recomputing upstream work
+
+---
+
 ## Report Layout
 
-Generated artifacts now live under the repo-level `reports/` tree:
+Generated report artifacts live under the repo-level `reports/` tree:
 
 ```text
 reports/
@@ -19,12 +49,6 @@ reports/
   core-run-analysis/    ← Stage 5 per-experiment and per-run reproducibility reports
   aggregate-summary/    ← Stage 6 aggregate operator-facing summaries
 ```
-
-Each report family keeps human-facing `*.latest.*` links in the visible directories and hides stamped history under `.history/`. Each generated report root should also contain:
-- `reproduce.latest.sh`: rerun the full computation that produced that report root
-- `rebuild_analysis.latest.sh` when the plotting/aggregation step can be rebuilt from saved machine-readable inputs without recomputing upstream work
-
----
 
 ## Stage 0: Environment Setup
 
@@ -68,11 +92,13 @@ PYTHONPATH=. python -m helm_audit.cli.check_env --plotly-static-only
 
 **Command:**
 ```bash
+export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
+
 python -m helm_audit.cli.index_historic_helm_runs \
   /data/crfm-helm-public \
-  --out_fpath run_specs.yaml \
-  --out_detail_fpath run_details.yaml \
-  --out_inventory_json dev/analysis/filter_inventory.json
+  --out_fpath "$AUDIT_STORE_ROOT/configs/run_specs.yaml" \
+  --out_detail_fpath "$AUDIT_STORE_ROOT/configs/run_details.yaml" \
+  --out_inventory_json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
 ```
 
 **Key Arguments:**
@@ -81,8 +107,8 @@ python -m helm_audit.cli.index_historic_helm_runs \
 - `--run_pattern`: Glob pattern for run selection within each suite (default: `*:*` = HELM run format).
 - `--require_per_instance_stats`: If True, only include runs with `per_instance_stats.json` (slow; default False).
 - `--include_max_eval_instances`: If True, infer `max_eval_instances` from per-instance data (slow; default False).
-- `--out_fpath`: Write `run_spec_name` list as YAML (fed to kwdagger scheduler).
-- `--out_detail_fpath`: Write full row data with all metadata as YAML.
+- `--out_fpath`: Write `run_spec_name` list as YAML. The package default is now `$AUDIT_STORE_ROOT/configs/run_specs.yaml`.
+- `--out_detail_fpath`: Write full row data with all metadata as YAML. The package default is now `$AUDIT_STORE_ROOT/configs/run_details.yaml`.
 - `--out_inventory_json`: Write the full Stage 1 filter inventory as JSON for later analysis / plotting.
 - `--dedupe`: If True (default), deduplicate identical `(run_spec_name, max_eval_instances)` rows.
 
@@ -102,9 +128,9 @@ python -m helm_audit.cli.index_historic_helm_runs \
    A model may fail multiple criteria simultaneously (e.g., size AND no HF deployment). All failure reasons are logged and included in the filter report Sankey.
 
 **Outputs:**
-- `run_specs.yaml`: List of selected `run_spec_name` strings (one per line), ready to feed into kwdagger.
-- `run_details.yaml`: Full dict rows with model, scenario_class, max_eval_instances, etc.
-- `dev/analysis/filter_inventory.json` (or your chosen path): full machine-readable Stage 1 inventory for later plotting and analysis.
+- `$AUDIT_STORE_ROOT/configs/run_specs.yaml`: selected `run_spec_name` strings
+- `$AUDIT_STORE_ROOT/configs/run_details.yaml`: detailed Stage 1 rows
+- `$AUDIT_STORE_ROOT/analysis/filter_inventory.json` (or your chosen path): full machine-readable Stage 1 inventory
 
 ### Stage 1a: Build Filter Reports From Saved Inventory
 
@@ -113,7 +139,7 @@ Use this when you want to iterate on the filter analyses, Sankeys, or report dir
 ```bash
 PYTHONPATH=. python -m helm_audit.cli.reports filter \
   --report-dpath reports/filtering \
-  --inventory-json dev/analysis/filter_inventory.json
+  --inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
 ```
 
 This step owns all output under `reports/filtering/`. Stage 1 itself no longer writes into the report tree.
@@ -148,58 +174,60 @@ For the richer secondary analysis, also inspect:
 
 ## Stage 2: Generate Experiment Manifests
 
-**Purpose:** Convert a list of historic run specs into experiment manifests suitable for scheduling on specific machines, with optional model deployment overrides.
+**Purpose:** Convert a stored run selection into a kwdagger-ready experiment manifest without writing generated YAML back into the repo.
 
 **Command:**
 ```bash
-helm-audit-make-manifest \
-  --index_fpath audit_results_index_20260404.csv \
-  --run_entries_fpath run_specs.yaml \
-  --experiment_name audit-historic-grid \
-  --out_dpath manifests
+helm-audit-make-manifest historic \
+  --run-specs-fpath "$AUDIT_STORE_ROOT/configs/run_specs.yaml" \
+  --run-details-fpath "$AUDIT_STORE_ROOT/configs/run_details.yaml" \
+  --experiment-name audit-historic-grid \
+  --suite audit-historic-grid \
+  --output "$AUDIT_STORE_ROOT/configs/manifests/historic_grid.generated.yaml"
 ```
 
 **Key Arguments:**
-- `--index_fpath`: CSV index from `helm-audit-index` (if re-running; optional for first run).
-- `--run_entries_fpath`: YAML list from Stage 1 `--out_fpath`.
-- `--experiment_name`: Label for this batch (e.g., `audit-historic-grid`, `audit-qwen25-7b-aiq`).
-- `--out_dpath`: Write manifests here (one per run spec).
+- `historic`: use the historic-selection manifest builder
+- `--run-specs-fpath`: YAML list from Stage 1
+- `--run-details-fpath`: optional detailed Stage 1 metadata used for selection sidecars
+- `--experiment-name`: label for this batch
+- `--suite`: suite name recorded into the manifest
+- `--output`: write the generated manifest into the audit store
+- `--selection-output`: optional explicit path for the generated selection sidecar; defaults next to the manifest as `*.selection.yaml`
 
 **Key Behavior:**
-- Automatically selects `model_deployments.yaml` override file if the run's model appears in known overrides (e.g., Qwen models → local HF instead of Together).
-- Creates one YAML manifest per unique run spec, with fully resolved model name and scenario parameters.
+- Automatically selects the repo-checked-in `configs/debug/repro_model_overrides.yaml` when the chosen runs need a local deployment override.
+- Writes one batch manifest plus a machine-readable selection sidecar summarizing the filtered entries that went into it.
 
 **Outputs:**
-- `manifests/<run_spec_slug>.yaml`: HELM manifest, ready to execute.
+- `$AUDIT_STORE_ROOT/configs/manifests/historic_grid.generated.yaml`
+- `$AUDIT_STORE_ROOT/configs/manifests/historic_grid.generated.yaml.selection.yaml`
 
 ---
 
 ## Stage 3: Execute Runs on Target Machines
 
-**Purpose:** Schedule and execute manifests across one or more machines (GPU clusters, single hosts, etc.), capturing outputs and logs.
+**Purpose:** Preview or execute a kwdagger schedule from one manifest at a time.
 
 **Command (preview mode — default):**
 ```bash
 helm-audit-run \
-  --experiment_name audit-historic-grid \
-  --manifests_dpath manifests \
-  --max_jobs 50
+  "$AUDIT_STORE_ROOT/configs/manifests/historic_grid.generated.yaml"
 ```
 
 **Command (execute mode):**
 ```bash
+export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 helm-audit-run \
-  --experiment_name audit-historic-grid \
-  --manifests_dpath manifests \
-  --max_jobs 50 \
+  "$AUDIT_STORE_ROOT/configs/manifests/historic_grid.generated.yaml" \
   --run 1
 ```
 
 **Key Behavior:**
-- **Preview mode** (default, `--run 0`): Prints what kwdagger would schedule, but doesn't execute.
-- **Execute mode** (`--run 1`): Actually submits jobs to kwdagger.
+- **Preview mode** (default, `--run 0`): prints the kwdagger invocation and resolved manifest context without executing.
+- **Execute mode** (`--run 1`): actually submits the schedule.
 - Uses `kwdagger` as the task scheduler for multi-GPU/multi-machine execution.
-- Respects `--max_jobs` to limit concurrent jobs per machine.
+- Supports overrides like `--root-dpath`, `--devices`, `--tmux-workers`, `--backend`, and `--queue-name` at invocation time.
 
 **Machine-Specific Considerations:**
 - Each target machine (aiq-gpu, namek, yardrat, etc.) may have different hardware (GPU type, memory, CPU cores).
@@ -223,24 +251,22 @@ rsync -avz --progress user@<gpu_host>:results/ /home/joncrall/data/helm_runs/
 
 ## Stage 4: Build Result Index
 
-**Purpose:** Scan the executed runs and create a master CSV index mapping job metadata to run outputs.
+**Purpose:** Scan executed audit results and write timestamped indexes into the audit store, not into the repo.
 
 **Command:**
 ```bash
 helm-audit-index \
-  --root_dpaths /home/joncrall/data/helm_runs \
-  --out_fpath audit_results_index_20260404.csv \
-  --experiment_names audit-historic-grid
+  --results-root /data/crfm-helm-audit \
+  --report-dpath "$AUDIT_STORE_ROOT/indexes"
 ```
 
 **Key Arguments:**
-- `--root_dpaths`: Directories containing run output subdirectories.
-- `--out_fpath`: Write index CSV here.
-- `--experiment_names`: Filter to specific experiments (optional).
+- `--results-root`: root containing kwdagger job directories and materialized HELM outputs
+- `--report-dpath`: destination directory for timestamped index artifacts; default is `$AUDIT_STORE_ROOT/indexes`
 
 **Outputs:**
-- `audit_results_index_*.csv`: Central join table with columns:
-  - `experiment_name`, `run_entry`, `run_spec_name`: ID triple
+- `$AUDIT_STORE_ROOT/indexes/audit_results_index_*.csv`: Central join table with columns:
+  - `experiment_name`, `job_id`, `run_entry`: core identifiers
   - `status`: completed, reused, unknown, failed
   - `has_run_spec`, `has_stats`, `has_per_instance_stats`: boolean flags
   - `run_dir`: path to run output directory
@@ -258,11 +284,10 @@ helm-audit-index \
 **Command:**
 ```bash
 helm-audit-rebuild-core \
-  --left_run_a <official_run_dir> \
-  --left_run_b <local_run_dir> \
-  --right_run_a <local_run_dir> \
-  --right_run_b <repeat_run_dir> \
-  --report_dpath reports/core-run-analysis/manual/core-metrics-<slug>
+  --run-entry "boolq:model=eleutherai/pythia-6.9b,data_augmentation=canonical" \
+  --experiment-name audit-historic-grid \
+  --index-dpath "$AUDIT_STORE_ROOT/indexes" \
+  --report-dpath reports/core-run-analysis/manual/core-metrics-boolq-pythia
 ```
 
 **Outputs:**
@@ -279,8 +304,8 @@ helm-audit-rebuild-core \
 **Command:**
 ```bash
 helm-audit-analyze-experiment \
-  --experiment_name audit-historic-grid \
-  --index_fpath audit_results_index_20260404.csv
+  --experiment-name audit-historic-grid \
+  --index-dpath "$AUDIT_STORE_ROOT/indexes"
 ```
 
 **Outputs:**
@@ -298,7 +323,8 @@ helm-audit-analyze-experiment \
 
 **Command:**
 ```bash
-python -m helm_audit.workflows.build_reports_summary
+python -m helm_audit.workflows.build_reports_summary \
+  --index-dpath "$AUDIT_STORE_ROOT/indexes"
 ```
 
 **Key Arguments:**
@@ -368,7 +394,8 @@ reports/
 Use this when you already have Stage 5 reports and want to iterate on directory structure, aggregate tables, or Plotly/Sankey outputs:
 
 ```bash
-PYTHONPATH=. python -m helm_audit.workflows.build_reports_summary
+PYTHONPATH=. python -m helm_audit.workflows.build_reports_summary \
+  --index-dpath "$AUDIT_STORE_ROOT/indexes"
 ```
 
 This step is independent of recomputing model executions. It only reads existing Stage 5 reports from `reports/core-run-analysis/experiment-analysis-*/`.
@@ -394,52 +421,48 @@ This step is independent of recomputing model executions. It only reads existing
 ### Scenario: Reproduce Qwen models on multiple machines
 
 ```bash
+export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
+
 # Stage 1: Discover & filter
 python -m helm_audit.cli.index_historic_helm_runs \
   /data/crfm-helm-public \
-  --out_fpath qwen_run_specs.yaml \
-  --out_inventory_json dev/analysis/qwen_filter_inventory.json
+  --out_fpath "$AUDIT_STORE_ROOT/configs/qwen_run_specs.yaml" \
+  --out_inventory_json "$AUDIT_STORE_ROOT/analysis/qwen_filter_inventory.json"
 
 # Stage 1a: Build filter analysis from saved inventory
 python -m helm_audit.cli.reports filter \
   --report-dpath reports/filtering/qwen \
-  --inventory-json dev/analysis/qwen_filter_inventory.json
+  --inventory-json "$AUDIT_STORE_ROOT/analysis/qwen_filter_inventory.json"
 
-# Stage 2: Generate manifests
-helm-audit-make-manifest \
-  --run_entries_fpath qwen_run_specs.yaml \
-  --experiment_name audit-qwen25-7b \
-  --out_dpath manifests_qwen
+# Stage 2: Generate a stored manifest
+helm-audit-make-manifest historic \
+  --run-specs-fpath "$AUDIT_STORE_ROOT/configs/qwen_run_specs.yaml" \
+  --experiment-name audit-qwen25-7b \
+  --suite audit-qwen25-7b \
+  --output "$AUDIT_STORE_ROOT/configs/manifests/qwen.generated.yaml"
 
 # Stage 3: Execute (preview first, then run)
-helm-audit-run \
-  --experiment_name audit-qwen25-7b \
-  --manifests_dpath manifests_qwen \
-  --max_jobs 50
+helm-audit-run "$AUDIT_STORE_ROOT/configs/manifests/qwen.generated.yaml"
 
 # When ready to execute:
-helm-audit-run \
-  --experiment_name audit-qwen25-7b \
-  --manifests_dpath manifests_qwen \
-  --max_jobs 50 \
-  --run 1
+helm-audit-run "$AUDIT_STORE_ROOT/configs/manifests/qwen.generated.yaml" --run 1
 
 # Sync results back to analysis host (run on GPU host or via CI/CD)
 rsync -avz --progress results/ /home/joncrall/data/helm_runs/
 
 # Stage 4: Index results
 helm-audit-index \
-  --root_dpaths /home/joncrall/data/helm_runs \
-  --out_fpath audit_results_index_qwen.csv \
-  --experiment_names audit-qwen25-7b
+  --results-root /data/crfm-helm-audit \
+  --report-dpath "$AUDIT_STORE_ROOT/indexes"
 
 # Stage 5: Analyze per-run reproducibility
 helm-audit-analyze-experiment \
-  --experiment_name audit-qwen25-7b \
-  --index_fpath audit_results_index_qwen.csv
+  --experiment-name audit-qwen25-7b \
+  --index-dpath "$AUDIT_STORE_ROOT/indexes"
 
 # Stage 6: Build aggregate reports
-python -m helm_audit.workflows.build_reports_summary
+python -m helm_audit.workflows.build_reports_summary \
+  --index-dpath "$AUDIT_STORE_ROOT/indexes"
 
 # Open reports
 firefox reports/aggregate-summary/all-results/README.latest.txt

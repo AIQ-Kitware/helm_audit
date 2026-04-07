@@ -180,3 +180,22 @@ Design takeaways:
 1. When the downstream integration already has the right seam, productizing the seam is usually better than widening it.
 2. Relative path conventions become part of the API surface once manifests are checked in and shared across runbooks.
 3. For local-model workflows, artifact verification is as important as launch instructions because deployment drift is often silent until comparison time.
+
+## 2026-04-07 14:06:48 +0000
+
+Summary of user intent: update the pipeline docs, scripts, and package defaults so generated run selections, manifests, and indexes stop polluting the repo, move into `/data/crfm-helm-audit-store`, remain distinct from immutable HELM result roots like `/data/crfm-helm-audit` and `/data/crfm-helm-public`, and preserve repo-local `reports/` as the main human browsing surface.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This change is about correcting a boundary that had become misleading. The repo had drifted into serving simultaneously as source tree, operator notes surface, and writable experiment state sink. That was convenient early on, but it makes the workflow harder to reason about now because generated manifests and selection files start to look canonical simply because they are nearby. The user’s prompt gets at the deeper issue: the “lens” that chooses or analyzes a set of runs should not dictate where the durable machine-readable state lives. The right fix is to give generated configuration artifacts their own home and make the package defaults encode that choice.
+
+I introduced `AUDIT_STORE_ROOT` with `/data/crfm-helm-audit-store` as the default and then drove the main generated-path helpers from that store. That means `run_specs.yaml`, `run_details.yaml`, generated manifests, and timestamped indexes all have a coherent default location that is writable and outside the repo, while `reports/` intentionally stays repo-local. I also followed that boundary through the operator surface: the thin runbook scripts now reference store-backed manifest paths, and the analysis/index defaults were updated so downstream report-building looks in the store for indexes instead of an old `reports/indexes` convention. That keeps the package behavior aligned with the runbooks instead of creating a new class of silent path mismatch.
+
+The documentation update mattered almost as much as the code. `docs/pipeline.md` had path examples and even CLI shapes that no longer matched the real entrypoints. I treated that as an opportunity to make the pipeline story more honest rather than just search-and-replace file names. The doc now explains the storage split explicitly, updates the Stage 1 to Stage 4 commands to the current CLI surface, and reframes manifests as generated store artifacts rather than repo content. There is still some older narrative elsewhere in the repo that references repo-root `run_specs.yaml` or `configs/generated/`; I left those broader research notes alone for now because the user asked specifically for the main docs, scripts, and defaults, and I wanted to avoid a giant low-signal doc churn.
+
+What I am confident about: the primary writable-path defaults now line up with the desired architecture, and the core analysis commands should agree on where indexes live. Risks: any external ad hoc script or muscle-memory workflow that still assumes repo-root `run_specs.yaml`, `run_details.yaml`, or `configs/generated/*.yaml` will now need either an explicit path or an updated store-root assumption. That is an acceptable tradeoff because the old behavior was the thing causing the repo pollution in the first place. I added a targeted test around the new store-root-derived paths so future refactors are less likely to regress this split silently.
+
+Design takeaways:
+1. Generated experiment state needs a canonical home that is independent of both the source tree and any single analysis lens.
+2. If reports remain browsable in-repo while indexes and manifests move out, the path defaults must be updated together or operators will fall into mismatched partial migrations.
+3. Documentation drift is often a boundary-design smell: when prose and CLI shape disagree, the storage model is usually muddier than it first appears.

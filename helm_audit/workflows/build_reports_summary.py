@@ -13,12 +13,14 @@ from typing import Any
 
 import kwutil
 
-from helm_audit.infra.api import audit_root, default_report_root
+from helm_audit.infra.api import audit_root, default_index_root
 from helm_audit.infra.plotly_env import configure_plotly_chrome
 from helm_audit.infra.fs_publish import stamped_history_dir, symlink_to, write_latest_alias
 from helm_audit.infra.report_layout import aggregate_summary_reports_root, core_run_reports_root
 from helm_audit.utils.numeric import nested_get
 from helm_audit.utils.sankey import emit_sankey_artifacts
+
+from loguru import logger
 
 
 DEFAULT_BREAKDOWN_DIMS = [
@@ -1324,6 +1326,7 @@ def _write_reproduce_sh(
         cmd,
     ]
     fpath.write_text("\n".join(lines) + "\n")
+    logger.debug(f'Write to 💻: {fpath}')
     fpath.chmod(0o755)
 
 
@@ -1796,7 +1799,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--experiment-name", default=None)
     parser.add_argument("--index-fpath", default=None)
-    parser.add_argument("--index-dpath", default=str(default_report_root() / "indexes"))
+    parser.add_argument("--index-dpath", default=str(default_index_root()))
     parser.add_argument("--summary-root", default=str(aggregate_summary_reports_root()))
     parser.add_argument(
         "--breakdown-dims",

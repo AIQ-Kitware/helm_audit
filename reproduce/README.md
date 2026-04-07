@@ -23,6 +23,12 @@ implementation. Each one should delegate to a `helm_audit` Python CLI such as
 For `helm-audit-run`, preview is the default. Use `--run=1` in runbooks when
 you actually want to execute the scheduled `kwdagger` job.
 
+Generated manifests referenced by these runbooks now default to
+`$AUDIT_STORE_ROOT/configs/manifests/` with
+`AUDIT_STORE_ROOT=/data/crfm-helm-audit-store` as the fallback. Checked-in
+`configs/` files remain source-controlled inputs and overrides, not a sink for
+generated experiment state.
+
 The `qwen35_vllm/` runbook assumes:
 - a local vLLM OpenAI-compatible server is available on `http://localhost:8000/v1`
 - the downstream `materialize_helm_run.py` copies the manifest's `model_deployments_fpath` into `<job_dir>/prod_env/model_deployments.yaml` before invoking `helm-run`
