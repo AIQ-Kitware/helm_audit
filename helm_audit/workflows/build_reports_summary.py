@@ -1483,7 +1483,7 @@ def _write_per_metric_agreement_plot(
             for metric_idx, metric in enumerate(metrics):
                 row_idx = (metric_idx // n_cols) + 1
                 col_idx = (metric_idx % n_cols) + 1
-                curve_pts = metrics_data[metric]
+                # curve_pts = metrics_data[metric]
 
                 for row in repro_rows:
                     key = (str(row.get("experiment_name")), str(row.get("run_entry")))
