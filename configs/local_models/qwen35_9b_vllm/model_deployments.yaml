@@ -1,0 +1,10 @@
+model_deployments:
+  - name: vllm/qwen3.5-9b-local
+    model_name: qwen/qwen3.5-9b
+    tokenizer_name: qwen/qwen3.5-9b
+    max_sequence_length: 32768
+    client_spec:
+      class_name: "helm.clients.vllm_client.VLLMChatClient"
+      args:
+        base_url: "http://localhost:8000/v1"
+        vllm_model_name: "Qwen/Qwen3.5-9B"

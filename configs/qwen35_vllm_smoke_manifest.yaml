@@ -1,0 +1,19 @@
+schema_version: 1
+experiment_name: audit-qwen35-9b-vllm-smoke
+description: Smoke-test HELM batch for qwen/qwen3.5-9b through a local vLLM server.
+run_entries:
+  - mmlu:subject=anatomy,method=multiple_choice_joint,model=qwen/qwen3.5-9b
+  - boolq:model=qwen/qwen3.5-9b,data_augmentation=canonical
+max_eval_instances: 5
+suite: audit-qwen35-vllm-smoke
+mode: compute_if_missing
+materialize: symlink
+backend: tmux
+devices: 0
+tmux_workers: 1
+local_path: prod_env
+precomputed_root: null
+require_per_instance_stats: true
+model_deployments_fpath: configs/local_models/qwen35_9b_vllm/model_deployments.yaml
+enable_huggingface_models: []
+enable_local_huggingface_models: []
