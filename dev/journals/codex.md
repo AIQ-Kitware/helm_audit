@@ -366,3 +366,18 @@ Design takeaways:
 1. If many plots need the same readability fix, put it in the shared chart helper.
 2. Long x labels usually need both more width and a rotated tick angle.
 3. A slightly larger PNG is a good trade when it makes the bars and labels legible without manual zooming.
+
+## 2026-04-10 01:06:04 +0000
+
+Summary of user intent: keep the widened bar-chart layout, but rein it in so the PNG/JPG aspect ratio stays reasonable and the plots do not become excessively wide.
+
+Model and configuration: GPT-5.4, reasoning_effort=medium, collaboration mode `Default`.
+
+The first widening pass solved the label truncation problem but overshot the mark by letting width scale too freely with category count and label length. The user’s correction was exactly right: readability improves only up to the point where the plot still feels like a chart instead of a banner. I adjusted the shared bar-chart layout helper to cap width at a sane ratio relative to height, which preserves the extra room but prevents the image from sprawling horizontally. That is a better default because it balances legibility against the practical cost of big diagnostic rasters.
+
+I kept the fix central in the helper rather than trying to special-case individual plots. That matters here because the filter analysis file has several bar charts with different label lengths, and the right ratio can vary a lot if you try to hand-tune each one. A global cap gives us consistency and still leaves the helper free to grow the canvas when the label count truly needs it. The regeneration pass confirmed the cap did not break PNG/JPG publication or the HTML alias flow.
+
+Design takeaways:
+1. A readability fix should have a ceiling, not just an expansion rule.
+2. For diagnostic plots, aspect ratio is often a better control than raw pixel width.
+3. The shared helper remains the right place for these layout decisions because it keeps every chart in the file aligned.

@@ -18,7 +18,7 @@ dist/
 .idea/
 
 # Generated experiment outputs
-reports/
+./reports/
 results/
 data/
 audit-smoke/
