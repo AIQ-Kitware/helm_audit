@@ -8,6 +8,7 @@ from helm_audit.workflows.build_reports_summary import (
     _build_attempted_to_repro_rows,
     _build_end_to_end_funnel_rows,
     _build_filter_to_attempt_rows,
+    _build_filter_selection_by_model_rows,
 )
 
 
@@ -185,3 +186,23 @@ def test_attempted_to_repro_rows_start_from_attempted_runs_only():
     assert rows[0]["execution_stage"] == "completed_with_run_artifacts"
     assert rows[0]["analysis_stage"] == "analyzed"
     assert rows[0]["reproduction_stage"] == "exact_or_near_exact"
+
+
+def test_filter_selection_by_model_rows_separate_selected_and_excluded_counts():
+    rows = _build_filter_selection_by_model_rows(
+        [
+            {"model": "model-a", "selection_status": "selected"},
+            {"model": "model-a", "selection_status": "excluded"},
+            {"model": "model-a", "selection_status": "excluded"},
+            {"model": "model-b", "selection_status": "selected"},
+            {"model": "model-b", "selection_status": "selected"},
+            {"model": "model-c", "selection_status": "excluded"},
+        ]
+    )
+
+    assert rows == [
+        {"model": "model-a", "selection_status": "excluded", "count": 2},
+        {"model": "model-a", "selection_status": "selected", "count": 1},
+        {"model": "model-b", "selection_status": "selected", "count": 2},
+        {"model": "model-c", "selection_status": "excluded", "count": 1},
+    ]

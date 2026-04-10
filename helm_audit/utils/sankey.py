@@ -61,6 +61,7 @@ def emit_sankey_artifacts(
     key_fpath = static_history / f"{base_name}_key.txt"
     html_fpath = (interactive_history / base_name).with_suffix(".html")
     jpg_fpath = (static_history / base_name).with_suffix(".jpg")
+    png_fpath = (static_history / base_name).with_suffix(".png")
 
     node_labels, source, target, value = graph._to_sankey_data()
     payload = kwutil.Json.ensure_serializable(
@@ -95,6 +96,7 @@ def emit_sankey_artifacts(
 
     html_out = None
     jpg_out = None
+    png_out = None
     plotly_error = None
     if os.environ.get("HELM_AUDIT_SKIP_PLOTLY", "") in {"1", "true", "yes"}:
         plotly_error = "skipped plotly sankey rendering by configuration"
@@ -111,8 +113,11 @@ def emit_sankey_artifacts(
                     fig.write_image(str(jpg_fpath), scale=3.0)
                     jpg_out = str(jpg_fpath)
                     logger.debug(f'Write 🖼: {jpg_out}')
+                    fig.write_image(str(png_fpath), scale=3.0)
+                    png_out = str(png_fpath)
+                    logger.debug(f'Write 🖼: {png_out}')
                 except Exception as ex:
-                    plotly_error = f"unable to write sankey JPG: {ex!r}"
+                    plotly_error = f"unable to write sankey JPG/PNG: {ex!r}"
                     logger.warning(plotly_error)
             else:
                 logger.debug('Skip sankey static image by config')
@@ -127,6 +132,8 @@ def emit_sankey_artifacts(
         write_latest_alias(html_fpath, _interactive, f"sankey_{kind}.latest.html")
     if jpg_out is not None:
         write_latest_alias(jpg_fpath, _static, f"sankey_{kind}.latest.jpg")
+    if png_out is not None:
+        write_latest_alias(png_fpath, _static, f"sankey_{kind}.latest.png")
 
     return {
         "json": str(json_fpath),
@@ -134,5 +141,6 @@ def emit_sankey_artifacts(
         "key_txt": str(key_fpath),
         "html": html_out,
         "jpg": jpg_out,
+        "png": png_out,
         "plotly_error": plotly_error,
     }

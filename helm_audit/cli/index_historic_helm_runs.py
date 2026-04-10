@@ -130,9 +130,7 @@ class CompileHelmReproListConfig(scfg.DataConfig):
         """
         Example:
             >>> # It's a good idea to setup a doctest.
-            >>> import sys, ubelt
-            >>> sys.path.append(ubelt.expandpath('~/code/aiq-magnet/dev/poc'))
-            >>> from inspect_historic_helm_runs import *  # NOQA
+            >>> from helm_audit.cli.index_historic_helm_runs import *  # NOQA
             >>> argv = False
             >>> kwargs = dict()
             >>> cls = CompileHelmReproListConfig
@@ -320,6 +318,18 @@ class CompileHelmReproListConfig(scfg.DataConfig):
                 'has_hf_client': r.get('has_hf_client', False),
                 'size_threshold_params': MAX_PARAMS,
             })
+
+        if 1:
+            # Which open models are we missing due to providers
+            for r in model_filter_rows:
+                nonblocking_reasons =  {'no-hf-deployment'}
+                blocking_reasons = {'too-large', 'not-open-access', 'not-text-like'}
+                if len(set(r['failure_reasons']) - nonblocking_reasons) == 0:
+                    print(r)
+                if len(set(r['failure_reasons']) & blocking_reasons) == 0:
+                    break
+                    ...
+
         for model_name, error_text in missing_model_metadata.items():
             model_filter_rows.append({
                 'model': model_name,

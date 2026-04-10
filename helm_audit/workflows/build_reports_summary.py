@@ -942,6 +942,31 @@ def _build_breakdown_rows(
     ]
 
 
+def _build_filter_selection_by_model_rows(filter_inventory_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    counts: dict[str, Counter[str]] = defaultdict(Counter)
+    for row in filter_inventory_rows:
+        model = str(row.get("model") or "unknown")
+        selection_status = "selected" if row.get("selection_status") == "selected" else "excluded"
+        counts[model][selection_status] += 1
+
+    rows: list[dict[str, Any]] = []
+    for model, status_counts in sorted(
+        counts.items(),
+        key=lambda item: (-(item[1]["selected"] + item[1]["excluded"]), -item[1]["selected"], item[0]),
+    ):
+        for selection_status in ["excluded", "selected"]:
+            count = int(status_counts.get(selection_status, 0))
+            if count:
+                rows.append(
+                    {
+                        "model": model,
+                        "selection_status": selection_status,
+                        "count": count,
+                    }
+                )
+    return rows
+
+
 def _summarize_by_dimension(
     enriched_rows: list[dict[str, Any]],
     *,
@@ -1038,7 +1063,8 @@ def _build_high_level_readme(
             "    3. open sankey_attempted_to_repro.latest.html to follow attempted runs into analysis and reproduction",
             "    4. open sankey_end_to_end.latest.html to connect filtering, execution, analysis, and reproduction in one view",
             "    5. open sankey_repro_by_metric.latest.html for per-metric drift breakdown (run-level max delta)",
-            "    6. see benchmark_status.latest.html and coverage_matrix.latest.html for what subsets ran",
+            "    6. open filter_selection_by_model.latest.html for selected vs excluded run-spec counts by model",
+            "    7. see benchmark_status.latest.html and coverage_matrix.latest.html for what subsets ran",
             "",
             "  understand_reproducibility:",
             "    1. open sankey_reproducibility.latest.html for analyzed runs at strict threshold (abs_tol=0)",
@@ -1092,6 +1118,7 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         "agreement_curve_per_metric.latest.html",
         "coverage_matrix.latest.html",
         "failure_taxonomy.latest.html",
+        "filter_selection_by_model.latest.html",
     ]:
         src = level_001_interactive / src_name
         if src.exists() or src.is_symlink():
@@ -1133,6 +1160,7 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         "agreement_curve_per_metric.latest.jpg",
         "coverage_matrix.latest.jpg",
         "failure_taxonomy.latest.jpg",
+        "filter_selection_by_model.latest.jpg",
         "failure_reasons.latest.txt",
         "failure_runs.latest.csv",
     ]:
@@ -1941,6 +1969,7 @@ def _render_scope_summary(
         }
         for bucket, count in repro_bucket_counts.most_common()
     ]
+    filter_selection_by_model_rows = _build_filter_selection_by_model_rows(filter_inventory_rows)
 
     benchmark_status_rows = _build_breakdown_rows(enriched_rows, group_key="benchmark", repro_keyed=repro_keyed)
     benchmark_summary = _summarize_by_dimension(enriched_rows, dimension="benchmark", repro_keyed=repro_keyed)
@@ -2386,6 +2415,19 @@ def _render_scope_summary(
             interactive_dpath=level_001_interactive,
             static_dpath=level_001_static,
         )
+        filter_selection_by_model_plot = _write_plotly_bar(
+            rows=filter_selection_by_model_rows,
+            x="model",
+            y="count",
+            color="selection_status",
+            title=f"Selected vs Excluded Run Specs by Model: {scope_title}",
+            stem=level_001 / f"filter_selection_by_model_{generated_utc}",
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+            xaxis_title="Model",
+            yaxis_title="Run Spec Count",
+        )
     else:
         benchmark_plot = {"json": None, "html": None, "jpg": None, "png": None, "plotly_error": None}
         repro_bucket_plot = {"json": None, "html": None, "jpg": None, "png": None, "plotly_error": None}
@@ -2393,6 +2435,7 @@ def _render_scope_summary(
         per_metric_agreement_plot = {"json": None, "html": None, "jpg": None, "plotly_error": None}
         coverage_matrix_plot = {"json": None, "html": None, "jpg": None, "plotly_error": None}
         failure_taxonomy_plot = {"json": None, "html": None, "jpg": None, "plotly_error": None}
+        filter_selection_by_model_plot = {"json": None, "html": None, "jpg": None, "png": None, "plotly_error": None}
 
     level_001_readme = _build_high_level_readme(
         scope_title=scope_title,
@@ -2451,6 +2494,7 @@ def _render_scope_summary(
             ("agreement_curve", agreement_curve_plot),
             ("coverage_matrix", coverage_matrix_plot),
             ("failure_taxonomy", failure_taxonomy_plot),
+            ("filter_selection_by_model", filter_selection_by_model_plot),
         ]:
             write_latest_alias(Path(artifact["json"]), level_001_machine, f"{base_name}.latest.json")
             if artifact.get("html"):
@@ -2494,6 +2538,7 @@ def _render_scope_summary(
         "agreement_curve_plot": agreement_curve_plot,
         "coverage_matrix_plot": coverage_matrix_plot,
         "failure_taxonomy_plot": failure_taxonomy_plot,
+        "filter_selection_by_model_plot": filter_selection_by_model_plot,
     }
     manifest_fpath = level_001_machine / f"summary_manifest_{generated_utc}.json"
     _write_json(manifest, manifest_fpath)

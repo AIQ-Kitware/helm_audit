@@ -200,6 +200,59 @@ Design takeaways:
 2. If reports remain browsable in-repo while indexes and manifests move out, the path defaults must be updated together or operators will fall into mismatched partial migrations.
 3. Documentation drift is often a boundary-design smell: when prose and CLI shape disagree, the storage model is usually muddier than it first appears.
 
+## 2026-04-09 22:45:14 +0000
+
+Summary of user intent: improve the historic grid aggregate report so it shows a model-separated histogram of run specs that were filtered out versus included.
+
+Model and configuration: GPT-5.4, reasoning_effort=medium, collaboration mode `Default`.
+
+I took the change into `helm_audit/workflows/build_reports_summary.py` because that is where the aggregate report already assembles its cross-cutting visuals, and it has the right shared view of the filter inventory plus execution/reproducibility data. The new histogram is intentionally simple: a stacked bar by model with `selected` and `excluded` buckets, driven from the Stage 1 filter inventory rather than from the later execution scope. That choice keeps the chart faithful to the question the user asked, which is about filtering/include decisions, not about whether a run later executed cleanly.
+
+I also threaded the new artifact through the operator-facing surfaces that matter for discoverability. The summary README now points people at `filter_selection_by_model.latest.html`, and the scope alias writer now publishes that artifact alongside the existing Sankeys and coverage plots. I chose not to invent a new report family because the aggregate summary already has the right audience and lifecycle; the only real gap was the missing model-level lens.
+
+The main tradeoff was whether to make this a new charting helper or reuse the existing stacked bar path. Reusing `_write_plotly_bar` won because it keeps the implementation small and makes the new artifact behave like the other report visuals, which should lower maintenance cost. The remaining risk is mostly operational: the repo’s pytest environment is missing optional plugins and the filter-report test module depends on `magnet`, so full-suite verification was not practical here. I did verify the new summary helper set with `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q tests/test_end_to_end_summary.py`, which passed and covers the new model aggregation logic.
+
+Design takeaways:
+1. When a question is fundamentally about a specific decision boundary, the cleanest data source is usually the artifact that records that decision directly.
+2. Reusing an existing chart helper is often the right move when the new view differs only in dimensions, not in behavior.
+3. A report can feel “missing” even when the underlying data exists; often the fix is a small discoverability layer rather than a new pipeline stage.
+
+## 2026-04-10 00:01:55 +0000
+
+Summary of user intent: extend `python -m helm_audit.cli.reports filter` so it produces the plots that explain what was filtered and why, then provide the regeneration command.
+
+Model and configuration: GPT-5.4, reasoning_effort=medium, collaboration mode `Default`.
+
+This was a good case for keeping the work close to the data source. The Stage 1 filter report already knows the candidate pool, the chosen model set, and the exclusion reasons, so I extended `helm_audit/reports/filter_analysis.py` instead of trying to infer anything from the later aggregate summary. The main addition is a reusable stacked-bar helper that lets the report answer the same question at different granularities without introducing a lot of one-off Plotly code. That kept the change modest while still giving us the missing operator-facing views.
+
+I added the plots we talked about in a way that keeps their meaning distinct: selected/excluded by model, benchmark, dataset, scenario, candidate pool, plus exclusion reasons by model and the top reason combinations. The original Sankey remains the best “how did the filter behave overall?” artifact, while the new bars are better for local diagnostics. That split feels right to me because it avoids overloading one chart with both funnel semantics and root-cause semantics, which usually makes reports harder to read instead of easier.
+
+One thing I was careful about was not to let the plots drift into a generic dashboard. The report still emphasizes the Stage 1 decision boundary rather than execution or reproducibility, and I only added views that help answer “what got filtered” or “why did it get filtered.” The risk is mostly volume: there are now more visual artifacts to scan. I mitigated that by keeping the README text blunt about which plots to open first and by preferring reusable dimensions over novelty.
+
+Verification was solid for the code I touched. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q tests/test_end_to_end_summary.py tests/test_filter_analysis_plots.py` passed, which covers the existing end-to-end summary helpers plus the new filter-analysis data shaping. I did not run the heavier filter-report test module because that import path still pulls in the external `magnet` package in this environment.
+
+Design takeaways:
+1. When a report answers a decision question, the visual should stay as close as possible to the decision table that generated it.
+2. Reusable stacked bars are a good middle ground between a single headline Sankey and a pile of narrow tables.
+3. A report becomes more useful when the first few plots are named after the operator questions, not the implementation details.
+
+## 2026-04-10 00:17:31 +0000
+
+Summary of user intent: make sure the filter report command produces PNGs for every Plotly HTML output, including Sankeys, and confirm the exact command to run.
+
+Model and configuration: GPT-5.4, reasoning_effort=medium, collaboration mode `Default`.
+
+The key gap turned out to be the Sankey writer, not the bar charts. The filter report already emitted PNGs for its bar plots, but `helm_audit.utils.sankey.emit_sankey_artifacts` only wrote HTML and JPG. I added PNG generation there too, plus the corresponding latest alias, so the same filter CLI now covers the full report surface without any special flags. That keeps the command simple and avoids a split-brain workflow where some plots would need a second post-processing step.
+
+I added a small regression test that fakes the Plotly figure and checks that the Sankey writer creates the PNG artifact and publishes the history-path alias. That was the right level of test here because it validates the filesystem plumbing directly without depending on the environment’s graphics stack. The broader filter-analysis plots test also still passes, so we’ve exercised both the selection/exclusion bars and the Sankey image path.
+
+The tradeoff is that the report now has one more static artifact per Sankey, which is fine for this use case because those images are the browsable deliverable operators expect. I’m comfortable with that because the report is explicitly meant for human inspection, and the PNGs remove a common annoyance when browsing the static output tree.
+
+Design takeaways:
+1. If a report already produces HTML for humans, matching PNGs are usually worth the small extra cost for portability.
+2. For filesystem-backed reporting, a fake-figure test is often the cleanest way to validate artifact plumbing.
+3. Keeping the command surface unchanged is a good sign the implementation stayed in the right layer.
+
 Follow-up in the same session: the first real run against `helm-audit-analyze-experiment --index-dpath "$AUDIT_STORE_ROOT/indexes"` exposed an empty-summary edge case. If every run entry gets skipped during per-run report generation, `summary_rows` is empty and Pandas raises on `sort_values('run_spec_name')` because the empty frame has no such column. This was not a path-migration bug after all; the new store-root defaults simply made it easier to hit an experiment state with zero built reports. I patched the workflow to tolerate that case, still emit the JSON/CSV/TXT summary artifacts, and include a warning in the text summary pointing the operator at `skipped_run_entries`. The important lesson is that path cleanup often surfaces latent control-flow assumptions, especially around “at least one artifact was built.”
 
 Second follow-up in the same session: the user tightened the pipeline doc toward copy-pasteability and correctly noticed that the document still did not present “rebuild the whole analysis from existing data” as a first-class workflow. The ingredients were present, but the story was fragmented across Stage 4, Stage 5b, and Stage 6, with stale runbook scripts still pointing at older compare-batch behavior. I treated that as an operator-experience bug more than a wording bug. The fix was to add an explicit analysis-only rebuild path in `docs/pipeline.md`, including both a single-experiment recipe and a loop that rebuilds Stage 5b for every experiment named in the latest index before refreshing the all-results summary. I also updated the thin runbook scripts so `historic_grid/20_rebuild_reports.sh` now performs index → analyze-experiment → build-summary, and the machine-compare helpers use the store-backed index location by default. This keeps the scripts and the docs aligned, which matters a lot when the intended use case is “start reading from the middle of the doc and paste the commands that are there.”
