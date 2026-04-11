@@ -31,6 +31,16 @@ model_deployments:
         base_url: "${LITELLM_BASE_URL}/v1"
         api_key: "${LITELLM_MASTER_KEY}"
         openai_model_name: "openai/gpt-oss-20b"
+  - name: litellm/gpt-oss-20b-chat-local
+    model_name: openai/gpt-oss-20b
+    tokenizer_name: openai/o200k_harmony
+    max_sequence_length: 32768
+    client_spec:
+      class_name: "helm.clients.openai_client.OpenAIClient"
+      args:
+        base_url: "${LITELLM_BASE_URL}/v1"
+        api_key: "${LITELLM_MASTER_KEY}"
+        openai_model_name: "openai/gpt-oss-20b"
 YAML
 
 cat > "$BUNDLE_ROOT/smoke_manifest.yaml" <<YAML
@@ -60,16 +70,10 @@ schema_version: 1
 experiment_name: audit-historic-grid-gpt-oss-20b-vllm
 description: Targeted historic-grid extension for openai/gpt-oss-20b using the local LiteLLM-backed vLLM service.
 run_entries:
-  - anthropic_red_team:model=openai/gpt-oss-20b
   - bbq:subject=all,method=multiple_choice_joint,max_train_instances=0,model=openai/gpt-oss-20b
   - gpqa:subset=gpqa_main,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b
-  - harm_bench:model=openai/gpt-oss-20b
   - ifeval:model=openai/gpt-oss-20b
   - mmlu_pro:subset=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b
-  - omni_math:model=openai/gpt-oss-20b
-  - simple_safety_tests:model=openai/gpt-oss-20b
-  - wildbench:subset=v2,model=openai/gpt-oss-20b
-  - xstest:model=openai/gpt-oss-20b
 max_eval_instances: 1000
 suite: audit-historic-grid-gpt-oss-20b-vllm
 mode: compute_if_missing

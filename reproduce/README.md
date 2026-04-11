@@ -39,3 +39,5 @@ The `gpt_oss_20b_vllm/` runbook assumes:
 - `LITELLM_MASTER_KEY` is available, either already exported or via `/data/service/service-repo/vllm/generated/.env`
 - the runbook writes a machine-local bundle under `$AUDIT_STORE_ROOT/local-bundles/gpt_oss_20b_vllm/` so secrets and absolute paths do not need to live in checked-in YAML
 - the local `gpt-oss` deployment should use the legacy completions path, not chat completions, because the observed chat response shape returned `message.content: null` for this backend/model combination
+- chat-oriented runs can still opt into an explicit chat deployment via `model_deployment=litellm/gpt-oss-20b-chat-local` when that is the cleaner scenario-level fit
+- the overnight manifest is now trimmed to the in-scope subset and does not schedule benchmarks that require proprietary / credentialed judges by default

@@ -46,3 +46,53 @@ Current equivalents in this repo:
 
 Unless explicitly stated otherwise, historical paths and commands above should be
 interpreted as pre-split references.
+
+---
+
+## Error reporting gap observed in `audit-historic-grid-gpt-oss-20b-vllm`
+
+Date observed: 2026-04-11
+Experiment root: `/data/crfm-helm-audit/audit-historic-grid-gpt-oss-20b-vllm`
+Manifest: `/data/crfm-helm-audit-store/local-bundles/gpt_oss_20b_vllm/full_manifest.yaml`
+
+Observed behavior:
+- `kwdagger schedule` returned `0`, which correctly means scheduling succeeded, but the operator-facing queue summary only surfaced aggregate counts (`passed=2`, `failed=8`) without the actionable failure causes.
+- Important failure details were only visible by opening individual tmux session output or per-job files under `helm/helm_id_*/`.
+- At least one failed job (`mmlu_pro`) had almost no useful traceback in `helm-run.log` or `helm-run.debug.log`, so the queue summary did not point to the next place an operator should inspect.
+
+Failure families recoverable only by manual artifact inspection:
+- Gated dataset access:
+  - `gpqa:subset=gpqa_main,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b`
+  - HELM raised `DatasetNotFoundError` because `Idavidrein/gpqa` is gated on Hugging Face.
+- Missing annotator / judge API key:
+  - `anthropic_red_team:model=openai/gpt-oss-20b`
+  - `harm_bench:model=openai/gpt-oss-20b`
+  - `omni_math:model=openai/gpt-oss-20b`
+  - `simple_safety_tests:model=openai/gpt-oss-20b`
+  - `xstest:model=openai/gpt-oss-20b`
+  - These failed during HELM annotation/execution with `The api_key client option must be set ... or by setting the OPENAI_API_KEY environment variable`.
+- Deployment/client mismatch:
+  - `wildbench:subset=v2,model=openai/gpt-oss-20b`
+  - The local deployment used legacy completions, but this run reached a chat-style request path and ultimately failed with `Either prompt or prompt_embeds must be provided and non-empty`.
+- Opaque / poorly surfaced failure:
+  - `mmlu_pro:subset=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b`
+  - The synced per-job HELM logs stop almost immediately after startup, so the real cause is not discoverable from the standard result files alone.
+
+Concrete improvements worth making in `kwdagger` / cmd-queue-facing tooling:
+- Distinguish scheduling success from payload success explicitly in the final summary.
+  - Example: `schedule_status=success`, `job_status=8 failed of 10`.
+- Print the failed `run_entry` values directly in the terminal summary, not just aggregate counts.
+- Extract and print one short exception summary per failed job when available.
+  - Examples:
+    - `gpqa ... -> gated dataset Idavidrein/gpqa`
+    - `xstest ... -> missing OPENAI_API_KEY for annotator`
+    - `wildbench ... -> completions client received empty prompt`
+- Print the exact artifact path to inspect for each failed job.
+  - Example: `<result_root>/helm/<job_id>/helm-run.log`
+- Group failures by shared cause so operators can see whether they have one broken dependency or many unrelated issues.
+- Preserve stderr / uncaught exceptions from the wrapped workload even when the inner tool exits before writing a rich log.
+  - The `mmlu_pro` case suggests there is still a path where the operator loses the real traceback.
+
+Practical takeaway:
+- The current final queue table is good for "did the batch finish?", but not yet good enough for "what do I fix next?".
+- For long HELM reproductions, a post-queue failure digest would save substantial operator time.

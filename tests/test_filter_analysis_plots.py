@@ -105,6 +105,11 @@ def test_open_access_exclusion_reason_table_ignores_non_open_models():
             {
                 "model_access": "open",
                 "selection_status": "excluded",
+                "failure_reasons": ["requires-closed-judge"],
+            },
+            {
+                "model_access": "open",
+                "selection_status": "excluded",
                 "failure_reasons": [],
             },
             {
@@ -117,6 +122,7 @@ def test_open_access_exclusion_reason_table_ignores_non_open_models():
 
     assert rows == [
         {"failure_reason": "no-hf-deployment", "run_count": 1},
+        {"failure_reason": "requires-closed-judge", "run_count": 1},
         {"failure_reason": "too-large", "run_count": 1},
         {"failure_reason": "unclassified-exclusion", "run_count": 1},
     ]

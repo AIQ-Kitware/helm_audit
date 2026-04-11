@@ -14,3 +14,13 @@ model_deployments:
         base_url: "http://localhost:14000/v1"
         api_key: "SET_LITELLM_MASTER_KEY_IN_RUNTIME_BUNDLE"
         openai_model_name: "openai/gpt-oss-20b"
+  - name: litellm/gpt-oss-20b-chat-local
+    model_name: openai/gpt-oss-20b
+    tokenizer_name: openai/o200k_harmony
+    max_sequence_length: 32768
+    client_spec:
+      class_name: "helm.clients.openai_client.OpenAIClient"
+      args:
+        base_url: "http://localhost:14000/v1"
+        api_key: "SET_LITELLM_MASTER_KEY_IN_RUNTIME_BUNDLE"
+        openai_model_name: "openai/gpt-oss-20b"

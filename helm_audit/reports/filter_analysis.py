@@ -12,6 +12,7 @@ from typing import Any
 import pandas as pd
 import kwutil
 
+from helm_audit.cli.index_historic_helm_runs import CLOSED_JUDGE_REQUIRED_REASON
 from helm_audit.infra.api import audit_root
 from helm_audit.infra.fs_publish import history_publish_root, write_latest_alias
 from helm_audit.infra.report_layout import filtering_reports_root, write_reproduce_script
@@ -337,6 +338,7 @@ def classify_hierarchical_filter_stages(row: dict[str, Any]) -> dict[str, str]:
             'tag_stage': 'stopped before tag check',
             'deployment_stage': 'stopped before deployment check',
             'size_stage': 'stopped before size check',
+            'judge_stage': 'stopped before judge check',
             'outcome_stage': 'excluded before candidate pool',
         }
 
@@ -345,6 +347,7 @@ def classify_hierarchical_filter_stages(row: dict[str, Any]) -> dict[str, str]:
     tag_ok = ('excluded-tags' not in reasons) and ('not-text-like' not in reasons)
     deployment_ok = 'no-hf-deployment' not in reasons
     size_ok = 'too-large' not in reasons
+    judge_ok = CLOSED_JUDGE_REQUIRED_REASON not in reasons
     selected = row.get('selection_status') == 'selected'
 
     if not access_ok:
@@ -354,6 +357,7 @@ def classify_hierarchical_filter_stages(row: dict[str, Any]) -> dict[str, str]:
             'tag_stage': 'stopped after access exclusion',
             'deployment_stage': 'stopped after access exclusion',
             'size_stage': 'stopped after access exclusion',
+            'judge_stage': 'stopped after access exclusion',
             'outcome_stage': 'excluded at open-weight gate',
         }
     if not tag_ok:
@@ -363,6 +367,7 @@ def classify_hierarchical_filter_stages(row: dict[str, Any]) -> dict[str, str]:
             'tag_stage': 'excluded: unsuitable text/modality tags',
             'deployment_stage': 'stopped after tag exclusion',
             'size_stage': 'stopped after tag exclusion',
+            'judge_stage': 'stopped after tag exclusion',
             'outcome_stage': 'excluded at tag gate',
         }
     if not deployment_ok:
@@ -372,6 +377,7 @@ def classify_hierarchical_filter_stages(row: dict[str, Any]) -> dict[str, str]:
             'tag_stage': 'kept: suitable text tags',
             'deployment_stage': 'excluded: no runnable local deployment',
             'size_stage': 'stopped after deployment exclusion',
+            'judge_stage': 'stopped after deployment exclusion',
             'outcome_stage': 'excluded at deployment gate',
         }
     if not size_ok:
@@ -387,7 +393,18 @@ def classify_hierarchical_filter_stages(row: dict[str, Any]) -> dict[str, str]:
             'tag_stage': 'kept: suitable text tags',
             'deployment_stage': 'kept: runnable local deployment',
             'size_stage': short_label,
+            'judge_stage': 'stopped after size exclusion',
             'outcome_stage': 'excluded at size gate',
+        }
+    if not judge_ok:
+        return {
+            'structural_stage': 'passed structural completeness',
+            'access_stage': 'kept: open weight',
+            'tag_stage': 'kept: suitable text tags',
+            'deployment_stage': 'kept: runnable local deployment',
+            'size_stage': 'kept: within size budget',
+            'judge_stage': 'excluded: requires closed-source judge',
+            'outcome_stage': 'excluded at judge gate',
         }
     if not selected:
         return {
@@ -396,6 +413,7 @@ def classify_hierarchical_filter_stages(row: dict[str, Any]) -> dict[str, str]:
             'tag_stage': 'kept: suitable text tags',
             'deployment_stage': 'kept: runnable local deployment',
             'size_stage': 'kept: within size budget',
+            'judge_stage': 'kept: no closed-source judge dependency',
             'outcome_stage': 'excluded after explicit gates (unclassified)',
         }
     return {
@@ -404,6 +422,7 @@ def classify_hierarchical_filter_stages(row: dict[str, Any]) -> dict[str, str]:
         'tag_stage': 'kept: suitable text tags',
         'deployment_stage': 'kept: runnable local deployment',
         'size_stage': 'kept: within size budget',
+        'judge_stage': 'kept: no closed-source judge dependency',
         'outcome_stage': 'selected for reproduction',
     }
 
@@ -451,9 +470,14 @@ def build_hierarchical_sankey_key(summary: dict[str, Any]) -> dict[str, list[str
             'kept: within size budget: passes the size budget gate',
             'stopped after deployment exclusion: excluded earlier, so no size decision was needed',
         ],
+        'Judge Gate': [
+            'excluded: requires closed-source judge: benchmark depends on a proprietary / credentialed judge or annotator',
+            'kept: no closed-source judge dependency: benchmark stays within the current open-model reproduction scope',
+            'stopped before judge check / stopped after access exclusion / stopped after tag exclusion / stopped after deployment exclusion / stopped after size exclusion',
+        ],
         'Outcome': [
             'selected for reproduction: run survives every gate and is included in the output run list',
-            'excluded before candidate pool / at open-weight gate / at tag gate / at deployment gate / at size gate / after explicit gates (unclassified)',
+            'excluded before candidate pool / at open-weight gate / at tag gate / at deployment gate / at size gate / at judge gate / after explicit gates (unclassified)',
         ],
     }
 
@@ -795,6 +819,7 @@ def emit_filter_report_artifacts(
                 'too-large: model exceeds the local reproduction size budget',
                 'not-open-access: model access is not open in the HELM registry',
                 'no-hf-deployment: model has no runnable local HuggingFace deployment path',
+                f'{CLOSED_JUDGE_REQUIRED_REASON}: benchmark requires a proprietary / credentialed judge or annotator',
                 f'{UNCLASSIFIED_EXCLUSION}: no current rule classified this exclusion',
             ],
             'outcome': [
@@ -866,7 +891,7 @@ def build_analysis_text(
     lines.extend([
         '',
         'Hierarchical gate order:',
-        '  all discovered runs -> structural completeness -> open weight -> suitable text tags -> runnable local deployment -> size budget -> selected subset',
+        '  all discovered runs -> structural completeness -> open weight -> suitable text tags -> runnable local deployment -> size budget -> no closed-source judge dependency -> selected subset',
         '  This gate order makes the full-corpus denominator visible while also showing the fairer open-weight and runnable subsets at intermediate steps.',
         '',
         'Suggested plots:',
@@ -1434,6 +1459,7 @@ def emit_filter_analysis_artifacts(
             ('tag_stage', 'Tag Gate'),
             ('deployment_stage', 'Deployment Gate'),
             ('size_stage', 'Size Gate'),
+            ('judge_stage', 'Judge Gate'),
             ('outcome_stage', 'Outcome'),
         ],
         machine_dpath=machine_dpath,

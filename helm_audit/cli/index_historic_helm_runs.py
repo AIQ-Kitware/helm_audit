@@ -54,19 +54,21 @@ import kwutil
 import scriptconfig as scfg
 from loguru import logger
 
-from magnet.backends.helm.helm_outputs import HelmOutputs, HelmRun
 from helm_audit.infra.api import repo_run_details_fpath, repo_run_specs_fpath
-
-# Reuse your existing discovery + inference logic
-from magnet.backends.helm.cli.materialize_helm_run import (
-    discover_benchmark_output_dirs,
-    infer_num_instances,
-    is_complete_run_dir,
-)
 from helm_audit.helm.run_entries import parse_run_entry_description, parse_run_name_to_kv
 
 
 MISSING_MODEL_METADATA_REASON = 'missing-model-metadata'
+CLOSED_JUDGE_REQUIRED_REASON = 'requires-closed-judge'
+
+CLOSED_JUDGE_BENCHMARKS = {
+    'anthropic_red_team',
+    'harm_bench',
+    'omni_math',
+    'simple_safety_tests',
+    'wildbench',
+    'xstest',
+}
 
 
 class CompileHelmReproListConfig(scfg.DataConfig):
@@ -255,7 +257,16 @@ class CompileHelmReproListConfig(scfg.DataConfig):
         chosen_model_names = {r['name'] for r in chosen_model_rows}
         logger.info('Filter to {} / {} models', len(chosen_model_rows), len(model_rows))
 
-        chosen_rows = [r for r in rows if r['model'] in chosen_model_names]
+        chosen_rows = []
+        for row in rows:
+            if row['model'] not in chosen_model_names:
+                continue
+            run_failure_reason_details = build_run_failure_reason_details(
+                benchmark=describe_run_spec(row['run_spec_name'], row.get('scenario_class'))['benchmark'],
+            )
+            if run_failure_reason_details:
+                continue
+            chosen_rows.append(row)
         logger.info('Filter to {} / {} runs', len(chosen_rows), len(rows))
 
         # Prepare filter-step analysis data (for report generation)
@@ -401,7 +412,12 @@ def gather_runs(
     run_pattern: str = "*:*",
     require_per_instance_stats: bool = False,
     include_max_eval_instances: bool = True,
-) -> tuple[list[HelmRun], list[dict[str, Any]]]:
+) -> tuple[list[Any], list[dict[str, Any]]]:
+    from magnet.backends.helm.helm_outputs import HelmOutputs, HelmRun
+    from magnet.backends.helm.cli.materialize_helm_run import (
+        discover_benchmark_output_dirs,
+        is_complete_run_dir,
+    )
 
     # Discover all benchmark_output dirs under provided roots
     logger.info('Discover benchmarks')
@@ -439,10 +455,12 @@ def gather_runs(
 
 
 def build_run_table(
-    runs: list[HelmRun],
+    runs: list[Any],
     *,
     include_max_eval_instances: bool = False,
 ) -> list[dict]:
+    from magnet.backends.helm.cli.materialize_helm_run import infer_num_instances
+
     rows = []
     mismatches = []
     for run in ub.ProgIter(runs, desc='Extract run spec info'):
@@ -560,6 +578,17 @@ def build_failure_reason_details(
     return details
 
 
+def build_run_failure_reason_details(*, benchmark: str) -> dict[str, str]:
+    details: dict[str, str] = {}
+    if benchmark in CLOSED_JUDGE_BENCHMARKS:
+        details[CLOSED_JUDGE_REQUIRED_REASON] = (
+            'Benchmark requires a proprietary / credentialed judge or annotator path; '
+            'that closed-source evaluation dependency is currently out of scope for the '
+            'local open-model reproduction recipe.'
+        )
+    return details
+
+
 def short_scenario_name(scenario_class: str | None) -> str:
     if not scenario_class:
         return 'UnknownScenario'
@@ -660,26 +689,38 @@ def build_filter_inventory_rows(
     for row in complete_rows:
         info = describe_run_spec(row['run_spec_name'], row.get('scenario_class'))
         model_meta = model_info.get(row['model'], {})
-        failure_reasons = list(model_meta.get('failure_reasons', []))
-        selected = row['model'] in chosen_model_names
+        model_failure_reasons = list(model_meta.get('failure_reasons', []))
+        model_failure_reason_details = dict(model_meta.get('failure_reason_details', {}))
+        run_failure_reason_details = build_run_failure_reason_details(benchmark=info['benchmark'])
+        run_failure_reasons = list(run_failure_reason_details)
+        failure_reasons = model_failure_reasons + [
+            reason for reason in run_failure_reasons if reason not in model_failure_reasons
+        ]
+        failure_reason_details = model_failure_reason_details | run_failure_reason_details
+        eligible_model = bool(model_meta.get('eligible', False))
+        eligible_candidate = eligible_model and not run_failure_reasons
+        candidate_pool = 'complete-run'
+        if eligible_model:
+            candidate_pool = 'eligible-model' if not run_failure_reasons else 'eligible-model-out-of-scope'
+        selected = row['model'] in chosen_model_names and not run_failure_reasons
         inventory_rows.append({
             **row,
             **info,
             'selection_status': 'selected' if selected else 'excluded',
             'outcome': 'selected' if selected else 'excluded',
             'considered_for_selection': True,
-            'eligible_candidate': bool(model_meta.get('eligible', False)),
-            'candidate_pool': 'eligible-model' if bool(model_meta.get('eligible', False)) else 'complete-run',
-            'eligible_model': bool(model_meta.get('eligible', False)),
+            'eligible_candidate': eligible_candidate,
+            'candidate_pool': candidate_pool,
+            'eligible_model': eligible_model,
             'failure_reasons': failure_reasons,
-            'failure_reason_details': dict(model_meta.get('failure_reason_details', {})),
+            'failure_reason_details': failure_reason_details,
             'failure_reason_summary': 'selected' if selected else '|'.join(failure_reasons),
             'selection_explanation': (
                 'Selected because the run was structurally complete and its model passed all eligibility filters.'
                 if selected else
-                'Excluded after consideration because the model failed: '
+                'Excluded after consideration because the run failed the current reproduction filters: '
                 + '; '.join(
-                    model_meta.get('failure_reason_details', {}).get(reason, reason)
+                    failure_reason_details.get(reason, reason)
                     for reason in failure_reasons
                 ) + '.'
             ),
