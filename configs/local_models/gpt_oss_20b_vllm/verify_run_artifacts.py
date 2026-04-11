@@ -18,7 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("run_dir")
     parser.add_argument("--expect-model", default="openai/gpt-oss-20b")
-    parser.add_argument("--expect-deployment", default="vllm/gpt-oss-20b-local")
+    parser.add_argument("--expect-deployment", default="litellm/gpt-oss-20b-local")
     args = parser.parse_args(argv)
 
     run_dir = Path(args.run_dir).expanduser().resolve()

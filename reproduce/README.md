@@ -16,7 +16,7 @@ Current scenarios:
 - `historic_grid/`: historic public-run manifest and rebuild flow
 - `machine_compare/`: cross-machine indexing, analysis, and pairwise compare
 - `qwen35_vllm/`: local vLLM smoke run for `qwen/qwen3.5-9b` through the existing `kwdagger` and materialized HELM path
-- `gpt_oss_20b_vllm/`: local vLLM smoke plus targeted overnight batch for the `openai/gpt-oss-20b` runs that were filtered out only because they had no local deployment path
+- `gpt_oss_20b_vllm/`: local LiteLLM-backed vLLM smoke plus targeted overnight batch for the `openai/gpt-oss-20b` runs that were filtered out only because they had no local deployment path
 
 The shell files here are intentionally thin. They are runbook steps, not the
 implementation. Each one should delegate to a `helm_audit` Python CLI such as
@@ -33,3 +33,8 @@ generated experiment state.
 The `qwen35_vllm/` runbook assumes:
 - a local vLLM OpenAI-compatible server is available on `http://localhost:8000/v1`
 - the downstream `materialize_helm_run.py` copies the manifest's `model_deployments_fpath` into `<job_dir>/prod_env/model_deployments.yaml` before invoking `helm-run`
+
+The `gpt_oss_20b_vllm/` runbook assumes:
+- the local service is exposed through LiteLLM on `http://localhost:14000/v1`
+- `LITELLM_MASTER_KEY` is available, either already exported or via `/data/service/service-repo/vllm/generated/.env`
+- the runbook writes a machine-local bundle under `$AUDIT_STORE_ROOT/local-bundles/gpt_oss_20b_vllm/` so secrets and absolute paths do not need to live in checked-in YAML
