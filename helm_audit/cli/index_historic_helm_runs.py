@@ -60,6 +60,7 @@ from helm_audit.helm.run_entries import parse_run_entry_description, parse_run_n
 
 MISSING_MODEL_METADATA_REASON = 'missing-model-metadata'
 CLOSED_JUDGE_REQUIRED_REASON = 'requires-closed-judge'
+GATED_DATASET_REASON = 'requires-gated-dataset'
 
 CLOSED_JUDGE_BENCHMARKS = {
     'anthropic_red_team',
@@ -68,6 +69,10 @@ CLOSED_JUDGE_BENCHMARKS = {
     'simple_safety_tests',
     'wildbench',
     'xstest',
+}
+
+GATED_DATASET_BENCHMARKS = {
+    'gpqa',
 }
 
 
@@ -584,6 +589,11 @@ def build_run_failure_reason_details(*, benchmark: str) -> dict[str, str]:
         details[CLOSED_JUDGE_REQUIRED_REASON] = (
             'Benchmark requires a proprietary / credentialed judge or annotator path; '
             'that closed-source evaluation dependency is currently out of scope for the '
+            'local open-model reproduction recipe.'
+        )
+    if benchmark in GATED_DATASET_BENCHMARKS:
+        details[GATED_DATASET_REASON] = (
+            'Benchmark requires a gated dataset that is not part of the default '
             'local open-model reproduction recipe.'
         )
     return details

@@ -2,8 +2,8 @@ schema_version: 1
 experiment_name: audit-gpt-oss-20b-vllm-smoke
 description: Checked-in reference manifest for the gpt-oss smoke batch. The runnable repro flow uses reproduce/gpt_oss_20b_vllm/05_write_bundle.sh to generate a machine-local LiteLLM-backed manifest.
 run_entries:
-  - ifeval:model=openai/gpt-oss-20b
-  - bbq:subject=all,method=multiple_choice_joint,max_train_instances=0,model=openai/gpt-oss-20b
+  - ifeval:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
+  - bbq:subject=all,method=multiple_choice_joint,max_train_instances=0,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
 max_eval_instances: 5
 suite: audit-gpt-oss-20b-vllm-smoke
 mode: compute_if_missing

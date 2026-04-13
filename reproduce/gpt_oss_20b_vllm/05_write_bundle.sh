@@ -48,8 +48,8 @@ schema_version: 1
 experiment_name: audit-gpt-oss-20b-vllm-smoke
 description: Smoke-test HELM batch for openai/gpt-oss-20b through the local LiteLLM-backed vLLM service.
 run_entries:
-  - ifeval:model=openai/gpt-oss-20b
-  - bbq:subject=all,method=multiple_choice_joint,max_train_instances=0,model=openai/gpt-oss-20b
+  - ifeval:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
+  - bbq:subject=all,method=multiple_choice_joint,max_train_instances=0,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
 max_eval_instances: 5
 suite: audit-gpt-oss-20b-vllm-smoke
 mode: compute_if_missing
@@ -67,15 +67,14 @@ YAML
 
 cat > "$BUNDLE_ROOT/full_manifest.yaml" <<YAML
 schema_version: 1
-experiment_name: audit-historic-grid-gpt-oss-20b-vllm
-description: Targeted historic-grid extension for openai/gpt-oss-20b using the local LiteLLM-backed vLLM service.
+experiment_name: audit-historic-grid-gpt-oss-20b-vllm-trimmed
+description: Targeted in-scope historic-grid extension for openai/gpt-oss-20b using the local LiteLLM-backed vLLM service.
 run_entries:
-  - bbq:subject=all,method=multiple_choice_joint,max_train_instances=0,model=openai/gpt-oss-20b
-  - gpqa:subset=gpqa_main,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b
-  - ifeval:model=openai/gpt-oss-20b
-  - mmlu_pro:subset=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b
+  - bbq:subject=all,method=multiple_choice_joint,max_train_instances=0,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
+  - ifeval:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
+  - mmlu_pro:subset=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
 max_eval_instances: 1000
-suite: audit-historic-grid-gpt-oss-20b-vllm
+suite: audit-historic-grid-gpt-oss-20b-vllm-trimmed
 mode: compute_if_missing
 materialize: symlink
 backend: tmux

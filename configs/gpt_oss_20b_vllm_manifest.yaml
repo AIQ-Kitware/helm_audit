@@ -1,13 +1,12 @@
 schema_version: 1
-experiment_name: audit-historic-grid-gpt-oss-20b-vllm
-description: Checked-in reference manifest for the targeted gpt-oss historic-grid extension. The runnable repro flow uses reproduce/gpt_oss_20b_vllm/05_write_bundle.sh to generate a machine-local LiteLLM-backed manifest.
+experiment_name: audit-historic-grid-gpt-oss-20b-vllm-trimmed
+description: Checked-in reference manifest for the targeted in-scope gpt-oss historic-grid extension. The runnable repro flow uses reproduce/gpt_oss_20b_vllm/05_write_bundle.sh to generate a machine-local LiteLLM-backed manifest.
 run_entries:
-  - bbq:subject=all,method=multiple_choice_joint,max_train_instances=0,model=openai/gpt-oss-20b
-  - gpqa:subset=gpqa_main,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b
-  - ifeval:model=openai/gpt-oss-20b
-  - mmlu_pro:subset=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b
+  - bbq:subject=all,method=multiple_choice_joint,max_train_instances=0,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
+  - ifeval:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
+  - mmlu_pro:subset=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
 max_eval_instances: 1000
-suite: audit-historic-grid-gpt-oss-20b-vllm
+suite: audit-historic-grid-gpt-oss-20b-vllm-trimmed
 mode: compute_if_missing
 materialize: symlink
 backend: tmux

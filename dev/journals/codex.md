@@ -443,3 +443,20 @@ Design takeaways:
 1. Run-level scope exclusions and model-level eligibility exclusions should share one reason schema, but they should not be forced into the same candidate-pool semantics.
 2. A deployment mismatch like `wildbench` is best represented as an explicit `model_deployment=` override when the framework already supports it.
 3. Post-run failure summaries become far more valuable once they include category grouping, concise human summaries, and exact artifact paths, not just a list of failed job ids.
+
+## 2026-04-13 00:02:05 +0000
+
+Summary of user intent: finish the follow-up from the trimmed `gpt-oss-20b` run by excluding gated-dataset benchmarks during Stage 1 indexing, improving post-run failure categorization for the null-text crash, fixing the `gpt-oss` manifests so in-scope runs actually use the completions deployment, and writing a concrete HELM patch proposal into `docs/`.
+
+Model and configuration: Codex (GPT-5-based coding agent), reasoning_effort=medium, collaboration mode `Default`.
+
+This pass closed the loop between investigation and operational cleanup. The most important new fact from the synced trimmed run was not just that `ifeval` and `bbq` still failed, but that they were failing while bound to `litellm/gpt-oss-20b-chat-local` even though the runbook had been intended to favor legacy completions for those scenarios. That exposed a subtle but very practical configuration hazard: once both chat and completions deployments exist for the same logical model name, relying on registry default selection is no longer safe. The better design is to pin `model_deployment=litellm/gpt-oss-20b-local` directly in the smoke and trimmed full manifests for the runs we know should go through completions. I also switched the default trimmed full experiment name into source control so future reruns land in a fresh root instead of being visually merged into the older 10-job experiment.
+
+On the filtering side, the user was right that the out-of-scope conditions should be visible as first-class policy in Stage 1 rather than rediscovered by overnight failures. I added gated-dataset exclusion beside the earlier proprietary-judge exclusion, using the same extensible run-level reason structure and the same `eligible-model-out-of-scope` candidate-pool semantics. That choice keeps the reporting model coherent: a model can still be locally eligible while a specific benchmark run is excluded because the dataset or judge dependency does not belong to the default recipe. The existing report structure already had the right shape for this, so the best move was to reuse it instead of inventing a second special-case pipeline for `gpqa`.
+
+I also now feel more confident saying the `NoneType.strip()` issue deserves a HELM-side proposal. The configuration bug clearly mattered, but even after disentangling it the failure signature remains an evaluator robustness problem, not just operator error. Rather than patching HELM in this repo, I wrote down the case for a client-layer normalization fix in a dedicated markdown note under `docs/`. That strikes the right balance for now: we keep the local reproduction path honest and minimally invasive, while documenting a concrete upstream-quality improvement that would make HELM behave better across provider quirks. The residual uncertainty is `mmlu_pro`, which still does not explain itself from the archived logs; that is a separate debugging thread and a reminder that our failure surfaces are still not complete.
+
+Design takeaways:
+1. If multiple deployments share one logical model name, manifests should pin the intended `model_deployment` instead of trusting registry default order.
+2. Dataset-access exclusions belong in the same Stage 1 reason system as model and judge exclusions, because operators need one coherent explanation surface.
+3. A local workaround can unblock experiments, but a written upstream patch proposal is worth capturing once the failure mode clearly reflects framework brittleness rather than pure misconfiguration.

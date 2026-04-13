@@ -170,6 +170,44 @@ def test_build_filter_inventory_rows_excludes_closed_judge_benchmarks_even_with_
     assert "closed-source evaluation dependency" in row["selection_explanation"]
 
 
+def test_build_filter_inventory_rows_excludes_gated_dataset_benchmarks_even_with_eligible_model():
+    complete_rows = [
+        {
+            "run_spec_name": "gpqa:subset=gpqa_main,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b",
+            "run_dir": "/tmp/gpqa-run",
+            "max_eval_instances": None,
+            "model": "openai/gpt-oss-20b",
+            "scenario_class": "helm.benchmark.scenarios.gpqa_scenario.GPQAScenario",
+        },
+    ]
+    inventory = build_filter_inventory_rows(
+        complete_rows=complete_rows,
+        incomplete_rows=[],
+        model_filter_rows=[
+            {
+                "model": "openai/gpt-oss-20b",
+                "n_runs": 1,
+                "failure_reasons": [],
+                "failure_reason_details": {},
+                "eligible": True,
+                "num_parameters": 20e9,
+                "access": "open",
+                "tags": ["TEXT_MODEL_TAG"],
+                "has_hf_client": True,
+                "size_threshold_params": 40e9,
+            }
+        ],
+        chosen_model_names={"openai/gpt-oss-20b"},
+    )
+    row = inventory[0]
+    assert row["selection_status"] == "excluded"
+    assert row["eligible_model"] is True
+    assert row["eligible_candidate"] is False
+    assert row["candidate_pool"] == "eligible-model-out-of-scope"
+    assert "requires-gated-dataset" in row["failure_reasons"]
+    assert "gated dataset" in row["selection_explanation"]
+
+
 def test_emit_filter_report_artifacts_writes_tables(tmp_path: Path):
     inventory_rows = [
         {

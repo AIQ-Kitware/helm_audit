@@ -37,3 +37,22 @@ def test_summarize_failures_classifies_known_failure_patterns(tmp_path):
     assert rows["helm_id_passed"]["status"] == "passed"
     assert "gated dataset" in rows["helm_id_gated"]["summary"]
     assert "OPENAI_API_KEY" in rows["helm_id_api"]["summary"]
+
+
+def test_summarize_failures_classifies_null_completion_text(tmp_path):
+    helm_root = tmp_path / "experiment" / "helm"
+    null_text = helm_root / "helm_id_null_text"
+    null_text.mkdir(parents=True)
+    (null_text / "job_config.json").write_text(json.dumps({"helm.run_entry": "ifeval:model=openai/gpt-oss-20b"}))
+    (null_text / "helm-run.log").write_text(
+        "Traceback (most recent call last):\n"
+        "  File \"/tmp/demo.py\", line 1, in <module>\n"
+        "AttributeError: 'NoneType' object has no attribute 'strip'\n"
+    )
+
+    summary = summarize_failures(tmp_path / "experiment")
+    assert summary["failed_jobs"] == 1
+    assert summary["category_counts"]["null_completion_text"] == 1
+    row = summary["rows"][0]
+    assert row["category"] == "null_completion_text"
+    assert "null text/content" in row["summary"]

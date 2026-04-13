@@ -10,6 +10,11 @@ import scriptconfig as scfg
 
 ERROR_PATTERNS: list[tuple[str, str, str]] = [
     (
+        r"AttributeError: 'NoneType' object has no attribute 'strip'",
+        "null_completion_text",
+        "HELM received a completion payload with null text/content and crashed while stripping it",
+    ),
+    (
         r"DatasetNotFoundError: Dataset '([^']+)' is a gated dataset",
         "gated_dataset",
         "gated dataset: {0}",
