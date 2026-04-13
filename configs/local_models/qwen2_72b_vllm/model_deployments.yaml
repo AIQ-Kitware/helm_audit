@@ -1,0 +1,10 @@
+model_deployments:
+  - name: vllm/qwen2-72b-instruct-local
+    model_name: qwen/qwen2-72b-instruct
+    tokenizer_name: qwen/qwen2-72b-instruct
+    max_sequence_length: 32768
+    client_spec:
+      class_name: "helm.clients.vllm_client.VLLMChatClient"
+      args:
+        base_url: "http://localhost:8000/v1"
+        vllm_model_name: "Qwen/Qwen2-72B-Instruct"

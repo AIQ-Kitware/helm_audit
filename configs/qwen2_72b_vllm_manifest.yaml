@@ -1,0 +1,28 @@
+schema_version: 1
+experiment_name: audit-historic-grid-qwen2-72b-vllm
+description: Historic-grid reproduction batch for qwen/qwen2-72b-instruct through a local vLLM server.
+run_entries:
+  - ewok:domain=agent_properties,model=qwen/qwen2-72b-instruct
+  - ewok:domain=material_dynamics,model=qwen/qwen2-72b-instruct
+  - ewok:domain=material_properties,model=qwen/qwen2-72b-instruct
+  - ewok:domain=physical_dynamics,model=qwen/qwen2-72b-instruct
+  - ewok:domain=physical_interactions,model=qwen/qwen2-72b-instruct
+  - ewok:domain=physical_relations,model=qwen/qwen2-72b-instruct
+  - ewok:domain=quantitative_properties,model=qwen/qwen2-72b-instruct
+  - ewok:domain=social_interactions,model=qwen/qwen2-72b-instruct
+  - ewok:domain=social_properties,model=qwen/qwen2-72b-instruct
+  - ewok:domain=social_relations,model=qwen/qwen2-72b-instruct
+  - ewok:domain=spatial_relations,model=qwen/qwen2-72b-instruct
+max_eval_instances: 1000
+suite: audit-historic-grid-qwen2-72b-vllm
+mode: compute_if_missing
+materialize: symlink
+backend: tmux
+devices: 0
+tmux_workers: 1
+local_path: prod_env
+precomputed_root: null
+require_per_instance_stats: true
+model_deployments_fpath: configs/local_models/qwen2_72b_vllm/model_deployments.yaml
+enable_huggingface_models: []
+enable_local_huggingface_models: []

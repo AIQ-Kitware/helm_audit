@@ -16,6 +16,7 @@ Current scenarios:
 - `historic_grid/`: historic public-run manifest and rebuild flow
 - `machine_compare/`: cross-machine indexing, analysis, and pairwise compare
 - `qwen35_vllm/`: local vLLM smoke run for `qwen/qwen3.5-9b` through the existing `kwdagger` and materialized HELM path
+- `qwen2_72b_vllm/`: local vLLM smoke plus full EWOK historic-grid batch for `qwen/qwen2-72b-instruct` using the `helm-qwen2-72b-instruct` server profile
 - `gpt_oss_20b_vllm/`: local LiteLLM-backed vLLM smoke plus targeted overnight batch for the `openai/gpt-oss-20b` runs that were filtered out only because they had no local deployment path
 
 The shell files here are intentionally thin. They are runbook steps, not the
@@ -32,6 +33,11 @@ generated experiment state.
 
 The `qwen35_vllm/` runbook assumes:
 - a local vLLM OpenAI-compatible server is available on `http://localhost:8000/v1`
+- the downstream `materialize_helm_run.py` copies the manifest's `model_deployments_fpath` into `<job_dir>/prod_env/model_deployments.yaml` before invoking `helm-run`
+
+The `qwen2_72b_vllm/` runbook assumes:
+- a local vLLM OpenAI-compatible server is available on `http://localhost:8000/v1`
+- the service is launched with the `helm-qwen2-72b-instruct` profile, or equivalently serves `Qwen/Qwen2-72B-Instruct` with the HELM alias `qwen/qwen2-72b-instruct`
 - the downstream `materialize_helm_run.py` copies the manifest's `model_deployments_fpath` into `<job_dir>/prod_env/model_deployments.yaml` before invoking `helm-run`
 
 The `gpt_oss_20b_vllm/` runbook assumes:

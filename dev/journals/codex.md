@@ -460,3 +460,20 @@ Design takeaways:
 1. If multiple deployments share one logical model name, manifests should pin the intended `model_deployment` instead of trusting registry default order.
 2. Dataset-access exclusions belong in the same Stage 1 reason system as model and judge exclusions, because operators need one coherent explanation surface.
 3. A local workaround can unblock experiments, but a written upstream patch proposal is worth capturing once the failure mode clearly reflects framework brittleness rather than pure misconfiguration.
+
+## 2026-04-13 00:27:24 +0000
+
+Summary of user intent: add a runnable reproduction script path for the next untested local Qwen target, specifically the `helm-qwen2-72b-instruct` profile, so it is easy to do both a quick smoke check and a fuller HELM reproduction batch without rebuilding the operator workflow from scratch.
+
+Model and configuration: Codex (GPT-5-based coding agent), reasoning_effort=medium, collaboration mode `Default`.
+
+This was a good case for reusing a working pattern instead of making the repo more clever than it needs to be. The existing `qwen35_vllm` runbook already encoded the right operator shape for a local vLLM-backed HELM path: thin shell steps, a checked-in local `model_deployments.yaml`, a validate script, and small manifests passed through `helm-audit-run`. The key work was therefore to make sure the new `qwen2-72b` files match the canonical names on both sides. I verified that `vllm_service` exposes a `helm-qwen2-72b-instruct` profile whose alias is `qwen/qwen2-72b-instruct`, and that HELM’s canonical model/tokenizer name is also `qwen/qwen2-72b-instruct`. That is the sort of alignment that saves a lot of debugging later, so I based the new bundle directly on those exact strings.
+
+I chose to make the full batch target the 11 historical `ewok` runs rather than inventing a broader synthetic benchmark set. That feels more honest to the repo’s purpose: this runbook is about reproducing prior HELM surface area, not about creating a new benchmark suite for the model. For the smoke run I kept just one `ewok` domain with five instances so it exercises the actual historical scenario family while still being cheap enough to validate the deployment. The new runbook mirrors the `qwen35_vllm` naming and operator sequence, which should keep the learning curve low when switching between local model families.
+
+I only did a preview validation here, not a live run against a server, so the remaining uncertainty is entirely operational: whether the target machine actually has the `helm-qwen2-72b-instruct` service profile running with enough VRAM and whether the default `Qwen/Qwen2-72B-Instruct` chat path behaves cleanly under the EWOK prompts. The manifest and deployment wiring are sound, and that is the right stopping point for this repo-side task. If the live run exposes model- or scenario-specific quirks, we now have a concrete runbook to iterate on instead of a pile of ad hoc shell history.
+
+Design takeaways:
+1. When a new reproduction target closely resembles an existing local model flow, copy the operator shape and spend effort only on the names, manifests, and historical scope.
+2. Historic reproduction runbooks are easier to trust when the “full” batch is grounded in actual previously observed run entries rather than generic smoke benchmarks.
+3. For local-vLLM HELM work, the most valuable upfront validation is confirming that the service alias, HELM model name, and deployment override all use the same canonical string.

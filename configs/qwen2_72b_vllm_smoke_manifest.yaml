@@ -1,0 +1,18 @@
+schema_version: 1
+experiment_name: audit-qwen2-72b-vllm-smoke
+description: Smoke-test HELM batch for qwen/qwen2-72b-instruct through a local vLLM server.
+run_entries:
+  - ewok:domain=agent_properties,model=qwen/qwen2-72b-instruct
+max_eval_instances: 5
+suite: audit-qwen2-72b-vllm-smoke
+mode: compute_if_missing
+materialize: symlink
+backend: tmux
+devices: 0
+tmux_workers: 1
+local_path: prod_env
+precomputed_root: null
+require_per_instance_stats: true
+model_deployments_fpath: configs/local_models/qwen2_72b_vllm/model_deployments.yaml
+enable_huggingface_models: []
+enable_local_huggingface_models: []
