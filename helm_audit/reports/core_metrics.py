@@ -377,6 +377,10 @@ def _agreement_curve_rows(*pairs: dict[str, Any], level_key: str) -> list[dict[s
 
 def _plot_distribution(ax, *pairs: dict[str, Any], level_key: str) -> None:
     rows = pd.DataFrame(_agreement_curve_rows(*pairs, level_key=level_key))
+    if rows.empty or 'abs_tol' not in rows.columns or 'agree_ratio' not in rows.columns:
+        ax.text(0.5, 0.5, 'No comparable core-metric rows', ha='center', va='center', transform=ax.transAxes)
+        ax.set_axis_off()
+        return
     sns.lineplot(
         ax=ax,
         data=rows,
@@ -523,12 +527,16 @@ def _distribution_rows(pair: dict[str, Any]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _plot_metric_distributions(fig_dpath: Path, stamp: str, left: dict[str, Any], right: dict[str, Any], run_spec_name: str) -> Path:
+def _plot_metric_distributions(fig_dpath: Path, stamp: str, left: dict[str, Any], right: dict[str, Any], run_spec_name: str) -> Path | None:
     df = pd.concat([
         _distribution_rows(left),
         _distribution_rows(right),
     ], ignore_index=True)
+    if df.empty or 'metric' not in df.columns:
+        return None
     metrics = sorted(df['metric'].dropna().unique().tolist())
+    if not metrics:
+        return None
     pair_order = [left['label'], right['label']]
     fig, axes = plt.subplots(
         len(pair_order),
@@ -608,13 +616,17 @@ def _plot_three_run_metric_distributions(
     kwdagger_b_run: str,
     official_run: str,
     run_spec_name: str,
-) -> Path:
+) -> Path | None:
     df = pd.concat([
         _single_run_instance_core_rows(kwdagger_a_run, 'kwdagger A'),
         _single_run_instance_core_rows(kwdagger_b_run, 'kwdagger B'),
         _single_run_instance_core_rows(official_run, 'official'),
     ], ignore_index=True)
+    if df.empty or 'metric' not in df.columns:
+        return None
     metrics = sorted(df['metric'].dropna().unique().tolist())
+    if not metrics:
+        return None
     run_order = ['kwdagger A', 'kwdagger B', 'official']
     fig, axes = plt.subplots(
         len(metrics),
@@ -666,13 +678,17 @@ def _plot_overlay_metric_distributions(
     kwdagger_b_run: str,
     official_run: str,
     run_spec_name: str,
-) -> Path:
+) -> Path | None:
     df = pd.concat([
         _single_run_instance_core_rows(kwdagger_a_run, 'kwdagger A'),
         _single_run_instance_core_rows(kwdagger_b_run, 'kwdagger B'),
         _single_run_instance_core_rows(official_run, 'official'),
     ], ignore_index=True)
+    if df.empty or 'metric' not in df.columns:
+        return None
     metrics = sorted(df['metric'].dropna().unique().tolist())
+    if not metrics:
+        return None
     fig, axes = plt.subplots(
         len(metrics),
         1,
@@ -725,13 +741,17 @@ def _plot_overlay_metric_ecdfs(
     kwdagger_b_run: str,
     official_run: str,
     run_spec_name: str,
-) -> Path:
+) -> Path | None:
     df = pd.concat([
         _single_run_instance_core_rows(kwdagger_a_run, 'kwdagger A'),
         _single_run_instance_core_rows(kwdagger_b_run, 'kwdagger B'),
         _single_run_instance_core_rows(official_run, 'official'),
     ], ignore_index=True)
+    if df.empty or 'metric' not in df.columns:
+        return None
     metrics = sorted(df['metric'].dropna().unique().tolist())
+    if not metrics:
+        return None
     fig, axes = plt.subplots(
         len(metrics),
         1,
@@ -1086,13 +1106,18 @@ def main(argv: list[str] | None = None) -> None:
         txt_fpath: 'core_metric_report.latest.txt',
         mgmt_fpath: 'core_metric_management_summary.latest.txt',
         fig_fpath: 'core_metric_report.latest.png',
-        dist_fig_fpath: 'core_metric_distributions.latest.png',
-        three_run_dist_fpath: 'core_metric_three_run_distributions.latest.png',
-        overlay_dist_fpath: 'core_metric_overlay_distributions.latest.png',
-        ecdf_fig_fpath: 'core_metric_ecdfs.latest.png',
         runlevel_csv_fpath: 'core_runlevel_table.latest.csv',
-        runlevel_md_fpath: 'core_runlevel_table.latest.md',
     }
+    if dist_fig_fpath is not None:
+        latest_map[dist_fig_fpath] = 'core_metric_distributions.latest.png'
+    if three_run_dist_fpath is not None:
+        latest_map[three_run_dist_fpath] = 'core_metric_three_run_distributions.latest.png'
+    if overlay_dist_fpath is not None:
+        latest_map[overlay_dist_fpath] = 'core_metric_overlay_distributions.latest.png'
+    if ecdf_fig_fpath is not None:
+        latest_map[ecdf_fig_fpath] = 'core_metric_ecdfs.latest.png'
+    if runlevel_md_fpath is not None:
+        latest_map[runlevel_md_fpath] = 'core_runlevel_table.latest.md'
     if per_metric_agree_fpath is not None:
         latest_map[per_metric_agree_fpath] = 'core_metric_per_metric_agreement.latest.png'
     for src, latest_name in latest_map.items():
@@ -1102,10 +1127,14 @@ def main(argv: list[str] | None = None) -> None:
     print(f'Wrote core metric text: {txt_fpath}')
     print(f'Wrote core metric management summary: {mgmt_fpath}')
     print(f'Wrote core metric plot: {fig_fpath}')
-    print(f'Wrote core metric distributions: {dist_fig_fpath}')
-    print(f'Wrote core metric three-run distributions: {three_run_dist_fpath}')
-    print(f'Wrote core metric overlay distributions: {overlay_dist_fpath}')
-    print(f'Wrote core metric ecdfs: {ecdf_fig_fpath}')
+    if dist_fig_fpath is not None:
+        print(f'Wrote core metric distributions: {dist_fig_fpath}')
+    if three_run_dist_fpath is not None:
+        print(f'Wrote core metric three-run distributions: {three_run_dist_fpath}')
+    if overlay_dist_fpath is not None:
+        print(f'Wrote core metric overlay distributions: {overlay_dist_fpath}')
+    if ecdf_fig_fpath is not None:
+        print(f'Wrote core metric ecdfs: {ecdf_fig_fpath}')
     if per_metric_agree_fpath is not None:
         print(f'Wrote per-metric agreement curves: {per_metric_agree_fpath}')
     print(f'Wrote core run-level table csv: {runlevel_csv_fpath}')

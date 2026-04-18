@@ -4,6 +4,7 @@ import argparse
 import datetime as datetime_mod
 import json
 from collections import Counter, defaultdict
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,9 @@ from helm_audit.infra.api import (
     load_manifest,
 )
 from helm_audit.helm.run_entries import (
+    canonicalize_kv,
     discover_benchmark_output_dirs,
+    parse_run_name_to_kv,
     run_dir_matches_requested,
 )
 from helm_audit.helm.diff import HelmRunDiff
@@ -70,7 +73,23 @@ def collect_historic_candidates(
     precomputed_root: str | Path,
     run_entry: str,
 ) -> list[dict[str, Any]]:
+    req_bench, _req_kv = parse_run_name_to_kv(run_entry)
+    if not req_bench:
+        return []
+    benchmark_index = _historic_candidate_benchmark_index(str(Path(precomputed_root).expanduser().resolve()))
     candidates = []
+    for candidate in benchmark_index.get(req_bench, ()):
+        if run_dir_matches_requested(candidate["run_name"], run_entry):
+            # Return fresh dicts so callers can mutate without poisoning the cache.
+            candidates.append(dict(candidate))
+    return candidates
+
+
+@lru_cache(maxsize=4)
+def _historic_candidate_benchmark_index(
+    precomputed_root: str,
+) -> dict[str, tuple[dict[str, Any], ...]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for bo in discover_benchmark_output_dirs([precomputed_root]):
         try:
             outputs = HelmOutputs.coerce(bo)
@@ -79,15 +98,18 @@ def collect_historic_candidates(
         for suite in outputs.suites(pattern="*"):
             for run in suite.runs(pattern="*"):
                 run_dir = Path(run.path)
-                if not run_dir_matches_requested(run.name, run_entry):
+                bench, cand_kv = parse_run_name_to_kv(run.name)
+                if not bench:
                     continue
                 run_spec = load_run_spec_json(run_dir)
                 adapter_spec = run_spec.get("adapter_spec", {}) or {}
                 metric_specs = run_spec.get("metric_specs", []) or []
-                candidates.append(
+                grouped[bench].append(
                     {
                         "run_dir": run_dir,
                         "run_name": run.name,
+                        "run_name_benchmark": bench,
+                        "run_name_kv": canonicalize_kv(cand_kv),
                         "source_root": bo,
                         "helm_version": run_dir.parent.name,
                         "requested_max_eval_instances": adapter_spec.get(
@@ -101,7 +123,7 @@ def collect_historic_candidates(
                         ],
                     }
                 )
-    return candidates
+    return {bench: tuple(rows) for bench, rows in grouped.items()}
 
 
 def choose_historic_candidate(
