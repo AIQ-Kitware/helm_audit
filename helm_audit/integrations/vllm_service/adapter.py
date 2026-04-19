@@ -42,6 +42,7 @@ PRESET_CONFIGS: dict[str, dict[str, Any]] = {
     "qwen2_72b_vllm": {
         "profile": "qwen2-72b-instruct-tp2-balanced",
         "bundle_name": "qwen2_72b_vllm",
+        "backend": "compose",
         "access_kind": "vllm-direct",
         "model_deployment_name": "vllm/qwen2-72b-instruct-local",
         "smoke_manifest": {
@@ -70,6 +71,46 @@ PRESET_CONFIGS: dict[str, dict[str, Any]] = {
                 "ewok:domain=spatial_relations,model=qwen/qwen2-72b-instruct",
             ],
             "suite": "audit-historic-grid-qwen2-72b-vllm",
+            "max_eval_instances": 1000,
+        },
+    },
+    "small_models_kubeai_overnight": {
+        "bundle_name": "small_models_kubeai_overnight",
+        "backend": "kubeai",
+        "profiles": [
+            {
+                "profile": "qwen2-5-7b-instruct-turbo-default",
+                "model_deployment_name": "kubeai/qwen2-5-7b-instruct-turbo-default-local",
+            },
+            {
+                "profile": "vicuna-7b-v1-3-no-chat-template",
+                "model_deployment_name": "kubeai/vicuna-7b-v1-3-no-chat-template-local",
+            },
+        ],
+        "smoke_manifest": {
+            "experiment_name": "audit-small-models-kubeai-smoke",
+            "description": "Smoke-test batch for the small KubeAI-served Qwen 2.5 7B and Vicuna 7B profiles.",
+            "run_entries": [
+                "ifeval:model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=kubeai/qwen2-5-7b-instruct-turbo-default-local",
+                "boolq:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical,model_deployment=kubeai/vicuna-7b-v1-3-no-chat-template-local",
+            ],
+            "suite": "audit-small-models-kubeai-smoke",
+            "max_eval_instances": 5,
+        },
+        "full_manifest": {
+            "experiment_name": "audit-small-models-kubeai-overnight",
+            "description": "Targeted overnight batch for the KubeAI-served Qwen 2.5 7B and Vicuna 7B profiles.",
+            "run_entries": [
+                "commonsense:dataset=openbookqa,method=multiple_choice_joint,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=kubeai/qwen2-5-7b-instruct-turbo-default-local",
+                "gsm:model=qwen/qwen2.5-7b-instruct-turbo,stop=none,model_deployment=kubeai/qwen2-5-7b-instruct-turbo-default-local",
+                "med_qa:model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=kubeai/qwen2-5-7b-instruct-turbo-default-local",
+                "mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=kubeai/qwen2-5-7b-instruct-turbo-default-local",
+                "narrative_qa:model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=kubeai/qwen2-5-7b-instruct-turbo-default-local",
+                "boolq:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical,model_deployment=kubeai/vicuna-7b-v1-3-no-chat-template-local",
+                "mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical,model_deployment=kubeai/vicuna-7b-v1-3-no-chat-template-local",
+                "narrative_qa:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical,model_deployment=kubeai/vicuna-7b-v1-3-no-chat-template-local",
+            ],
+            "suite": "audit-small-models-kubeai-overnight",
             "max_eval_instances": 1000,
         },
     },
@@ -191,6 +232,17 @@ def _model_deployment_entry(
     return entry
 
 
+def _profile_specs(profile: str, preset_cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    preset_profiles = preset_cfg.get("profiles")
+    if preset_profiles:
+        return [dict(item) for item in preset_profiles]
+    return [{
+        "profile": preset_cfg.get("profile", profile),
+        "access_kind": preset_cfg.get("access_kind"),
+        "model_deployment_name": preset_cfg.get("model_deployment_name"),
+    }]
+
+
 def _maybe_repo_relative(target: Path) -> str:
     try:
         return str(target.resolve().relative_to(repo_root().resolve()))
@@ -236,25 +288,35 @@ def _write_alias(src: Path, dst: Path) -> None:
 
 def materialize_benchmark_bundle(
     *,
-    contract: dict[str, Any],
+    contracts: list[dict[str, Any]],
     output_dir: Path,
     preset: str | None = None,
+    profile_specs: list[dict[str, Any]] | None = None,
     access_kind: str | None = None,
     base_url: str | None = None,
     api_key_value: str | None = None,
 ) -> dict[str, Any]:
     output_dir = output_dir.resolve()
-    service = _select_service(contract)
     preset_cfg = PRESET_CONFIGS.get(preset or "", {})
-    model_entry = _model_deployment_entry(
-        contract,
-        access_kind=access_kind or preset_cfg.get("access_kind"),
-        model_deployment_name=preset_cfg.get("model_deployment_name"),
-        base_url=base_url,
-        api_key_value=api_key_value,
-    )
+    specs = profile_specs or _profile_specs("", preset_cfg)
+    services = [_select_service(contract) for contract in contracts]
+    model_entries = []
+    selected_accesses = []
+    for contract, spec in zip(contracts, specs, strict=True):
+        service = _select_service(contract)
+        selected_kind = access_kind or spec.get("access_kind") or preset_cfg.get("access_kind")
+        model_entries.append(
+            _model_deployment_entry(
+                contract,
+                access_kind=selected_kind,
+                model_deployment_name=spec.get("model_deployment_name"),
+                base_url=base_url,
+                api_key_value=api_key_value,
+            )
+        )
+        selected_accesses.append(_select_access(service, selected_kind))
     output_dir.mkdir(parents=True, exist_ok=True)
-    model_deployments = {"model_deployments": [model_entry]}
+    model_deployments = {"model_deployments": model_entries}
     model_deployments_path = output_dir / "model_deployments.yaml"
     _write_yaml(model_deployments_path, model_deployments)
 
@@ -262,20 +324,26 @@ def materialize_benchmark_bundle(
     smoke_spec = preset_cfg.get(
         "smoke_manifest",
         {
-            "experiment_name": f"{service['public_name']}-smoke",
-            "description": f"Machine-local benchmark smoke manifest for {service['public_name']}.",
-            "run_entries": [f"ifeval:model={service['model']['logical_model_name']},model_deployment={model_entry['name']}"],
-            "suite": f"{service['public_name']}-smoke",
+            "experiment_name": f"{services[0]['public_name']}-smoke",
+            "description": f"Machine-local benchmark smoke manifest for {services[0]['public_name']}.",
+            "run_entries": [
+                f"ifeval:model={service['model']['logical_model_name']},model_deployment={entry['name']}"
+                for service, entry in zip(services, model_entries, strict=True)
+            ],
+            "suite": f"{services[0]['public_name']}-smoke",
             "max_eval_instances": 5,
         },
     )
     full_spec = preset_cfg.get(
         "full_manifest",
         {
-            "experiment_name": f"{service['public_name']}-full",
-            "description": f"Machine-local benchmark full manifest for {service['public_name']}.",
-            "run_entries": [f"ifeval:model={service['model']['logical_model_name']},model_deployment={model_entry['name']}"],
-            "suite": f"{service['public_name']}-full",
+            "experiment_name": f"{services[0]['public_name']}-full",
+            "description": f"Machine-local benchmark full manifest for {services[0]['public_name']}.",
+            "run_entries": [
+                f"ifeval:model={service['model']['logical_model_name']},model_deployment={entry['name']}"
+                for service, entry in zip(services, model_entries, strict=True)
+            ],
+            "suite": f"{services[0]['public_name']}-full",
             "max_eval_instances": 1000,
         },
     )
@@ -293,11 +361,10 @@ def materialize_benchmark_bundle(
 
     bundle = {
         "target": "crfm_helm_benchmark",
-        "profile": contract["profile"],
-        "selected_access": _select_access(service, access_kind or preset_cfg.get("access_kind")),
         "benchmark": {
             "preset": preset,
-            "model_deployment_name": model_entry["name"],
+            "model_deployment_name": model_entries[0]["name"] if len(model_entries) == 1 else None,
+            "model_deployment_names": [entry["name"] for entry in model_entries],
             "model_deployments_path": str(model_deployments_path),
             "model_deployments_fpath": model_deployments_fpath,
         },
@@ -307,6 +374,12 @@ def materialize_benchmark_bundle(
             "benchmark_full_manifest": str(benchmark_full_path),
         },
     }
+    if len(contracts) == 1:
+        bundle["profile"] = contracts[0]["profile"]
+        bundle["selected_access"] = selected_accesses[0]
+    else:
+        bundle["profiles"] = [contract["profile"] for contract in contracts]
+        bundle["selected_accesses"] = selected_accesses
     bundle_path = output_dir / "bundle.yaml"
     _write_yaml(bundle_path, bundle)
     return {
@@ -334,20 +407,25 @@ def export_benchmark_bundle(
     api_key_value: str | None = None,
 ) -> dict[str, Any]:
     preset_cfg = PRESET_CONFIGS.get(preset or "", {})
-    selected_profile = preset_cfg.get("profile", profile)
-    contract = load_profile_contract(
-        selected_profile,
-        backend=backend,
-        simulate_hardware=simulate_hardware,
-        vllm_root=vllm_root,
-    )
+    effective_backend = backend or preset_cfg.get("backend")
+    specs = _profile_specs(profile, preset_cfg)
+    contracts = [
+        load_profile_contract(
+            spec["profile"],
+            backend=effective_backend,
+            simulate_hardware=simulate_hardware,
+            vllm_root=vllm_root,
+        )
+        for spec in specs
+    ]
     if bundle_root is None:
-        bundle_name = preset_cfg.get("bundle_name") or selected_profile.replace("-", "_")
+        bundle_name = preset_cfg.get("bundle_name") or specs[0]["profile"].replace("-", "_")
         bundle_root = audit_store_root() / "local-bundles" / bundle_name
     return materialize_benchmark_bundle(
-        contract=contract,
+        contracts=contracts,
         output_dir=bundle_root,
         preset=preset,
+        profile_specs=specs,
         access_kind=access_kind,
         base_url=base_url,
         api_key_value=api_key_value,

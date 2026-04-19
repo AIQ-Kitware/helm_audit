@@ -634,3 +634,46 @@ Design takeaways:
 1. A cross-repo integration point is only truly stable when the upper layer depends on one public function, not on the lower layer’s assembly steps.
 2. For machine-local bundle generation, “fail fast before writing anything plausible-looking” is more valuable than permissive placeholders.
 3. Serving-side access metadata can include auth expectations without dragging benchmark policy back into the serving repo.
+
+## 2026-04-18 22:26:38 +0000
+
+Summary of user intent: do a small `vllm_service` UX pass so the main-branch getting-started flow no longer depends on manually editing config files, while keeping the broader ownership boundary and integration story intact.
+
+Model and configuration: Codex (GPT-5-based coding agent), default in-session configuration.
+
+This was primarily a submodule-only pass, but I’m noting it here because it matters to how the two repos fit together operationally. The problem was straightforward: the architecture had improved, but the first-run experience still encouraged people to land in hand-edited YAML before they could render anything useful. I kept the benchmark/integration boundary unchanged and focused on the serving repo’s main-branch ergonomics instead. The new approach is a single `setup` command with flags and environment-variable fallbacks, followed by the existing render/apply/test commands. That keeps the integration story simpler too, because `helm_audit` can continue to treat `vllm_service` as a real tool with a predictable operator setup path rather than as a library that requires humans to pre-edit local files.
+
+I did not need to touch `helm_audit` code for this pass. The meaningful cross-repo consideration was making sure the setup changes stayed within the serving repo and did not reintroduce benchmark-specific language into the public workflow. The README was rewritten around Compose and KubeAI only, with no benchmark framing, which is exactly the direction we wanted after the earlier ownership refactor.
+
+## 2026-04-18 22:31:21 +0000
+
+Summary of user intent: do a follow-up correctness pass in `vllm_service` so transient overrides do not leak into persisted config during `switch`, and keep the setup-first onboarding story consistent and honest.
+
+Model and configuration: Codex (GPT-5-based coding agent), default in-session configuration.
+
+This was another submodule-only pass, but it is worth noting here because it tightens the operator semantics of the serving repo in a way that downstream tooling can trust. The key fix was clarifying that `setup` owns general config persistence while `switch` owns only `active_profile`. That sounds small, but it is exactly the kind of boundary that prevents “I passed `--namespace` once and now my config changed forever” style surprises. I left the integration boundary untouched; this was entirely about making the serving repo’s CLI behavior more unsurprising for humans.
+
+## 2026-04-19 00:07:41 +0000
+
+Summary of user intent: apply a final small fix in `vllm_service` so KubeAI deploy freshness notices changes to the synced local resource-profile file and rerenders before deploy when needed.
+
+Model and configuration: Codex (GPT-5-based coding agent), default in-session configuration.
+
+This was another submodule-only follow-up, but it closes an important operational gap in the same source-of-truth story. Once `kubeai-values.local.yaml` became canonical local input, `deploy` needed to notice changes to it through the existing stale-plan check. The change stayed local to `vllm_service`: the CLI now treats that synced local file as a freshness input for KubeAI renders, and the focused tests prove both direct stale detection and actual rerender-on-deploy behavior. No integration boundary changes were needed.
+## 2026-04-19 01:22:57 +0000
+Summary of user intent: set up an overnight multi-model benchmark path on the 4x96GB KubeAI cluster for the active high-value small models, specifically the currently running Qwen 2.5 7B profile and the likely Vicuna companion, while keeping the recent serving/profile ownership boundary intact and avoiding a broad orchestration redesign.
+
+Model/configuration: Codex on GPT-5.4 (medium reasoning effort) operating as a coding agent in the shared workspace.
+
+I started by checking whether this needed a serving-side refactor or just a cleaner benchmark/runbook layer. The reassuring result is that the pieces are already close: `vllm_service` has the right named profiles for `qwen2-5-7b-instruct-turbo-default` and `vicuna-7b-v1-3-no-chat-template`, both map to the same one-GPU KubeAI resource class, and the `helm_audit` integration layer already knows how to turn a single serving profile contract into a benchmark bundle. The real gap is not scheduler feasibility on a 4x96GB cluster; it is operator ergonomics for multi-model overnight runs. The current CLI still thinks in terms of one active profile at a time, but because KubeAI `kubectl apply` is additive, sequential profile applies can leave multiple `Model` objects resident simultaneously. That means the smallest honest fix is likely on the `helm_audit` side: create a multi-profile KubeAI bundle preset plus thin runbook scripts that deploy both models, verify both public IDs are live, and then run one combined manifest.
+
+The main design tradeoff I am accepting is to avoid teaching `vllm_service` a fully general multi-profile deployment UX in this pass. That would be a larger product change and would blur the current ownership line again. Instead, I want to leverage the already-correct serving abstraction and make the benchmark layer compose multiple single-profile contracts explicitly. The risk is that additive KubeAI deployment remains a little implicit unless the runbook spells it out carefully. I think that is acceptable for now because the user's goal is near-term overnight execution, not a new generalized orchestrator. If this pattern proves useful, a future pass could add a first-class “apply these N profiles” command on the serving side without changing the benchmark integration contract.
+
+Reusable takeaways:
+1. When the cluster API is additive, you can often unlock multi-model benchmark workflows by composing single-profile serving contracts rather than inventing a second profile schema.
+2. Keep multi-model benchmark selection in `helm_audit`; serving-profile resolution should stay benchmark-agnostic unless the serving CLI itself genuinely needs the new abstraction.
+3. For overnight runs, proven smaller subsets with known-good benchmarks are often more valuable than a grander manifest that looks elegant but reopens runtime uncertainty.
+
+Follow-up in the same session: I chose the smallest implementation that makes the overnight path real without changing serving ownership. The key code change is in `helm_audit.integrations.vllm_service.adapter`, which can now materialize a benchmark bundle from more than one serving-profile contract when a preset explicitly asks for it. I used that to add a `small_models_kubeai_overnight` preset combining `qwen2-5-7b-instruct-turbo-default` and `vicuna-7b-v1-3-no-chat-template` behind the KubeAI OpenAI-compatible front door. That keeps the benchmark layer responsible for multi-model experiment composition while leaving `vllm_service` responsible only for single-profile serving descriptions and additive `switch --apply` deployment. The resulting model deployment file now contains two entries with the right split in client semantics: chat client for Qwen, legacy completions client for Vicuna.
+
+I also added a dedicated `reproduce/small_models_kubeai/` runbook because the human workflow mattered as much as the bundle. The deploy step deliberately applies Qwen first, then Vicuna, and then switches the saved active profile back to Qwen without reapplying. That feels like the least surprising local state after an overnight setup: the cluster still hosts both models, but the repo does not remain pointed at Vicuna by accident for the next unrelated one-model task. The main residual risk is operational rather than repo-local: KubeAI must actually accept both `Model` objects concurrently and expose them on the front door the way the current port-forward or ingress expects. I added a validation step that checks `/models` and probes Qwen via `/chat/completions` and Vicuna via `/completions` to make that expectation explicit before the overnight batch is launched.

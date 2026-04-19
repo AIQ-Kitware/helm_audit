@@ -18,6 +18,7 @@ Current scenarios:
 - `qwen35_vllm/`: local vLLM smoke run for `qwen/qwen3.5-9b` through the existing `kwdagger` and materialized HELM path
 - `qwen2_72b_vllm/`: local vLLM smoke plus full EWOK historic-grid batch for `qwen/qwen2-72b-instruct` using the `helm-qwen2-72b-instruct` server profile
 - `gpt_oss_20b_vllm/`: local LiteLLM-backed vLLM smoke plus targeted overnight batch for the `openai/gpt-oss-20b` runs that were filtered out only because they had no local deployment path
+- `small_models_kubeai/`: KubeAI-backed overnight batch that keeps both `qwen/qwen2.5-7b-instruct-turbo` and `lmsys/vicuna-7b-v1.3` live together on the cluster and emits one combined benchmark bundle
 
 The shell files here are intentionally thin. They are runbook steps, not the
 implementation. Each one should delegate to a `helm_audit` Python CLI such as
@@ -47,3 +48,8 @@ The `gpt_oss_20b_vllm/` runbook assumes:
 - the local `gpt-oss` deployment should use the legacy completions path, not chat completions, because the observed chat response shape returned `message.content: null` for this backend/model combination
 - chat-oriented runs can still opt into an explicit chat deployment via `model_deployment=litellm/gpt-oss-20b-chat-local` when that is the cleaner scenario-level fit
 - the overnight manifest is now trimmed to the in-scope subset and does not schedule benchmarks that require proprietary / credentialed judges by default
+
+The `small_models_kubeai/` runbook assumes:
+- the KubeAI chart is already installed and reachable at `KUBEAI_BASE_URL` (default `http://127.0.0.1:8000/openai/v1`, typically via `kubectl port-forward`)
+- the `vllm_service` repo is configured for the same KubeAI namespace and can `switch --apply` the `qwen2-5-7b-instruct-turbo-default` and `vicuna-7b-v1-3-no-chat-template` profiles
+- applying the second profile is additive on the cluster, so both KubeAI `Model` objects remain resident for the combined overnight manifest

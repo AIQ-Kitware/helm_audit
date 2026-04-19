@@ -157,3 +157,34 @@ def test_qwen_direct_vllm_export_does_not_require_litellm_auth(tmp_path: Path, m
     )
     deployment = yaml.safe_load(result["model_deployments_path"].read_text())["model_deployments"][0]
     assert "api_key" not in deployment["client_spec"]["args"]
+
+
+def test_export_bundle_supports_multi_model_kubeai_overnight_preset(tmp_path: Path) -> None:
+    vllm_root = _make_vllm_root(tmp_path)
+    result = export_benchmark_bundle(
+        "",
+        preset="small_models_kubeai_overnight",
+        bundle_root=tmp_path / "small-models-kubeai",
+        vllm_root=vllm_root,
+    )
+    deployments = yaml.safe_load(result["model_deployments_path"].read_text())["model_deployments"]
+    assert [item["name"] for item in deployments] == [
+        "kubeai/qwen2-5-7b-instruct-turbo-default-local",
+        "kubeai/vicuna-7b-v1-3-no-chat-template-local",
+    ]
+    assert deployments[0]["client_spec"]["class_name"].endswith("OpenAIClient")
+    assert deployments[0]["client_spec"]["args"]["base_url"] == "http://127.0.0.1:8000/openai/v1"
+    assert deployments[0]["client_spec"]["args"]["openai_model_name"] == "qwen2-5-7b-instruct-turbo-default"
+    assert deployments[1]["client_spec"]["class_name"].endswith("OpenAILegacyCompletionsClient")
+    assert deployments[1]["client_spec"]["args"]["openai_model_name"] == "vicuna-7b-v1-3-no-chat-template"
+
+    bundle = yaml.safe_load(result["bundle_path"].read_text())
+    assert [item["public_name"] for item in bundle["profiles"]] == [
+        "qwen2-5-7b-instruct-turbo-default",
+        "vicuna-7b-v1-3-no-chat-template",
+    ]
+
+    overnight = yaml.safe_load(result["benchmark_full_manifest_path"].read_text())
+    assert overnight["experiment_name"] == "audit-small-models-kubeai-overnight"
+    assert any("model_deployment=kubeai/qwen2-5-7b-instruct-turbo-default-local" in entry for entry in overnight["run_entries"])
+    assert any("model_deployment=kubeai/vicuna-7b-v1-3-no-chat-template-local" in entry for entry in overnight["run_entries"])
