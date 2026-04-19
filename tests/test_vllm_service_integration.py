@@ -172,9 +172,15 @@ def test_export_bundle_supports_multi_model_kubeai_overnight_preset(tmp_path: Pa
         "kubeai/qwen2-5-7b-instruct-turbo-default-local",
         "kubeai/vicuna-7b-v1-3-no-chat-template-local",
     ]
+    assert deployments[0]["model_name"] == "qwen/qwen2.5-7b-instruct-turbo"
+    assert deployments[0]["tokenizer_name"] == "qwen/qwen2.5-7b-instruct"
+    assert deployments[0]["tokenizer_name"] != "qwen/qwen2.5-7b-instruct-turbo"
     assert deployments[0]["client_spec"]["class_name"].endswith("OpenAIClient")
     assert deployments[0]["client_spec"]["args"]["base_url"] == "http://127.0.0.1:8000/openai/v1"
     assert deployments[0]["client_spec"]["args"]["openai_model_name"] == "qwen2-5-7b-instruct-turbo-default"
+    assert deployments[1]["model_name"] == "lmsys/vicuna-7b-v1.3"
+    assert deployments[1]["tokenizer_name"] == "hf-internal-testing/llama-tokenizer"
+    assert deployments[1]["tokenizer_name"] != "lmsys/vicuna-7b-v1.3"
     assert deployments[1]["client_spec"]["class_name"].endswith("OpenAILegacyCompletionsClient")
     assert deployments[1]["client_spec"]["args"]["openai_model_name"] == "vicuna-7b-v1-3-no-chat-template"
 

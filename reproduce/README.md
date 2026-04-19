@@ -55,6 +55,7 @@ The `small_models_kubeai/` runbook assumes:
 - applying the second profile is additive on the cluster, so both KubeAI `Model` objects remain resident for the combined overnight manifest
 - on `aiq-gpu`, the KubeAI Helm release currently lives in the `default` namespace, so these scripts default `KUBEAI_NAMESPACE=default`
 - tonight's runbook also applies an explicit post-deploy patch so both model CRs use `resourceProfile=gpu-single-default:1`, `minReplicas=1`, and `--served-model-name=<public profile name>` to match the routed OpenAI model ids exposed by `/openai/v1/models`
+- the benchmark bundle export normalizes HELM-facing tokenizer aliases before writing `model_deployments.yaml`; regenerate the bundle after pulling changes if smoke/full previously failed on tokenizer lookup
 
 Exact `aiq-gpu` flow:
 

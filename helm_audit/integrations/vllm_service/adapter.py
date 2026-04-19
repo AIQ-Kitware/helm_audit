@@ -81,10 +81,14 @@ PRESET_CONFIGS: dict[str, dict[str, Any]] = {
             {
                 "profile": "qwen2-5-7b-instruct-turbo-default",
                 "model_deployment_name": "kubeai/qwen2-5-7b-instruct-turbo-default-local",
+                "helm_model_name": "qwen/qwen2.5-7b-instruct-turbo",
+                "helm_tokenizer_name": "qwen/qwen2.5-7b-instruct",
             },
             {
                 "profile": "vicuna-7b-v1-3-no-chat-template",
                 "model_deployment_name": "kubeai/vicuna-7b-v1-3-no-chat-template-local",
+                "helm_model_name": "lmsys/vicuna-7b-v1.3",
+                "helm_tokenizer_name": "hf-internal-testing/llama-tokenizer",
             },
         ],
         "smoke_manifest": {
@@ -202,6 +206,8 @@ def _resolve_api_key(access: dict[str, Any], *, api_key_value: str | None = None
 def _model_deployment_entry(
     contract: dict[str, Any],
     *,
+    helm_model_name: str | None = None,
+    helm_tokenizer_name: str | None = None,
     access_kind: str | None = None,
     model_deployment_name: str | None = None,
     base_url: str | None = None,
@@ -213,8 +219,8 @@ def _model_deployment_entry(
     kind = access["kind"]
     entry = {
         "name": model_deployment_name or _default_deployment_name(service, kind),
-        "model_name": service["model"]["logical_model_name"],
-        "tokenizer_name": service["model"]["tokenizer_name"],
+        "model_name": helm_model_name or service["model"]["logical_model_name"],
+        "tokenizer_name": helm_tokenizer_name or service["model"]["tokenizer_name"],
         "max_sequence_length": int(service["runtime"]["max_model_len"]),
         "client_spec": {
             "class_name": _benchmark_client_class(protocol_mode, kind),
@@ -230,6 +236,29 @@ def _model_deployment_entry(
         entry["client_spec"]["args"]["api_key"] = resolved_api_key
         entry["client_spec"]["args"]["openai_model_name"] = access["request_model_name"]
     return entry
+
+
+def _helm_config_paths() -> tuple[Path, Path]:
+    helm_root = repo_root() / "submodules" / "helm" / "src" / "helm" / "config"
+    return helm_root / "model_metadata.yaml", helm_root / "tokenizer_configs.yaml"
+
+
+def _assert_helm_aliases_exist(model_name: str, tokenizer_name: str) -> None:
+    import yaml
+
+    model_metadata_path, tokenizer_configs_path = _helm_config_paths()
+    model_docs = yaml.safe_load(model_metadata_path.read_text(encoding="utf-8")) or {}
+    tokenizer_docs = yaml.safe_load(tokenizer_configs_path.read_text(encoding="utf-8")) or {}
+    known_models = {item.get("name") for item in model_docs.get("models", []) or []}
+    known_tokenizers = {item.get("name") for item in tokenizer_docs.get("tokenizer_configs", []) or []}
+    if model_name not in known_models:
+        raise ValueError(
+            f"HELM model alias missing for {model_name!r}; update the benchmark export override before launching the run."
+        )
+    if tokenizer_name not in known_tokenizers:
+        raise ValueError(
+            f"HELM tokenizer alias missing for {tokenizer_name!r}; update the benchmark export override before launching the run."
+        )
 
 
 def _profile_specs(profile: str, preset_cfg: dict[str, Any]) -> list[dict[str, Any]]:
@@ -308,12 +337,15 @@ def materialize_benchmark_bundle(
         model_entries.append(
             _model_deployment_entry(
                 contract,
+                helm_model_name=spec.get("helm_model_name"),
+                helm_tokenizer_name=spec.get("helm_tokenizer_name"),
                 access_kind=selected_kind,
                 model_deployment_name=spec.get("model_deployment_name"),
                 base_url=base_url,
                 api_key_value=api_key_value,
             )
         )
+        _assert_helm_aliases_exist(model_entries[-1]["model_name"], model_entries[-1]["tokenizer_name"])
         selected_accesses.append(_select_access(service, selected_kind))
     output_dir.mkdir(parents=True, exist_ok=True)
     model_deployments = {"model_deployments": model_entries}
