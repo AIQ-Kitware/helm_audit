@@ -750,3 +750,28 @@ I kept this fix entirely in `helm_audit` and made it profile-specific. The servi
 
 Reusable takeaway:
 1. When the serving runtime and the benchmark-side window service disagree by a token or two, the smallest honest fix is often a profile-specific export margin, not a global truncation rule and not a serving-side lie about the true model limit.
+
+## 2026-04-19 21:57:29 +0000
+Summary of user intent: inspect the remaining Vicuna overflow after adding the profile-specific combined-budget headroom and fix the actual bug in HELM’s completion windowing/truncation layer so the exported `max_sequence_and_generated_tokens_length` is truly enforced.
+
+Model/configuration: Codex on GPT-5.4 (medium reasoning effort) operating as a coding agent in the shared workspace.
+
+This pass confirmed the suspicion from the live arithmetic: the benchmark export was already carrying the conservative combined budget, but HELM’s local window-service logic was still effectively budgeting prompt length off `max_request_length` alone. That meant the exported `max_sequence_and_generated_tokens_length` field existed on the deployment object but did not participate in completion prompt truncation for the default/local window-service path. In other words, the export fix was correct, but the execution path ignored the field it was supposed to honor.
+
+I fixed this where it belongs: in HELM’s `LocalWindowService`. The right mental model is that there are two different ceilings, and prompt construction must respect the tighter one. `max_request_length` describes how much prompt the model can ingest. `max_sequence_and_generated_tokens_length` describes the total prompt-plus-generation budget. For completion requests, the actual prompt budget is `min(max_request_length, max_sequence_and_generated_tokens_length - expected_completion_token_length)`. Once that is encoded directly in `fits_within_context_window()` and `truncate_from_right()`, the Vicuna-style deployment behaves the way the exported deployment contract already said it should.
+
+Reusable takeaway:
+1. Exporting a richer deployment limit is not enough; the windowing layer has to explicitly choose the tighter of the prompt limit and the total prompt-plus-generation limit or the extra field is just inert metadata.
+## 2026-04-19 23:51:32 +0000
+Summary of user intent: fix the analysis/report path for `audit-small-models-kubeai-overnight` so completed local KubeAI runs can be matched against public historic HELM candidates and produce per-run reports, without touching serving outputs or widening the fix beyond the analysis layer.
+
+Model and configuration: Codex GPT-5, default collaboration mode, no approval prompts, danger-full-access filesystem, network enabled.
+
+I approached this as a boundary-correction problem rather than a data problem. The synced experiment was healthy: `8/8` jobs completed, current logs were present, and the overnight run directories existed exactly where the wrapper said they would. The analysis summary still showed `0` per-run reports because historic candidate selection was comparing the full local run entry, including `model_deployment=kubeai/...-local`, against public HELM runs that do not carry any machine-local deployment suffix. The important design choice was not to "fuzzily match more things" in general. That would make the report layer harder to trust. Instead, I added a very narrow normalization for historic lookup only: strip `model_deployment` from the requested run entry before comparing it to public candidates. Local bookkeeping still keeps the exact run entry, and the narrower rule matches the real semantics here: deployment aliases are local execution details, not benchmark identity.
+
+The strongest evidence that this is the right seam is that candidate lookup immediately started finding the expected public runs once the local deployment suffix was removed, across both Qwen and Vicuna cases in the overnight preset. The tradeoff is that this fix assumes `model_deployment` should not participate in public historic matching. I think that is correct for the current audit use case, but if we ever compare two different public deployments of the same model within the historic corpus, we may want a more explicit "public benchmark identity" helper rather than just dropping one field. For now the smaller fix is better: easy to explain, easy to test, and it keeps the exact local identity intact everywhere except the one place where it was breaking comparison.
+
+Reusable takeaways:
+1. Local deployment aliases belong to execution bookkeeping, not to public historic comparison keys.
+2. When a local-vs-public mismatch appears in the report layer, prefer explicit comparison-only normalization over broad canonicalization in the core run-entry model.
+3. Before widening a normalization rule, confirm the historic corpus actually contains the expected public candidates; otherwise it is easy to "fix" the wrong layer.

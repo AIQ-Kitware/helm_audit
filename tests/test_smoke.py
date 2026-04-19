@@ -11,6 +11,7 @@ from helm_audit.cli.reports import main as reports_main
 from helm_audit.cli.run import main as run_main
 from helm_audit.helm.run_entries import (
     discover_benchmark_output_dirs,
+    normalize_run_entry_for_historic_lookup,
     parse_run_entry_description,
     run_dir_matches_requested,
 )
@@ -43,6 +44,16 @@ def test_run_entry_helpers_match_canonical_model_tokens():
     )
 
 
+def test_historic_lookup_normalization_drops_local_model_deployment():
+    run_entry = (
+        "boolq:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical,"
+        "model_deployment=kubeai/vicuna-7b-v1-3-no-chat-template-local"
+    )
+    assert normalize_run_entry_for_historic_lookup(run_entry) == (
+        "boolq:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical"
+    )
+
+
 def test_discover_benchmark_output_dirs(tmp_path: Path):
     benchmark_output = tmp_path / "nested" / "benchmark_output"
     benchmark_output.mkdir(parents=True)
@@ -67,4 +78,3 @@ def test_aggregate_report_counts():
     assert report["status_counts"]["compared"] == 1
     assert report["diagnosis_label_counts"]["deployment_drift"] == 1
     assert report["primary_reason_name_counts"]["deployment_changed"] == 1
-

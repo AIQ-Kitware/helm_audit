@@ -21,6 +21,7 @@ from helm_audit.infra.api import (
 from helm_audit.helm.run_entries import (
     canonicalize_kv,
     discover_benchmark_output_dirs,
+    normalize_run_entry_for_historic_lookup,
     parse_run_name_to_kv,
     run_dir_matches_requested,
 )
@@ -76,10 +77,11 @@ def collect_historic_candidates(
     req_bench, _req_kv = parse_run_name_to_kv(run_entry)
     if not req_bench:
         return []
+    public_lookup_entry = normalize_run_entry_for_historic_lookup(run_entry)
     benchmark_index = _historic_candidate_benchmark_index(str(Path(precomputed_root).expanduser().resolve()))
     candidates = []
     for candidate in benchmark_index.get(req_bench, ()):
-        if run_dir_matches_requested(candidate["run_name"], run_entry):
+        if run_dir_matches_requested(candidate["run_name"], public_lookup_entry):
             # Return fresh dicts so callers can mutate without poisoning the cache.
             candidates.append(dict(candidate))
     return candidates

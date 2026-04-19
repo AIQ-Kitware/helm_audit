@@ -36,6 +36,38 @@ def parse_run_name_to_kv(run_name: str) -> tuple[str, dict[str, object]]:
     return bench, kv
 
 
+def format_run_name_from_kv(bench: str, kv: dict[str, object]) -> str:
+    parts: list[str] = []
+    for key, value in kv.items():
+        if value is True:
+            parts.append(str(key))
+        else:
+            parts.append(f"{key}={value}")
+    if not bench:
+        return ",".join(parts)
+    if not parts:
+        return bench
+    return f"{bench}:{','.join(parts)}"
+
+
+def normalize_run_entry_for_historic_lookup(run_entry: str) -> str:
+    """
+    Normalize local bookkeeping-only fields away when matching against public
+    historic HELM runs.
+
+    In particular, local runs may include a machine/deployment-specific
+    ``model_deployment=...`` suffix that has no public historic counterpart.
+    """
+    bench, kv = parse_run_name_to_kv(run_entry)
+    if not bench:
+        return run_entry
+    if "model_deployment" not in kv:
+        return run_entry
+    kv = dict(kv)
+    kv.pop("model_deployment", None)
+    return format_run_name_from_kv(bench, kv)
+
+
 def canonicalize_kv(kv: dict[str, object]) -> dict[str, object]:
     kv = dict(kv)
     model = kv.get("model", None)
