@@ -1057,23 +1057,25 @@ def _build_scope_cardinality_lines(
         all_inv = filter_inventory_rows
         selected_inv = [r for r in filter_inventory_rows if r.get("selection_status") == "selected"]
         lines.append(row_line("discovered", _cardinality(all_inv)))
-        lines.append(row_line("eligible_selected", _cardinality(selected_inv)))
+        lines.append(row_line("selected", _cardinality(selected_inv)))
 
     lines.append(row_line("attempted", _cardinality(enriched_rows)))
 
     completed_rows = [r for r in enriched_rows if _is_truthy_text(r.get("has_run_spec"))]
     lines.append(row_line("completed", _cardinality(completed_rows)))
 
-    analyzed_rows = [r for r in enriched_rows if r.get("official_instance_agree_0") is not None]
+    analyzed_rows = [r for r in enriched_rows if r.get("repro_report_dir") is not None]
     lines.append(row_line("analyzed", _cardinality(analyzed_rows)))
 
     lines += [
         "",
         "Columns: runs = total run entries; models/benchmarks/scenarios = unique values;",
         "         mod×bench = unique (model, benchmark) pairs in that subset.",
-        "Stages: discovered = all runs seen by Stage 1 filter; eligible_selected = passed all filters;",
-        "        attempted = scheduled in this experiment; completed = produced HELM artifacts;",
-        "        analyzed = have reproducibility report.",
+        "Stages: discovered = all runs seen by Stage 1 filter; selected = passed all filters",
+        "        and chosen for reproduction; attempted = scheduled in this experiment;",
+        "        completed = produced HELM artifacts; analyzed = have reproducibility report.",
+        "Note: discovered/selected rows show the global filter universe; other rows are scoped",
+        "      to this report's experiment/dimension filter.",
     ]
     return lines
 
@@ -1220,6 +1222,10 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         src = level_002_static / src_name
         if src.exists() or src.is_symlink():
             write_latest_alias(src, summary_root, src_name)
+
+    machine_csv = level_002 / "breakdowns" / "by_machine_host" / "index.latest.csv"
+    if machine_csv.exists() or machine_csv.is_symlink():
+        write_latest_alias(machine_csv, summary_root, "machine_summary.latest.csv")
 
 
 def _render_breakdown_scopes(
@@ -2652,7 +2658,9 @@ def _render_scope_summary(
         "  File: sankey_s01_operational.latest.{html,jpg,txt}",
         "",
         "s02 — Filter Funnel to Attempted Runs",
-        "  How many eligible run-specs were actually attempted, and why others were skipped.",
+        "  All discovered run-specs through every filter gate (structural, model, tag, deployment,",
+        "  size, selection) to the attempt stage. Shows how much of the universe we ran and why",
+        "  the rest was excluded.",
         "  File: sankey_s02_filter_to_attempt.latest.{html,jpg,txt}",
         "",
         "s03 — Attempted Runs to Reproducibility (exact match)",
