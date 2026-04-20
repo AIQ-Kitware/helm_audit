@@ -219,6 +219,23 @@ Design takeaways:
 2. If reports remain browsable in-repo while indexes and manifests move out, the path defaults must be updated together or operators will fall into mismatched partial migrations.
 3. Documentation drift is often a boundary-design smell: when prose and CLI shape disagree, the storage model is usually muddier than it first appears.
 
+## 2026-04-20 23:50:15 +0000
+
+Summary of user intent: keep `helm_audit/reports/filter_analysis.py` plotting the full canonical data while making static PNG exports slide-friendly by separating HTML fidelity from PNG compactness, without reintroducing truncation or new artifact families.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This was a layout-only repair, but it mattered because the earlier “no truncation” change exposed an old assumption: the same Plotly figure settings were being used for both interactive HTML and static PNG export, so the PNGs inherited the same growth behavior as the full-data plots. The practical fix was to treat HTML and PNG as different render targets with different constraints. HTML stays the rich inspection surface with the full labels intact. PNG now gets a compact canvas, abbreviated tick text, and lower raster scale so it can still be pasted into slides without losing the underlying bars.
+
+I kept the scope narrow on purpose. The data path still plots every bar and every category, and the count metadata remains honest because it is derived from the full plotted rows rather than from any display-only abbreviation. The main tradeoff is that the PNG is now a presentation view rather than a faithful pixel-for-pixel replica of the HTML, but that is the correct tradeoff here: the canonical truth is still in the data and HTML, while the slide artifact just needs to be legible and bounded.
+
+The only risk I still watch is that exceptionally dense categorical plots can remain visually busy even when bounded. I did not try to solve that by dropping data or inventing alternate plot families, because the user explicitly asked not to. Instead I chose the least invasive controls: capped static dimensions, shorter tick labels, more aggressive tick rotation, and a smaller export scale.
+
+Design takeaways:
+1. If a single figure serves both browser and slide use, the static export needs its own rendering contract.
+2. Bounding raster size is not the same as truncating data; keep the data complete and only compact the presentation layer.
+3. Abbreviating tick labels is acceptable when the axis title still carries the full count semantics and the full labels remain available in HTML.
+
 ## 2026-04-09 22:45:14 +0000
 
 Summary of user intent: improve the historic grid aggregate report so it shows a model-separated histogram of run specs that were filtered out versus included.
