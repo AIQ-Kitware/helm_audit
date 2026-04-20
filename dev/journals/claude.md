@@ -263,3 +263,28 @@ Design takeaways:
 1. Prefixing with `s0N_` costs nothing in code complexity and creates a self-documenting directory listing. The "N" directly answers "what order should I read these in?"
 2. Move supporting artifacts to subdirs rather than prefixing them — the directory becomes the namespace, not the filename.
 3. A plain text reading-order file is the cheapest possible navigation aid and survives file system inspection better than any README embedded in an HTML file.
+
+## 2026-04-20 (Stage 1 consistency + Stage 2)
+
+Summary: Stage 1 README consistency patch + Stage 2 factor/cardinality summaries.
+
+**Stage 1 consistency patch (build_reports_summary.py)**
+
+`_build_high_level_readme()` still referenced old sankey names. Updated to use `s01`–`s05` names, added `story_index.latest.txt` and `cardinality_summary.latest.txt` as first items under `start_here:`, and replaced the tolerance-variant browsing guidance with a pointer to `alt_tolerances/`.
+
+**Stage 2: filter_cardinality_summary.latest.txt (filter_analysis.py)**
+
+Added `build_filter_cardinality_text(inventory_rows)` — a pure function that computes unique model/benchmark/scenario counts at each filter funnel stage (all_discovered → considered → eligible → selected) and formats them as a fixed-width table. Called from `emit_filter_report_artifacts`; written to `static/filter_cardinality_summary_{stamp}.txt` with a `.latest.txt` alias. One new key in `outputs` dict: `'filter_cardinality_txt'`.
+
+No changes to the existing summary JSON, TSVs, or sankeys — just a new text artifact alongside them.
+
+**Stage 2: cardinality_summary.latest.txt (build_reports_summary.py)**
+
+Added `_cardinality(rows)` helper and `_build_scope_cardinality_lines(filter_inventory_rows, enriched_rows, scope_title, generated_utc)`. Covers five pipeline stages: discovered (from filter_inventory_rows), eligible_selected (from filter_inventory_rows), attempted, completed (`has_run_spec` truthy), analyzed (`official_instance_agree_0 is not None`). Written to `level_001_static/cardinality_summary_{stamp}.txt`; aliased to both `level_001/cardinality_summary.latest.txt` (direct access) and surfaced to summary_root via `_write_scope_level_aliases`. If `filter_inventory_rows` is empty, the discovered/selected lines are omitted silently.
+
+**Intentionally not changed:**
+- No architectural changes, no new data loading, no recompute passes
+- No changes to sankey schemas or existing artifact paths
+- `filter_analysis.py`'s TSV tables and existing summary JSON untouched
+- No cardinality data in the manifest dict (it's a plain text artifact, not machine-readable state)
+- `_write_scope_level_aliases` still only surfaces the `level_001_static` version to summary_root — the direct `level_001` alias is for convenience only

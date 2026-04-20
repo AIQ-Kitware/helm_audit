@@ -1018,6 +1018,66 @@ def _summarize_by_dimension(
     return rows
 
 
+def _cardinality(rows: list[dict[str, Any]], *, model_key: str = "model", bench_key: str = "benchmark", scenario_key: str = "scenario") -> dict[str, int]:
+    return {
+        "n": len(rows),
+        "models": len({r.get(model_key) for r in rows if r.get(model_key)}),
+        "benchmarks": len({r.get(bench_key) for r in rows if r.get(bench_key)}),
+        "scenarios": len({r.get(scenario_key) for r in rows if r.get(scenario_key)}),
+        "model_bench_pairs": len({(r.get(model_key), r.get(bench_key)) for r in rows if r.get(model_key) and r.get(bench_key)}),
+    }
+
+
+def _build_scope_cardinality_lines(
+    *,
+    filter_inventory_rows: list[dict[str, Any]],
+    enriched_rows: list[dict[str, Any]],
+    scope_title: str,
+    generated_utc: str,
+) -> list[str]:
+    header = f"{'Stage':<22} {'runs':>6}  {'models':>6}  {'benchmarks':>10}  {'scenarios':>9}  {'mod×bench':>9}"
+    sep = "-" * len(header)
+    lines = [
+        f"Scope Cardinality Summary: {scope_title}",
+        f"Generated: {generated_utc}",
+        "",
+        "Run-spec counts at each stage of the pipeline funnel.",
+        "",
+        header,
+        sep,
+    ]
+
+    def row_line(label: str, c: dict[str, int]) -> str:
+        return (
+            f"{label:<22} {c['n']:>6}  {c['models']:>6}  {c['benchmarks']:>10}"
+            f"  {c['scenarios']:>9}  {c['model_bench_pairs']:>9}"
+        )
+
+    if filter_inventory_rows:
+        all_inv = filter_inventory_rows
+        selected_inv = [r for r in filter_inventory_rows if r.get("selection_status") == "selected"]
+        lines.append(row_line("discovered", _cardinality(all_inv)))
+        lines.append(row_line("eligible_selected", _cardinality(selected_inv)))
+
+    lines.append(row_line("attempted", _cardinality(enriched_rows)))
+
+    completed_rows = [r for r in enriched_rows if _is_truthy_text(r.get("has_run_spec"))]
+    lines.append(row_line("completed", _cardinality(completed_rows)))
+
+    analyzed_rows = [r for r in enriched_rows if r.get("official_instance_agree_0") is not None]
+    lines.append(row_line("analyzed", _cardinality(analyzed_rows)))
+
+    lines += [
+        "",
+        "Columns: runs = total run entries; models/benchmarks/scenarios = unique values;",
+        "         mod×bench = unique (model, benchmark) pairs in that subset.",
+        "Stages: discovered = all runs seen by Stage 1 filter; eligible_selected = passed all filters;",
+        "        attempted = scheduled in this experiment; completed = produced HELM artifacts;",
+        "        analyzed = have reproducibility report.",
+    ]
+    return lines
+
+
 def _build_high_level_readme(
     *,
     scope_title: str,
@@ -1056,32 +1116,34 @@ def _build_high_level_readme(
         [
             "",
             "start_here:",
+            "  story_index.latest.txt — canonical 5-step reading order for the sankey visualizations",
+            "  cardinality_summary.latest.txt — run/model/benchmark counts at each stage of the funnel",
             "",
             "  understand_upstream_filtering:",
-            "    1. What runs were excluded at Stage 1 (discovery)? Export a Stage 1 inventory and run",
-            "       `python -m helm_audit.cli.reports filter --report-dpath reports/filtering --inventory-json ...`",
-            "       to see reports/filtering/interactive/sankey_model_filter.latest.html (why runs were rejected).",
+            "    1. What runs were excluded at Stage 1 (discovery)? See reports/filtering/ which contains",
+            "       sankey_model_filter.latest.html and filter_cardinality_summary.latest.txt.",
             "    2. Read docs/pipeline.md for the full end-to-end workflow (stages 1-6).",
             "",
-            "  explore_execution_coverage:",
-            "    1. open sankey_operational.latest.html to see the full pipeline: all runs → outcomes",
-            "    2. open sankey_filter_to_attempt.latest.html to see how Stage 1 filters narrow to the runs we attempted",
-            "    3. open sankey_attempted_to_repro.latest.html to follow attempted runs into analysis and reproduction",
-            "    4. open sankey_end_to_end.latest.html to connect filtering, execution, analysis, and reproduction in one view",
-            "    5. open sankey_repro_by_metric.latest.html for per-metric drift breakdown (run-level max delta)",
-            "    6. open filter_selection_by_model.latest.html for selected vs excluded run-spec counts by model",
-            "    7. see benchmark_status.latest.html and coverage_matrix.latest.html for what subsets ran",
+            "  explore_execution_coverage (read sankeys in order):",
+            "    s01: sankey_s01_operational.latest.html — all attempted runs: benchmark → lifecycle → outcome",
+            "    s02: sankey_s02_filter_to_attempt.latest.html — eligible run-specs → actually attempted",
+            "    s03: sankey_s03_attempted_to_repro.latest.html — attempted runs → reproducibility (exact match)",
+            "    s04: sankey_s04_end_to_end.latest.html — full funnel: discovered → reproducible",
+            "    s05: sankey_s05_reproducibility.latest.html — detailed group → repeatability → agreement → diagnosis",
+            "    sup: sankey_repro_by_metric.latest.html — per-metric drift (run-level max |official - local|)",
+            "    sup: filter_selection_by_model.latest.html — selected vs excluded run-specs by model",
+            "    sup: benchmark_status.latest.html and coverage_matrix.latest.html",
+            "    alt: alt_tolerances/ — tolerance sweep variants (tol001, tol010, tol050) for s03/s04/s05",
             "",
             "  understand_reproducibility:",
-            "    1. open sankey_reproducibility.latest.html for analyzed runs at strict threshold (abs_tol=0)",
-            "    2. open agreement_curve.latest.html to see how agreement changes across tolerance thresholds",
-            "    3. open agreement_curve_per_metric.latest.html to see agreement curves per individual metric",
-            "    4. open sankey_repro_tol001/tol010/tol050.latest.html to see relaxed tolerance breakdowns",
+            "    1. open agreement_curve.latest.html to see how agreement changes across tolerance thresholds",
+            "    2. open agreement_curve_per_metric.latest.html for per-metric agreement curves",
+            "    3. open reproducibility_buckets.latest.html to see agreement distribution",
+            "    4. for relaxed tolerances, see alt_tolerances/ subdirectory",
             "",
             "  diagnose_failures:",
             "    1. read failure_reasons.latest.txt to see why incomplete jobs failed",
             "    2. open failure_taxonomy.latest.html to see root-cause breakdown (hardware/data/infra)",
-            "    3. open reproducibility_buckets.latest.html to see agreement distribution",
             "",
             "  drill_down_by_dimension:",
             "    - follow next_level/ for breakdown tables by benchmark, model, suite, machine, experiment",
@@ -1122,6 +1184,7 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         if src.exists() or src.is_symlink():
             write_latest_alias(src, summary_root, src_name)
     for src_name in [
+        "cardinality_summary.latest.txt",
         "sankey_s01_operational.latest.jpg",
         "sankey_s01_operational.latest.txt",
         "sankey_s02_filter_to_attempt.latest.jpg",
@@ -2435,6 +2498,17 @@ def _render_scope_summary(
         breakdown_dims=breakdown_dims,
     )
     _write_text(level_001_readme, level_001 / f"README_{generated_utc}.txt")
+
+    cardinality_lines = _build_scope_cardinality_lines(
+        filter_inventory_rows=filter_inventory_rows,
+        enriched_rows=enriched_rows,
+        scope_title=scope_title,
+        generated_utc=generated_utc,
+    )
+    cardinality_fpath = level_001_static / f"cardinality_summary_{generated_utc}.txt"
+    _write_text(cardinality_lines, cardinality_fpath)
+    write_latest_alias(cardinality_fpath, level_001_static, "cardinality_summary.latest.txt")
+    write_latest_alias(cardinality_fpath, level_001, "cardinality_summary.latest.txt")
 
     level_002_lines = [
         "Drilldown Summary",

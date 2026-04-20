@@ -626,6 +626,51 @@ def write_filter_reproduce_script(report_dpath: Path, *, source_command: str | N
     return script
 
 
+def build_filter_cardinality_text(inventory_rows: list[dict[str, Any]]) -> str:
+    def _card(rows: list[dict[str, Any]]) -> dict[str, int]:
+        return {
+            'n': len(rows),
+            'models': len({r.get('model') for r in rows if r.get('model')}),
+            'benchmarks': len({r.get('benchmark') for r in rows if r.get('benchmark')}),
+            'scenarios': len({r.get('scenario') for r in rows if r.get('scenario')}),
+            'model_bench_pairs': len({(r.get('model'), r.get('benchmark')) for r in rows if r.get('model') and r.get('benchmark')}),
+        }
+
+    all_rows = inventory_rows
+    considered_rows = [r for r in inventory_rows if r.get('considered_for_selection')]
+    eligible_rows = [r for r in inventory_rows if r.get('eligible_candidate')]
+    selected_rows = [r for r in inventory_rows if r.get('selection_status') == 'selected']
+
+    header = f"{'Stage':<22} {'runs':>6}  {'models':>6}  {'benchmarks':>10}  {'scenarios':>9}  {'mod×bench':>9}"
+    sep = '-' * len(header)
+
+    def row_line(label: str, c: dict[str, int]) -> str:
+        return (
+            f"{label:<22} {c['n']:>6}  {c['models']:>6}  {c['benchmarks']:>10}"
+            f"  {c['scenarios']:>9}  {c['model_bench_pairs']:>9}"
+        )
+
+    lines = [
+        'Filter Stage Cardinality Summary',
+        '================================',
+        '',
+        'Run-spec counts at each stage of the Stage 1 filter funnel.',
+        '',
+        header,
+        sep,
+        row_line('all_discovered', _card(all_rows)),
+        row_line('considered', _card(considered_rows)),
+        row_line('eligible', _card(eligible_rows)),
+        row_line('selected', _card(selected_rows)),
+        '',
+        'Columns: runs = total run entries; models/benchmarks/scenarios = unique values;',
+        '         mod×bench = unique (model, benchmark) pairs.',
+        'Stages: all_discovered = every run seen; considered = passed initial checks;',
+        '        eligible = passed all criteria; selected = chosen for reproduction.',
+    ]
+    return '\n'.join(lines) + '\n'
+
+
 def build_filter_report_text(
     *,
     summary: dict[str, Any],
@@ -784,11 +829,13 @@ def emit_filter_report_artifacts(
         selected_rows=selected_rows,
     )
     selected_run_specs_txt = '\n'.join(row['run_spec_name'] for row in selected_rows) + '\n'
+    cardinality_txt = build_filter_cardinality_text(inventory_rows)
 
     outputs = {
         'summary_json': str(_write_stamped_json(report_dpath, machine_dpath, 'model_filter_summary', stamp, {'summary': summary})),
         'inventory_json': str(_write_stamped_json(report_dpath, machine_dpath, 'model_filter_inventory', stamp, inventory_rows)),
         'summary_txt': str(_write_stamped_text(report_dpath, static_dpath, 'model_filter_report', stamp, '.txt', summary_txt)),
+        'filter_cardinality_txt': str(_write_stamped_text(report_dpath, static_dpath, 'filter_cardinality_summary', stamp, '.txt', cardinality_txt)),
         'selected_run_specs_txt': str(_write_stamped_text(report_dpath, static_dpath, 'model_filter_selected_run_specs', stamp, '.txt', selected_run_specs_txt)),
         'inventory_tsv': str(_write_stamped_table(report_dpath, tables_dpath, 'model_filter_inventory', stamp, inventory_rows)),
         'selected_runs_tsv': str(_write_stamped_table(report_dpath, tables_dpath, 'model_filter_selected_runs', stamp, selected_rows)),
