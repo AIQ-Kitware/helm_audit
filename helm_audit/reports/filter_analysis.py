@@ -1155,6 +1155,8 @@ def _emit_stacked_bar_chart(
     xaxis_title: str | None = None,
     yaxis_title: str | None = None,
     color_order: list[str] | None = None,
+    n_facets_shown: int | None = None,
+    n_facets_total: int | None = None,
 ) -> dict[str, str | None]:
     if not rows:
         return {'html': None, 'png': None, 'plotly_error': None}
@@ -1172,17 +1174,24 @@ def _emit_stacked_bar_chart(
         category_orders = {}
         if color_order is not None:
             category_orders[color] = color_order
+        if n_facets_shown is not None and n_facets_total is not None:
+            title_str = f'{title}  (n_facets_shown={n_facets_shown}, n_facets_total={n_facets_total})'
+        else:
+            title_str = _title_with_n(title, len(rows))
+        x_label = xaxis_title if xaxis_title is not None else x.replace('_', ' ')
+        if n_facets_shown is not None:
+            x_label = f'{x_label}  (n_bars={n_facets_shown})'
         fig = px.bar(
             pd.DataFrame(rows),
             x=x,
             y=y,
             color=color,
-            title=_title_with_n(title, len(rows)),
+            title=title_str,
             barmode='stack',
             category_orders=category_orders,
         )
         fig.update_layout(
-            xaxis_title=xaxis_title if xaxis_title is not None else x.replace('_', ' '),
+            xaxis_title=x_label,
             yaxis_title=yaxis_title if yaxis_title is not None else y.replace('_', ' '),
             **_bar_chart_layout(rows, x),
         )
@@ -1205,18 +1214,39 @@ def _emit_stacked_bar_chart(
     return {'html': html_out, 'png': png_out, 'plotly_error': plotly_error}
 
 
-def _make_selected_excluded_rows(inventory_rows: list[dict[str, Any]], facet_key: str) -> list[dict[str, Any]]:
+def _make_selected_excluded_rows(
+    inventory_rows: list[dict[str, Any]],
+    facet_key: str,
+    *,
+    limit: int = 40,
+) -> tuple[list[dict[str, Any]], int, int]:
+    """
+    Returns (plot_rows, n_facets_shown, n_facets_total).
+
+    Slices at the facet level (top `limit` facets by total then selected count)
+    before expanding to per-status rows, so the slice boundary never cuts a
+    facet in half and selected facets are never crowded out by excluded-only facets.
+    """
     counts: dict[str, dict[str, int]] = {}
     for row in inventory_rows:
         facet = str(row.get(facet_key) or 'unknown')
         status = 'selected' if row.get('selection_status') == 'selected' else 'excluded'
         bucket = counts.setdefault(facet, {'selected': 0, 'excluded': 0})
         bucket[status] += 1
+    sorted_facets = sorted(
+        counts.items(),
+        key=lambda item: (-sum(item[1].values()), -item[1]['selected'], str(item[0])),
+    )
+    n_facets_total = len(sorted_facets)
+    top_facets = sorted_facets[:limit]
+    n_facets_shown = len(top_facets)
     rows = []
-    for facet, bucket in sorted(counts.items(), key=lambda item: (-sum(item[1].values()), -item[1]['selected'], str(item[0]))):
-        rows.append({facet_key: facet, 'selection_status': 'selected', 'count': bucket['selected']})
-        rows.append({facet_key: facet, 'selection_status': 'excluded', 'count': bucket['excluded']})
-    return [row for row in rows if row['count'] > 0]
+    for facet, bucket in top_facets:
+        if bucket['selected'] > 0:
+            rows.append({facet_key: facet, 'selection_status': 'selected', 'count': bucket['selected']})
+        if bucket['excluded'] > 0:
+            rows.append({facet_key: facet, 'selection_status': 'excluded', 'count': bucket['excluded']})
+    return rows, n_facets_shown, n_facets_total
 
 
 def emit_filter_analysis_artifacts(
@@ -1243,10 +1273,10 @@ def emit_filter_analysis_artifacts(
     by_benchmark_rows = make_count_table(inventory_rows, facet_key='benchmark')
     candidate_pool_rows = make_candidate_pool_table(inventory_rows)
     selection_path_rows = make_selection_path_table(inventory_rows)
-    selected_excluded_by_model_rows = _make_selected_excluded_rows(inventory_rows, 'model')
-    selected_excluded_by_benchmark_rows = _make_selected_excluded_rows(inventory_rows, 'benchmark')
-    selected_excluded_by_dataset_rows = _make_selected_excluded_rows(inventory_rows, 'dataset')
-    selected_excluded_by_scenario_rows = _make_selected_excluded_rows(inventory_rows, 'scenario')
+    selected_excluded_by_model_rows, n_model_facets_shown, n_model_facets_total = _make_selected_excluded_rows(inventory_rows, 'model', limit=40)
+    selected_excluded_by_benchmark_rows, n_benchmark_facets_shown, n_benchmark_facets_total = _make_selected_excluded_rows(inventory_rows, 'benchmark', limit=40)
+    selected_excluded_by_dataset_rows, n_dataset_facets_shown, n_dataset_facets_total = _make_selected_excluded_rows(inventory_rows, 'dataset', limit=40)
+    selected_excluded_by_scenario_rows, n_scenario_facets_shown, n_scenario_facets_total = _make_selected_excluded_rows(inventory_rows, 'scenario', limit=40)
     reasons_by_model = make_reason_breakout_table(inventory_rows, 'model')
     reasons_by_dataset = make_reason_breakout_table(inventory_rows, 'dataset')
     reasons_by_scenario = make_reason_breakout_table(inventory_rows, 'scenario')
@@ -1366,6 +1396,10 @@ def emit_filter_analysis_artifacts(
         'model_benchmark_tsv': str(_write_stamped_table(report_dpath, tables_dpath, 'filter_candidate_model_by_benchmark', stamp, pair_model_benchmark_rows)),
         'benchmark_dataset_tsv': str(_write_stamped_table(report_dpath, tables_dpath, 'filter_candidate_benchmark_by_dataset', stamp, pair_benchmark_dataset_rows)),
         'reason_examples_tsv': str(_write_stamped_table(report_dpath, tables_dpath, 'filter_candidate_reason_examples', stamp, reason_example_rows)),
+        'sel_excl_by_model_tsv': str(_write_stamped_table(report_dpath, tables_dpath, 'filter_candidate_selection_by_model', stamp, selected_excluded_by_model_rows)),
+        'sel_excl_by_benchmark_tsv': str(_write_stamped_table(report_dpath, tables_dpath, 'filter_candidate_selection_by_benchmark', stamp, selected_excluded_by_benchmark_rows)),
+        'sel_excl_by_dataset_tsv': str(_write_stamped_table(report_dpath, tables_dpath, 'filter_candidate_selection_by_dataset', stamp, selected_excluded_by_dataset_rows)),
+        'sel_excl_by_scenario_tsv': str(_write_stamped_table(report_dpath, tables_dpath, 'filter_candidate_selection_by_scenario', stamp, selected_excluded_by_scenario_rows)),
     }
 
     outputs['selected_fraction_by_model_chart'] = _emit_bar_chart(
@@ -1444,7 +1478,7 @@ def emit_filter_analysis_artifacts(
         yaxis_title='Excluded Run Count',
     )
     outputs['selected_vs_excluded_by_model_chart'] = _emit_stacked_bar_chart(
-        selected_excluded_by_model_rows[:40],
+        selected_excluded_by_model_rows,
         report_dpath=report_dpath,
         x='model',
         y='count',
@@ -1457,9 +1491,11 @@ def emit_filter_analysis_artifacts(
         xaxis_title='Model',
         yaxis_title='Run Spec Count',
         color_order=['selected', 'excluded'],
+        n_facets_shown=n_model_facets_shown,
+        n_facets_total=n_model_facets_total,
     )
     outputs['selected_vs_excluded_by_benchmark_chart'] = _emit_stacked_bar_chart(
-        selected_excluded_by_benchmark_rows[:40],
+        selected_excluded_by_benchmark_rows,
         report_dpath=report_dpath,
         x='benchmark',
         y='count',
@@ -1472,9 +1508,11 @@ def emit_filter_analysis_artifacts(
         xaxis_title='Benchmark',
         yaxis_title='Run Spec Count',
         color_order=['selected', 'excluded'],
+        n_facets_shown=n_benchmark_facets_shown,
+        n_facets_total=n_benchmark_facets_total,
     )
     outputs['selected_vs_excluded_by_dataset_chart'] = _emit_stacked_bar_chart(
-        selected_excluded_by_dataset_rows[:40],
+        selected_excluded_by_dataset_rows,
         report_dpath=report_dpath,
         x='dataset',
         y='count',
@@ -1487,9 +1525,11 @@ def emit_filter_analysis_artifacts(
         xaxis_title='Dataset Slice',
         yaxis_title='Run Spec Count',
         color_order=['selected', 'excluded'],
+        n_facets_shown=n_dataset_facets_shown,
+        n_facets_total=n_dataset_facets_total,
     )
     outputs['selected_vs_excluded_by_scenario_chart'] = _emit_stacked_bar_chart(
-        selected_excluded_by_scenario_rows[:40],
+        selected_excluded_by_scenario_rows,
         report_dpath=report_dpath,
         x='scenario',
         y='count',
@@ -1502,6 +1542,8 @@ def emit_filter_analysis_artifacts(
         xaxis_title='Scenario',
         yaxis_title='Run Spec Count',
         color_order=['selected', 'excluded'],
+        n_facets_shown=n_scenario_facets_shown,
+        n_facets_total=n_scenario_facets_total,
     )
     outputs['exclusion_reason_chart'] = _emit_bar_chart(
         [{'failure_reason': reason, 'run_count': count} for reason, count in summary['exclusion_reason_counts'].items()],

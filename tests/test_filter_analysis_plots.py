@@ -17,7 +17,7 @@ from helm_audit.utils.sankey import emit_sankey_artifacts
 
 
 def test_make_selected_excluded_rows_groups_by_facet():
-    rows = _make_selected_excluded_rows(
+    rows, n_shown, n_total = _make_selected_excluded_rows(
         [
             {"model": "m1", "selection_status": "selected"},
             {"model": "m1", "selection_status": "excluded"},
@@ -34,6 +34,8 @@ def test_make_selected_excluded_rows_groups_by_facet():
         {"model": "m2", "selection_status": "selected", "count": 1},
         {"model": "m3", "selection_status": "excluded", "count": 1},
     ]
+    assert n_shown == 3
+    assert n_total == 3
 
 
 def test_title_helper_appends_n_suffix():
