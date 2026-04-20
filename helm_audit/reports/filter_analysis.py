@@ -29,6 +29,23 @@ def _title_with_n(title: str, n: int) -> str:
     return f'{title} n={n}'
 
 
+_AXIS_COUNT_TAGS = {
+    'model': 'n_models',
+    'benchmark': 'n_benchmarks',
+    'dataset': 'n_datasets',
+    'scenario': 'n_scenarios',
+    'failure_reason': 'n_failure_reasons',
+    'candidate_pool': 'n_candidate_pools',
+    'reason_combo': 'n_reason_combos',
+}
+
+
+def _bar_count_label(axis_key: str, n_bars: int, *, axis_title: str | None = None) -> str:
+    label = axis_title if axis_title is not None else axis_key.replace('_', ' ').title()
+    count_tag = _AXIS_COUNT_TAGS.get(axis_key, 'n_categories')
+    return f'{label} ({count_tag}={n_bars}, n_bars={n_bars})'
+
+
 def _bar_chart_layout(rows: list[dict[str, Any]], x: str) -> dict[str, Any]:
     unique_x = []
     seen = set()
@@ -1105,6 +1122,7 @@ def _emit_bar_chart(
     stamp: str,
     interactive_dpath: Path,
     static_dpath: Path,
+    xaxis_title: str | None = None,
 ) -> dict[str, str | None]:
     if not rows:
         return {'html': None, 'png': None, 'plotly_error': None}
@@ -1119,9 +1137,12 @@ def _emit_bar_chart(
         import plotly.express as px
 
         configure_plotly_chrome()
-        fig = px.bar(pd.DataFrame(rows), x=x, y=y, title=_title_with_n(title, len(rows)))
+        n_bars = len({str(row.get(x) or 'unknown') for row in rows})
+        if n_bars > 75:
+            logger.warning(f'Chart {stem!r} is rendering {n_bars} bars; rendering the full chart anyway.')
+        fig = px.bar(pd.DataFrame(rows), x=x, y=y, title=title)
         fig.update_layout(**_bar_chart_layout(rows, x))
-        fig.update_xaxes(tickangle=-45, automargin=True)
+        fig.update_xaxes(title_text=_bar_count_label(x, n_bars, axis_title=xaxis_title), tickangle=-45, automargin=True)
         fig.write_html(str(html_fpath), include_plotlyjs='cdn')
         logger.debug(f'Write to 📝: {html_fpath}')
         write_latest_alias(html_fpath, interactive_dpath, f'{stem}.latest.html')
@@ -1174,24 +1195,20 @@ def _emit_stacked_bar_chart(
         category_orders = {}
         if color_order is not None:
             category_orders[color] = color_order
-        if n_facets_shown is not None and n_facets_total is not None:
-            title_str = f'{title}  (n_facets_shown={n_facets_shown}, n_facets_total={n_facets_total})'
-        else:
-            title_str = _title_with_n(title, len(rows))
-        x_label = xaxis_title if xaxis_title is not None else x.replace('_', ' ')
-        if n_facets_shown is not None:
-            x_label = f'{x_label}  (n_bars={n_facets_shown})'
+        n_bars = len({str(row.get(x) or 'unknown') for row in rows})
+        if n_bars > 75:
+            logger.warning(f'Chart {stem!r} is rendering {n_bars} bars; rendering the full chart anyway.')
         fig = px.bar(
             pd.DataFrame(rows),
             x=x,
             y=y,
             color=color,
-            title=title_str,
+            title=title,
             barmode='stack',
             category_orders=category_orders,
         )
         fig.update_layout(
-            xaxis_title=x_label,
+            xaxis_title=_bar_count_label(x, n_bars, axis_title=xaxis_title),
             yaxis_title=yaxis_title if yaxis_title is not None else y.replace('_', ' '),
             **_bar_chart_layout(rows, x),
         )
@@ -1218,14 +1235,15 @@ def _make_selected_excluded_rows(
     inventory_rows: list[dict[str, Any]],
     facet_key: str,
     *,
-    limit: int = 40,
+    limit: int | None = None,
 ) -> tuple[list[dict[str, Any]], int, int]:
     """
     Returns (plot_rows, n_facets_shown, n_facets_total).
 
-    Slices at the facet level (top `limit` facets by total then selected count)
-    before expanding to per-status rows, so the slice boundary never cuts a
-    facet in half and selected facets are never crowded out by excluded-only facets.
+    If `limit` is provided, slices at the facet level (top `limit` facets by
+    total then selected count) before expanding to per-status rows, so the slice
+    boundary never cuts a facet in half and selected facets are never crowded
+    out by excluded-only facets. If `limit` is `None`, all facets are included.
     """
     counts: dict[str, dict[str, int]] = {}
     for row in inventory_rows:
@@ -1238,7 +1256,7 @@ def _make_selected_excluded_rows(
         key=lambda item: (-sum(item[1].values()), -item[1]['selected'], str(item[0])),
     )
     n_facets_total = len(sorted_facets)
-    top_facets = sorted_facets[:limit]
+    top_facets = sorted_facets if limit is None else sorted_facets[:limit]
     n_facets_shown = len(top_facets)
     rows = []
     for facet, bucket in top_facets:
@@ -1273,10 +1291,10 @@ def emit_filter_analysis_artifacts(
     by_benchmark_rows = make_count_table(inventory_rows, facet_key='benchmark')
     candidate_pool_rows = make_candidate_pool_table(inventory_rows)
     selection_path_rows = make_selection_path_table(inventory_rows)
-    selected_excluded_by_model_rows, n_model_facets_shown, n_model_facets_total = _make_selected_excluded_rows(inventory_rows, 'model', limit=40)
-    selected_excluded_by_benchmark_rows, n_benchmark_facets_shown, n_benchmark_facets_total = _make_selected_excluded_rows(inventory_rows, 'benchmark', limit=40)
-    selected_excluded_by_dataset_rows, n_dataset_facets_shown, n_dataset_facets_total = _make_selected_excluded_rows(inventory_rows, 'dataset', limit=40)
-    selected_excluded_by_scenario_rows, n_scenario_facets_shown, n_scenario_facets_total = _make_selected_excluded_rows(inventory_rows, 'scenario', limit=40)
+    selected_excluded_by_model_rows, n_model_facets_shown, n_model_facets_total = _make_selected_excluded_rows(inventory_rows, 'model')
+    selected_excluded_by_benchmark_rows, n_benchmark_facets_shown, n_benchmark_facets_total = _make_selected_excluded_rows(inventory_rows, 'benchmark')
+    selected_excluded_by_dataset_rows, n_dataset_facets_shown, n_dataset_facets_total = _make_selected_excluded_rows(inventory_rows, 'dataset')
+    selected_excluded_by_scenario_rows, n_scenario_facets_shown, n_scenario_facets_total = _make_selected_excluded_rows(inventory_rows, 'scenario')
     reasons_by_model = make_reason_breakout_table(inventory_rows, 'model')
     reasons_by_dataset = make_reason_breakout_table(inventory_rows, 'dataset')
     reasons_by_scenario = make_reason_breakout_table(inventory_rows, 'scenario')
@@ -1403,7 +1421,7 @@ def emit_filter_analysis_artifacts(
     }
 
     outputs['selected_fraction_by_model_chart'] = _emit_bar_chart(
-        by_model_rows[:20],
+        by_model_rows,
         report_dpath=report_dpath,
         x='model',
         y='fraction_selected_of_all',
@@ -1414,7 +1432,7 @@ def emit_filter_analysis_artifacts(
         static_dpath=figures_dpath,
     )
     outputs['selected_fraction_by_dataset_chart'] = _emit_bar_chart(
-        by_dataset_rows[:20],
+        by_dataset_rows,
         report_dpath=report_dpath,
         x='dataset',
         y='fraction_selected_of_all',
@@ -1436,7 +1454,7 @@ def emit_filter_analysis_artifacts(
         static_dpath=figures_dpath,
     )
     outputs['open_access_exclusion_reason_by_model_chart'] = _emit_stacked_bar_chart(
-        open_access_exclusion_reason_by_model_rows[:120],
+        open_access_exclusion_reason_by_model_rows,
         report_dpath=report_dpath,
         x='model',
         y='run_count',
@@ -1450,7 +1468,7 @@ def emit_filter_analysis_artifacts(
         yaxis_title='Excluded Run Count',
     )
     outputs['open_access_text_exclusion_reason_by_model_chart'] = _emit_stacked_bar_chart(
-        open_access_text_exclusion_reason_by_model_rows[:120],
+        open_access_text_exclusion_reason_by_model_rows,
         report_dpath=report_dpath,
         x='model',
         y='run_count',
@@ -1464,7 +1482,7 @@ def emit_filter_analysis_artifacts(
         yaxis_title='Excluded Run Count',
     )
     outputs['open_access_text_size_exclusion_reason_by_model_chart'] = _emit_stacked_bar_chart(
-        open_access_text_size_exclusion_reason_by_model_rows[:120],
+        open_access_text_size_exclusion_reason_by_model_rows,
         report_dpath=report_dpath,
         x='model',
         y='run_count',
@@ -1557,7 +1575,7 @@ def emit_filter_analysis_artifacts(
         static_dpath=figures_dpath,
     )
     outputs['reason_by_model_chart'] = _emit_stacked_bar_chart(
-        reasons_by_model[:120],
+        reasons_by_model,
         report_dpath=report_dpath,
         x='model',
         y='run_count',
@@ -1602,11 +1620,11 @@ def emit_filter_analysis_artifacts(
         color_order=['selected', 'excluded'],
     )
     outputs['reason_combo_chart'] = _emit_bar_chart(
-        reason_combo_rows[:25],
+        reason_combo_rows,
         report_dpath=report_dpath,
         x='reason_combo',
         y='run_count',
-        title='Top Filter Reason Combinations',
+        title='Filter Reason Combinations',
         stem='filter_candidate_reason_combinations',
         stamp=stamp,
         interactive_dpath=interactive_dpath,
