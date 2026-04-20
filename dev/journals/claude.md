@@ -165,3 +165,67 @@ After the initial implementation, the filter report was generating JSON and TXT 
 - Top exclusion reason: no-hf-deployment (10,601 runs)
 
 The fix ensures operators always get JPG sidecars alongside HTML for easy sharing and offline viewing.
+
+## 2026-04-18 00:00:00 +0000
+
+User intent: refactor the report/analysis layout to establish one canonical per-experiment analysis root in the audit store, eliminating the split between `repo_root()/reports/` and `/data/crfm-helm-audit-store/`.
+
+Model and configuration: claude-sonnet-4-6, Claude Code CLI.
+
+### Problem statement
+
+The codebase had analysis truth split across two filesystem roots:
+- Raw experiment outputs and indexes → `/data/crfm-helm-audit-store/`
+- Per-experiment analysis summaries and core reports → `repo_root()/reports/core-run-analysis/experiment-analysis-{name}/`
+
+This made it hard to answer: "what is the current canonical analysis for experiment X?" It also meant indexes had no `latest` alias (five timestamped files, no pointer to the newest), and there was no per-analysis provenance record.
+
+### Approach chosen
+
+Minimal coherent refactor: change where things are written, not what is written. No content changes to reports; only path and alias logic touched.
+
+1. **`paths.py`** — added `experiment_analysis_dpath(name)` returning `$AUDIT_STORE_ROOT/analysis/experiments/{name}/`.
+
+2. **`report_layout.py`** — `core_run_reports_root()` now returns the store path (`$AUDIT_STORE_ROOT/analysis/experiments/`). Old `reports/core-run-analysis/` is now `compat_core_run_reports_root()`.
+
+3. **`analyze_experiment.py`** — three additions:
+   - On first run with new code, if an existing real dir lives at the old compat path and the canonical store path doesn't yet exist, it is automatically moved (`shutil.move`) to the store. This migrates history without data loss.
+   - After writing analysis outputs, writes `provenance.json` at the experiment root recording `generated_utc`, `experiment_name`, `index_fpath`, `analysis_root`, `git_sha`.
+   - Creates a relative symlink from the legacy compat path (`reports/core-run-analysis/experiment-analysis-{name}`) to the canonical store path. Existing symlinks are left alone (idempotent); real dirs that weren't migrated (e.g., both paths already existed) log a warning and skip.
+
+4. **`build_reports_summary.py`** — `_load_all_repro_rows()` now scans both the new canonical store root (`*/core-reports/*/...`) and the old compat root (`experiment-analysis-*/core-reports/*/...`). Deduplication by `(experiment_name, run_entry)` tuple handles any overlap. The `experiment-analysis` symlink in aggregate summaries now prefers `experiment_analysis_dpath()` and falls back to the compat path.
+
+5. **`index_results.py`** — after writing timestamped index files, now also writes `latest` aliases (`audit_results_index.latest.{csv,jsonl,txt}`) so the most recent index is always findable without parsing timestamps.
+
+### Key design insight
+
+The `reports/` tree is gitignored, so it was already a local-only artifact. Making it a symlink forest (pointing into the store) costs nothing and preserves every existing hardcoded path. The store becomes the real truth; `reports/` is now a convenience layer.
+
+### Migration story
+
+- Existing experiment dirs at `reports/core-run-analysis/experiment-analysis-{name}/`: migrated to store automatically on first re-run. Between now and that re-run, `build_reports_summary.py` still finds them via the dual-scan glob.
+- Existing index files in `/data/crfm-helm-audit-store/indexes/`: timestamped files remain; next `helm-audit-index` run will also write `latest` aliases.
+- No history deleted, no content modified.
+
+### Files changed
+
+- `helm_audit/infra/paths.py` — +5 lines (`experiment_analysis_dpath`)
+- `helm_audit/infra/report_layout.py` — `core_run_reports_root` redirected, `compat_core_run_reports_root` added
+- `helm_audit/workflows/analyze_experiment.py` — new canonical path, migration, provenance.json, compat symlink
+- `helm_audit/workflows/build_reports_summary.py` — dual-scan glob, `experiment_analysis_dpath` lookup
+- `helm_audit/workflows/index_results.py` — `latest` aliases for index files
+
+### Command to rerun analysis and inspect new canonical output
+
+```bash
+python -m helm_audit.workflows.analyze_experiment \
+  --experiment-name audit-small-models-kubeai-overnight \
+  --index-fpath /data/crfm-helm-audit-store/indexes/audit_results_index.latest.csv
+
+# New canonical root:
+ls /data/crfm-helm-audit-store/analysis/experiments/audit-small-models-kubeai-overnight/
+cat /data/crfm-helm-audit-store/analysis/experiments/audit-small-models-kubeai-overnight/provenance.json
+
+# Compat symlink (backward compat):
+ls -la reports/core-run-analysis/experiment-analysis-audit-small-models-kubeai-overnight
+```

@@ -17,7 +17,8 @@ import kwutil
 from helm_audit.infra.api import audit_root, default_index_root, default_store_root
 from helm_audit.infra.plotly_env import configure_plotly_chrome
 from helm_audit.infra.fs_publish import stamped_history_dir, symlink_to, write_latest_alias
-from helm_audit.infra.report_layout import aggregate_summary_reports_root, core_run_reports_root, portable_repo_root_lines
+from helm_audit.infra.paths import experiment_analysis_dpath
+from helm_audit.infra.report_layout import aggregate_summary_reports_root, compat_core_run_reports_root, core_run_reports_root, portable_repo_root_lines
 from helm_audit.utils.numeric import nested_get
 from helm_audit.utils.sankey import emit_sankey_artifacts
 from helm_audit.utils import sankey_builder
@@ -726,8 +727,13 @@ def _fd_count() -> int | None:
 
 
 def _load_all_repro_rows() -> list[dict[str, Any]]:
+    # Scan both the canonical store location and the legacy compat location so
+    # experiments that haven't been re-run since the layout migration are still found.
+    new_root = core_run_reports_root()
+    old_root = compat_core_run_reports_root()
     report_jsons = sorted(
-        core_run_reports_root().glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json")
+        list(new_root.glob("*/core-reports/*/core_metric_report.latest.json"))
+        + list(old_root.glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json"))
     )
     deduped: dict[tuple[str | None, str | None], dict[str, Any]] = {}
     for report_json in report_jsons:
@@ -2559,7 +2565,10 @@ def _render_scope_summary(
     experiment_names = {str(row.get("experiment_name")) for row in enriched_rows if row.get("experiment_name")}
     if len(experiment_names) == 1:
         exp_name = next(iter(experiment_names))
-        analysis_dpath = core_run_reports_root() / f"experiment-analysis-{slugify(exp_name)}"
+        # Check canonical store location first, fall back to legacy compat path.
+        analysis_dpath = experiment_analysis_dpath(exp_name)
+        if not analysis_dpath.exists():
+            analysis_dpath = compat_core_run_reports_root() / f"experiment-analysis-{slugify(exp_name)}"
         if analysis_dpath.exists():
             symlink_to(analysis_dpath, level_002 / "experiment-analysis")
 

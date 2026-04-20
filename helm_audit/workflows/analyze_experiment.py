@@ -16,8 +16,9 @@ from loguru import logger
 from helm_audit.reports.aggregate import _find_curve_value, _find_pair
 from helm_audit.infra.api import audit_root, default_index_root
 from helm_audit.utils.numeric import nested_get
-from helm_audit.infra.fs_publish import write_latest_alias
-from helm_audit.infra.report_layout import core_run_reports_root, portable_repo_root_lines, write_reproduce_script
+from helm_audit.infra.fs_publish import symlink_to, write_latest_alias
+from helm_audit.infra.paths import experiment_analysis_dpath
+from helm_audit.infra.report_layout import compat_core_run_reports_root, portable_repo_root_lines, write_reproduce_script
 from helm_audit.reports import pair_report
 from helm_audit.reports.paper_labels import load_paper_label_manager
 from helm_audit.workflows.rebuild_core_report import (
@@ -157,7 +158,14 @@ def main(argv: list[str] | None = None) -> None:
     run_entries = sorted({r.get('run_entry') for r in experiment_rows if r.get('run_entry')})
     benchmark_completion = _benchmark_completion_summary(experiment_rows)
 
-    out_dpath = core_run_reports_root() / f'experiment-analysis-{slugify(args.experiment_name)}'
+    out_dpath = experiment_analysis_dpath(args.experiment_name)
+    # Migrate existing real dir from legacy compat location to canonical store location.
+    compat_dpath = compat_core_run_reports_root() / f'experiment-analysis-{slugify(args.experiment_name)}'
+    if compat_dpath.is_dir() and not compat_dpath.is_symlink() and not out_dpath.exists():
+        import shutil
+        logger.info(f'Migrating legacy report dir: {compat_dpath} → {out_dpath}')
+        out_dpath.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(compat_dpath), str(out_dpath))
     out_dpath.mkdir(parents=True, exist_ok=True)
     reports_dpath = out_dpath / 'core-reports'
     reports_dpath.mkdir(parents=True, exist_ok=True)
@@ -411,6 +419,40 @@ def main(argv: list[str] | None = None) -> None:
     ])
     write_latest_alias(reproduce_fpath, out_dpath, 'reproduce.sh')
 
+    # Write provenance.json at the experiment root (overwritten each run).
+    provenance: dict[str, Any] = {
+        'generated_utc': stamp,
+        'experiment_name': args.experiment_name,
+        'index_fpath': str(index_fpath),
+        'analysis_root': str(out_dpath),
+        'n_run_entries': len(run_entries),
+        'n_built_reports': len(summary_rows),
+    }
+    try:
+        import subprocess
+        from helm_audit.infra.env import load_env as _load_env
+        git_sha = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=str(_load_env().repo_root),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        provenance['git_sha'] = git_sha
+    except Exception:
+        pass
+    provenance_fpath = out_dpath / 'provenance.json'
+    provenance_fpath.write_text(json.dumps(provenance, indent=2))
+    logger.debug(f'Write to: {provenance_fpath}')
+
+    # Publish backward-compat symlink at the legacy repo/reports location.
+    compat_link = compat_core_run_reports_root() / f'experiment-analysis-{slugify(args.experiment_name)}'
+    if not compat_link.is_symlink():
+        try:
+            symlink_to(out_dpath, compat_link)
+        except Exception as ex:
+            logger.warning(f'Could not create compat symlink {compat_link}: {ex}')
+
+    logger.info(f'Canonical analysis root: {out_dpath}')
     logger.info(f'Wrote experiment summary json: {json_fpath}')
     logger.info(f'Wrote experiment summary csv: {csv_fpath}')
     logger.info(f'Wrote experiment summary txt: {txt_fpath}')

@@ -12,6 +12,7 @@ import pandas as pd
 
 from helm_audit.compat.helm_outputs import HelmOutputs
 from helm_audit.infra.api import default_index_root, env_defaults
+from helm_audit.infra.fs_publish import write_latest_alias
 from helm_audit.helm.run_entries import parse_run_entry_description
 
 from loguru import logger
@@ -196,9 +197,14 @@ def main(argv: list[str] | None = None) -> None:
     table.to_csv(csv_fpath, index=False)
     _write_summary(rows, summary_fpath)
 
+    write_latest_alias(jsonl_fpath, report_dpath, 'audit_results_index.latest.jsonl')
+    write_latest_alias(csv_fpath, report_dpath, 'audit_results_index.latest.csv')
+    write_latest_alias(summary_fpath, report_dpath, 'audit_results_index.latest.txt')
+
     logger.info(f'Wrote jsonl index: {jsonl_fpath}')
     logger.info(f'Wrote csv index: {csv_fpath}')
     logger.info(f'Wrote summary: {summary_fpath}')
+    logger.info(f'Latest alias: {report_dpath}/audit_results_index.latest.csv')
 
 
 if __name__ == '__main__':

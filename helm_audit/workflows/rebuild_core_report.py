@@ -140,13 +140,16 @@ def main(argv: list[str] | None = None) -> None:
     if len(matches) >= 2:
         left_a = matches[0]['run_dir']
         left_b = matches[1]['run_dir']
+        single_run = False
     elif args.allow_single_repeat:
         left_a = matches[0]['run_dir']
         left_b = matches[0]['run_dir']
+        single_run = True
+        print(f'single_run=True: only one local run found; repeat pair will be skipped')
     else:
         raise SystemExit(
             f'Need at least 2 matching kwdagger runs for run_entry={args.run_entry!r}; '
-            f'found {len(matches)}. Use --allow-single-repeat to duplicate the latest run.'
+            f'found {len(matches)}. Use --allow-single-repeat to skip the repeat pair.'
         )
 
     desired_max = None
@@ -183,13 +186,14 @@ def main(argv: list[str] | None = None) -> None:
         'report_dpath': str(report_dpath),
         'experiment_name': args.experiment_name,
         'historic_info': info,
+        'single_run': single_run,
     }
     selection_fpath = _write_latest_selection(report_dpath, selection)
     link_info = _write_selected_run_symlinks(report_dpath, selection)
     selection['selected_run_links'] = link_info
     selection_fpath = _write_latest_selection(report_dpath, selection)
     print(f'selection_fpath={selection_fpath}')
-    core_metrics.main([
+    core_metrics_cmd = [
         '--left-run-a', str(left_a),
         '--left-run-b', str(left_b),
         '--left-label', args.left_label,
@@ -197,14 +201,18 @@ def main(argv: list[str] | None = None) -> None:
         '--right-run-b', str(left_a),
         '--right-label', args.right_label,
         '--report-dpath', str(report_dpath),
-    ])
+    ]
+    if single_run:
+        core_metrics_cmd.append('--single-run')
+    core_metrics.main(core_metrics_cmd)
 
-    pair_samples.write_pair_samples(
-        run_a=str(left_a),
-        run_b=str(left_b),
-        label=args.left_label,
-        report_dpath=report_dpath,
-    )
+    if not single_run:
+        pair_samples.write_pair_samples(
+            run_a=str(left_a),
+            run_b=str(left_b),
+            label=args.left_label,
+            report_dpath=report_dpath,
+        )
     pair_samples.write_pair_samples(
         run_a=str(chosen_historic['run_dir']),
         run_b=str(left_a),

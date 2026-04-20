@@ -844,18 +844,23 @@ def _strip_private(obj: Any) -> Any:
 
 
 def _write_text(report: dict[str, Any], out_fpath: Path) -> None:
-    left, right = report['pairs']
+    pairs = report['pairs']
+    left = next((p for p in pairs if p.get('label') == 'kwdagger_repeat'), None)
+    right = next((p for p in pairs if p.get('label') != 'kwdagger_repeat'), None) or (pairs[-1] if pairs else {})
     lines = []
     lines.append('Core Metric Report')
     lines.append('')
     lines.append(f"generated_utc: {report['generated_utc']}")
     lines.append(f"run_spec_name: {report['run_spec_name']}")
-    lines.append(f"left_label: {left['label']}")
-    lines.append(f"right_label: {right['label']}")
+    if report.get('single_run_mode'):
+        lines.append('single_run_mode: true  # repeat pair not computed (only one local run)')
+    lines.append(f"left_label: {left['label'] if left else 'not_computed'}")
+    lines.append(f"right_label: {right.get('label', 'unknown')}")
     lines.append(f"diagnostic_flags: {report.get('diagnostic_flags', [])}")
     lines.append('')
     lines.append('core_metrics:')
-    for metric in left['core_metrics']:
+    ref_pair = left or right
+    for metric in ref_pair.get('core_metrics', []):
         lines.append(f'  - {metric}')
     lines.append('')
     lines.append('run_diagnostics:')
@@ -901,17 +906,22 @@ def _find_curve_value(rows: list[dict[str, Any]], abs_tol: float) -> float | Non
 
 
 def _write_management_summary(report: dict[str, Any], out_fpath: Path) -> None:
-    left, right = report['pairs']
+    pairs = report['pairs']
+    left = next((p for p in pairs if p.get('label') == 'kwdagger_repeat'), None)
+    right = next((p for p in pairs if p.get('label') != 'kwdagger_repeat'), None) or (pairs[-1] if pairs else {})
+    ref_pair = left or right
     lines = []
     lines.append('Core Metric Executive Summary')
     lines.append('')
     lines.append(f"generated_utc: {report['generated_utc']}")
     lines.append(f"run_spec_name: {report['run_spec_name']}")
-    lines.append(f"core_metrics: {', '.join(left.get('core_metrics', []))}")
+    if report.get('single_run_mode'):
+        lines.append('single_run_mode: true  # repeat pair not computed (only one local run)')
+    lines.append(f"core_metrics: {', '.join(ref_pair.get('core_metrics', []))}")
     lines.append(f"diagnostic_flags: {report.get('diagnostic_flags', [])}")
     lines.append('')
     lines.append('metric_descriptions:')
-    for metric in left.get('core_metrics', []):
+    for metric in ref_pair.get('core_metrics', []):
         desc = _metric_descriptor(metric)
         lines.append(
             f"  - {metric}: {desc['kind']}; {desc['range']}; {desc['direction']}"
@@ -929,20 +939,24 @@ def _write_management_summary(report: dict[str, Any], out_fpath: Path) -> None:
         lines.append(f"    num_output_tokens_from_stats: {(diag.get('stats_means') or {}).get('num_output_tokens')}")
         lines.append(f"    finish_reason_unknown_from_stats: {(diag.get('stats_means') or {}).get('finish_reason_unknown')}")
     lines.append('')
-    lines.append(f"{left['label']}:")
-    lines.append(f"  diagnosis: {left['diagnosis'].get('label')}")
-    lines.append(f"  run-level N: {left['run_level']['n_rows']}")
-    lines.append(f"  instance-level N: {left['instance_level']['n_rows']}")
-    lines.append(
-        f"  instance agreement at abs_tol=0.0: {_find_curve_value(left['instance_level']['agreement_vs_abs_tol'], 0.0)}"
-    )
-    lines.append(
-        f"  run-level abs delta max: {left['run_level']['overall_quantiles']['abs_delta']['max']}"
-    )
-    lines.append(
-        f"  instance-level abs delta max: {left['instance_level']['overall_quantiles']['abs_delta']['max']}"
-    )
-    lines.append('')
+    if left is not None:
+        lines.append(f"{left['label']}:")
+        lines.append(f"  diagnosis: {left['diagnosis'].get('label')}")
+        lines.append(f"  run-level N: {left['run_level']['n_rows']}")
+        lines.append(f"  instance-level N: {left['instance_level']['n_rows']}")
+        lines.append(
+            f"  instance agreement at abs_tol=0.0: {_find_curve_value(left['instance_level']['agreement_vs_abs_tol'], 0.0)}"
+        )
+        lines.append(
+            f"  run-level abs delta max: {left['run_level']['overall_quantiles']['abs_delta']['max']}"
+        )
+        lines.append(
+            f"  instance-level abs delta max: {left['instance_level']['overall_quantiles']['abs_delta']['max']}"
+        )
+        lines.append('')
+    else:
+        lines.append('kwdagger_repeat: not_computed (single_run_mode)')
+        lines.append('')
     lines.append(f"{right['label']}:")
     lines.append(f"  diagnosis: {right['diagnosis'].get('label')}")
     lines.append(f"  run-level N: {right['run_level']['n_rows']}")
@@ -985,6 +999,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument('--right-run-b', required=True)
     parser.add_argument('--right-label', required=True)
     parser.add_argument('--report-dpath', required=True)
+    parser.add_argument(
+        '--single-run',
+        action='store_true',
+        help=(
+            'Only one local run is available; skip the kwdagger_repeat pair comparison '
+            'and compute only official_vs_kwdagger. Avoids a meaningless self-comparison.'
+        ),
+    )
     args = parser.parse_args(argv)
 
     thresholds = [0.0, 1e-12, 1e-9, 1e-6, 1e-4, 1e-3, 1e-2, 2e-2, 5e-2, 1e-1, 2.5e-1, 5e-1, 1.0]
@@ -995,111 +1017,136 @@ def main(argv: list[str] | None = None) -> None:
     history_dpath.mkdir(parents=True, exist_ok=True)
     run_spec_name = _infer_run_spec_name(args.left_run_a, args.left_run_b, args.right_run_a)
 
-    left = _build_pair(args.left_run_a, args.left_run_b, args.left_label, thresholds)
     right = _build_pair(args.right_run_a, args.right_run_b, args.right_label, thresholds)
-    run_diagnostics = {
-        'kwdagger_a': _run_diagnostics(args.left_run_a),
-        'kwdagger_b': _run_diagnostics(args.left_run_b),
-        'official': _run_diagnostics(args.right_run_a),
-    }
+    if args.single_run:
+        # Only one local run: skip the repeat pair to avoid a meaningless self-comparison.
+        left = None
+        run_diagnostics = {
+            'kwdagger_a': _run_diagnostics(args.left_run_a),
+            'official': _run_diagnostics(args.right_run_a),
+        }
+        pairs = [right]
+    else:
+        left = _build_pair(args.left_run_a, args.left_run_b, args.left_label, thresholds)
+        run_diagnostics = {
+            'kwdagger_a': _run_diagnostics(args.left_run_a),
+            'kwdagger_b': _run_diagnostics(args.left_run_b),
+            'official': _run_diagnostics(args.right_run_a),
+        }
+        pairs = [left, right]
+
     report = {
         'generated_utc': stamp,
         'run_spec_name': run_spec_name,
         'thresholds': thresholds,
-        'pairs': [left, right],
+        'pairs': pairs,
         'run_diagnostics': run_diagnostics,
         'diagnostic_flags': _diagnostic_flags(run_diagnostics),
+        'single_run_mode': args.single_run,
     }
 
     json_fpath = history_dpath / f'core_metric_report_{stamp}.json'
     txt_fpath = history_dpath / f'core_metric_report_{stamp}.txt'
     mgmt_fpath = history_dpath / f'core_metric_management_summary_{stamp}.txt'
-    fig_fpath = history_dpath / f'core_metric_report_{stamp}.png'
-    dist_fig_fpath = _plot_metric_distributions(history_dpath, stamp, left, right, run_spec_name)
-    three_run_dist_fpath = _plot_three_run_metric_distributions(
-        history_dpath,
-        stamp,
-        args.left_run_a,
-        args.left_run_b,
-        args.right_run_a,
-        run_spec_name,
-    )
-    overlay_dist_fpath = _plot_overlay_metric_distributions(
-        history_dpath,
-        stamp,
-        args.left_run_a,
-        args.left_run_b,
-        args.right_run_a,
-        run_spec_name,
-    )
-    ecdf_fig_fpath = _plot_overlay_metric_ecdfs(
-        history_dpath,
-        stamp,
-        args.left_run_a,
-        args.left_run_b,
-        args.right_run_a,
-        run_spec_name,
-    )
-    per_metric_agree_fpath = _plot_per_metric_agreement(
-        history_dpath,
-        stamp,
-        left,
-        right,
-        level_key='instance_level',
-        thresholds=thresholds,
-    )
-    runlevel_csv_fpath, runlevel_md_fpath = _write_three_run_runlevel_table(
-        history_dpath,
-        stamp,
-        args.left_run_a,
-        args.left_run_b,
-        args.right_run_a,
-    )
+
+    # Plots that require both runs (left_a ≠ left_b) are skipped in single-run mode.
+    if args.single_run or left is None:
+        fig_fpath = None
+        dist_fig_fpath = None
+        three_run_dist_fpath = None
+        overlay_dist_fpath = None
+        ecdf_fig_fpath = None
+        per_metric_agree_fpath = None
+        runlevel_csv_fpath = None
+        runlevel_md_fpath = None
+    else:
+        fig_fpath = history_dpath / f'core_metric_report_{stamp}.png'
+        dist_fig_fpath = _plot_metric_distributions(history_dpath, stamp, left, right, run_spec_name)
+        three_run_dist_fpath = _plot_three_run_metric_distributions(
+            history_dpath,
+            stamp,
+            args.left_run_a,
+            args.left_run_b,
+            args.right_run_a,
+            run_spec_name,
+        )
+        overlay_dist_fpath = _plot_overlay_metric_distributions(
+            history_dpath,
+            stamp,
+            args.left_run_a,
+            args.left_run_b,
+            args.right_run_a,
+            run_spec_name,
+        )
+        ecdf_fig_fpath = _plot_overlay_metric_ecdfs(
+            history_dpath,
+            stamp,
+            args.left_run_a,
+            args.left_run_b,
+            args.right_run_a,
+            run_spec_name,
+        )
+        per_metric_agree_fpath = _plot_per_metric_agreement(
+            history_dpath,
+            stamp,
+            left,
+            right,
+            level_key='instance_level',
+            thresholds=thresholds,
+        )
+        runlevel_csv_fpath, runlevel_md_fpath = _write_three_run_runlevel_table(
+            history_dpath,
+            stamp,
+            args.left_run_a,
+            args.left_run_b,
+            args.right_run_a,
+        )
 
     report = kwutil.Json.ensure_serializable(_strip_private(report))
     json_fpath.write_text(json.dumps(report, indent=2))
     _write_text(report, txt_fpath)
     _write_management_summary(report, mgmt_fpath)
 
-    extra_pair = _load_optional_cross_machine_pair(report_dpath)
-    paper_labels = load_paper_label_manager(style='paper_short')
-    extra_label = extra_pair['label'] if extra_pair is not None else None
-    pair_line = f'Pairs: {left["label"]} vs {right["label"]}'
-    if extra_label is not None:
-        pair_line += f' + {extra_label}'
-    pair_line = paper_labels.relabel_text(pair_line)
-    sns.set_theme(style='whitegrid', context='talk')
-    fig, axes = plt.subplots(2, 2, figsize=(24, 14.5), constrained_layout=True)
-    _plot_quantiles(
-        axes[0, 0],
-        left,
-        right,
-        'run_level',
-        'Run-Level Delta Quantiles'
-    )
-    _plot_quantiles(
-        axes[0, 1],
-        left,
-        right,
-        'instance_level',
-        'Instance-Level Delta Quantiles'
-    )
-    _plot_distribution(axes[1, 0], left, right, extra_pair, level_key='run_level')
-    axes[1, 0].set_title('Run-Level Agreement vs Tolerance', fontsize=11)
-    _plot_distribution(axes[1, 1], left, right, extra_pair, level_key='instance_level')
-    axes[1, 1].set_title('Instance-Level Agreement vs Tolerance', fontsize=11)
-    axes[0, 0].title.set_fontsize(11)
-    axes[0, 1].title.set_fontsize(11)
-    fig.suptitle(
-        'Core Metric Agreement and Difference Summary\n'
-        f'Run Spec: {run_spec_name}\n'
-        f'{pair_line}\n'
-        f'Run-level N: {left["run_level"]["n_rows"]} vs {right["run_level"]["n_rows"]} | '
-        f'Instance-level N: {left["instance_level"]["n_rows"]} vs {right["instance_level"]["n_rows"]}',
-        fontsize=15,
-    )
-    fig.savefig(fig_fpath, dpi=180)
-    plt.close(fig)
+    if left is not None:
+        extra_pair = _load_optional_cross_machine_pair(report_dpath)
+        paper_labels = load_paper_label_manager(style='paper_short')
+        extra_label = extra_pair['label'] if extra_pair is not None else None
+        pair_line = f'Pairs: {left["label"]} vs {right["label"]}'
+        if extra_label is not None:
+            pair_line += f' + {extra_label}'
+        pair_line = paper_labels.relabel_text(pair_line)
+        sns.set_theme(style='whitegrid', context='talk')
+        fig, axes = plt.subplots(2, 2, figsize=(24, 14.5), constrained_layout=True)
+        _plot_quantiles(
+            axes[0, 0],
+            left,
+            right,
+            'run_level',
+            'Run-Level Delta Quantiles'
+        )
+        _plot_quantiles(
+            axes[0, 1],
+            left,
+            right,
+            'instance_level',
+            'Instance-Level Delta Quantiles'
+        )
+        _plot_distribution(axes[1, 0], left, right, extra_pair, level_key='run_level')
+        axes[1, 0].set_title('Run-Level Agreement vs Tolerance', fontsize=11)
+        _plot_distribution(axes[1, 1], left, right, extra_pair, level_key='instance_level')
+        axes[1, 1].set_title('Instance-Level Agreement vs Tolerance', fontsize=11)
+        axes[0, 0].title.set_fontsize(11)
+        axes[0, 1].title.set_fontsize(11)
+        fig.suptitle(
+            'Core Metric Agreement and Difference Summary\n'
+            f'Run Spec: {run_spec_name}\n'
+            f'{pair_line}\n'
+            f'Run-level N: {left["run_level"]["n_rows"]} vs {right["run_level"]["n_rows"]} | '
+            f'Instance-level N: {left["instance_level"]["n_rows"]} vs {right["instance_level"]["n_rows"]}',
+            fontsize=15,
+        )
+        fig.savefig(fig_fpath, dpi=180)
+        plt.close(fig)
 
     latest_map = {
         json_fpath: 'core_metric_report.latest.json',

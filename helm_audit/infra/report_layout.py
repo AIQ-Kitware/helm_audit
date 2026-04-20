@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from helm_audit.infra.paths import reports_root
+from helm_audit.infra.paths import audit_store_root, reports_root
 from loguru import logger
 
 
@@ -11,6 +11,12 @@ def filtering_reports_root() -> Path:
 
 
 def core_run_reports_root() -> Path:
+    """Canonical root for per-experiment analysis outputs (in the audit store)."""
+    return audit_store_root() / "analysis" / "experiments"
+
+
+def compat_core_run_reports_root() -> Path:
+    """Legacy location; used only to publish backward-compat symlinks."""
     return reports_root() / "core-run-analysis"
 
 

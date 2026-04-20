@@ -49,5 +49,10 @@ def experiment_report_dpath(experiment_name: str) -> Path:
     return reports_root() / experiment_name
 
 
+def experiment_analysis_dpath(experiment_name: str) -> Path:
+    """Canonical per-experiment analysis root inside the audit store."""
+    return audit_store_root() / "analysis" / "experiments" / experiment_name
+
+
 def paper_label_config_fpath() -> Path:
     return configs_root() / "paper_label_mappings.yaml"

@@ -50,7 +50,9 @@ helm-audit-report-core = "helm_audit.reports.core_metrics:main"
 helm-audit-report-aggregate = "helm_audit.reports.aggregate:main"
 helm-audit-rebuild-core = "helm_audit.workflows.rebuild_core_report:main"
 helm-audit-analyze-experiment = "helm_audit.workflows.analyze_experiment:main"
+helm-audit-analyze-many = "helm_audit.cli.analyze_many:main"
 helm-audit-build-summary = "helm_audit.workflows.build_reports_summary:main"
+helm-audit-portfolio-status = "helm_audit.cli.portfolio_status:main"
 
 [tool.setuptools.packages.find]
 include = ["helm_audit*"]
