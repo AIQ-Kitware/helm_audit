@@ -345,7 +345,7 @@ def classify_hierarchical_filter_stages(row: dict[str, Any]) -> dict[str, str]:
     reasons = set(row.get('failure_reasons', []) or [])
     access_ok = 'not-open-access' not in reasons
     tag_ok = ('excluded-tags' not in reasons) and ('not-text-like' not in reasons)
-    deployment_ok = 'no-hf-deployment' not in reasons
+    deployment_ok = 'no-local-helm-deployment' not in reasons
     size_ok = 'too-large' not in reasons
     judge_ok = CLOSED_JUDGE_REQUIRED_REASON not in reasons
     selected = row.get('selection_status') == 'selected'
@@ -671,6 +671,77 @@ def build_filter_cardinality_text(inventory_rows: list[dict[str, Any]]) -> str:
     return '\n'.join(lines) + '\n'
 
 
+def build_local_serving_recovery_text(inventory_rows: list[dict[str, Any]]) -> str:
+    """
+    Partition models excluded by no-local-helm-deployment into:
+      on-story  — public HELM model with a checked-in local serving recipe
+      off-story — local extension not in the public HELM storyline
+      no-plan   — not in the model registry; no known local serving path
+    """
+    NO_LOCAL = 'no-local-helm-deployment'
+    deployment_excluded = [
+        r for r in inventory_rows
+        if NO_LOCAL in (r.get('failure_reasons') or [])
+    ]
+    seen: set[str] = set()
+    model_rows: list[dict[str, Any]] = []
+    for r in deployment_excluded:
+        m = str(r.get('model') or 'unknown')
+        if m not in seen:
+            seen.add(m)
+            model_rows.append(r)
+    model_rows.sort(key=lambda r: str(r.get('model') or ''))
+
+    on_story = [r for r in model_rows if r.get('replaces_helm_deployment') is not None]
+    off_story = [r for r in model_rows if r.get('replaces_helm_deployment') is None and r.get('expected_local_served')]
+    no_plan = [r for r in model_rows if not r.get('expected_local_served')]
+
+    def _table(rows: list[dict[str, Any]]) -> list[str]:
+        if not rows:
+            return ['  (none)']
+        out = []
+        for r in rows:
+            m = str(r.get('model') or 'unknown')
+            src = str(r.get('local_registry_source') or '')
+            repl = r.get('replaces_helm_deployment')
+            suffix = f'  replaces={repl}' if repl else ''
+            src_str = f'  source={src}' if src else ''
+            out.append(f'  {m:<48}{src_str}{suffix}')
+        return out
+
+    lines: list[str] = [
+        'Local Serving Recovery Summary',
+        '==============================',
+        '',
+        'Models excluded by no-local-helm-deployment, by local serving plan.',
+        '',
+        f'  on-story  (public HELM model, local recipe exists): {len(on_story)}',
+        f'  off-story (local extension, not in public HELM):    {len(off_story)}',
+        f'  no-plan   (not in helm_audit model registry):       {len(no_plan)}',
+        '',
+    ]
+    if on_story:
+        lines += ['On-story models (in main reproducibility storyline):']
+        lines += _table(on_story)
+        lines += ['']
+    if off_story:
+        lines += ['Off-story models (local extensions, not in public HELM storyline):']
+        lines += _table(off_story)
+        lines += ['']
+    if no_plan:
+        lines += ['No local serving plan (not in helm_audit/model_registry.py):']
+        lines += _table(no_plan)
+        lines += ['']
+    lines += [
+        'Notes:',
+        '  no-local-helm-deployment = Stage 1 automatic filter found no default local',
+        '  HELM deployment path for this model. On-story models have a recipe in',
+        '  helm_audit/model_registry.py and are run via a separate serving bundle.',
+        '  TODO: Add runtime verification that vllm_service profiles can serve these.',
+    ]
+    return '\n'.join(lines) + '\n'
+
+
 def build_filter_report_text(
     *,
     summary: dict[str, Any],
@@ -830,12 +901,14 @@ def emit_filter_report_artifacts(
     )
     selected_run_specs_txt = '\n'.join(row['run_spec_name'] for row in selected_rows) + '\n'
     cardinality_txt = build_filter_cardinality_text(inventory_rows)
+    local_serving_txt = build_local_serving_recovery_text(inventory_rows)
 
     outputs = {
         'summary_json': str(_write_stamped_json(report_dpath, machine_dpath, 'model_filter_summary', stamp, {'summary': summary})),
         'inventory_json': str(_write_stamped_json(report_dpath, machine_dpath, 'model_filter_inventory', stamp, inventory_rows)),
         'summary_txt': str(_write_stamped_text(report_dpath, static_dpath, 'model_filter_report', stamp, '.txt', summary_txt)),
         'filter_cardinality_txt': str(_write_stamped_text(report_dpath, static_dpath, 'filter_cardinality_summary', stamp, '.txt', cardinality_txt)),
+        'local_serving_txt': str(_write_stamped_text(report_dpath, static_dpath, 'filter_local_serving_summary', stamp, '.txt', local_serving_txt)),
         'selected_run_specs_txt': str(_write_stamped_text(report_dpath, static_dpath, 'model_filter_selected_run_specs', stamp, '.txt', selected_run_specs_txt)),
         'inventory_tsv': str(_write_stamped_table(report_dpath, tables_dpath, 'model_filter_inventory', stamp, inventory_rows)),
         'selected_runs_tsv': str(_write_stamped_table(report_dpath, tables_dpath, 'model_filter_selected_runs', stamp, selected_rows)),
@@ -867,7 +940,7 @@ def emit_filter_report_artifacts(
                 'excluded-tags: model tagged as a modality or category we exclude',
                 'too-large: model exceeds the local reproduction size budget',
                 'not-open-access: model access is not open in the HELM registry',
-                'no-hf-deployment: model has no runnable local HuggingFace deployment path',
+                'no-local-helm-deployment: no default local HELM deployment path known to Stage 1 filter',
                 f'{CLOSED_JUDGE_REQUIRED_REASON}: benchmark requires a proprietary / credentialed judge or annotator',
                 f'{UNCLASSIFIED_EXCLUSION}: no current rule classified this exclusion',
             ],
@@ -882,6 +955,7 @@ def emit_filter_report_artifacts(
         static_dpath=static_dpath,
     )
     write_latest_alias(Path(outputs['filter_cardinality_txt']), report_dpath, 'filter_cardinality_summary.latest.txt')
+    write_latest_alias(Path(outputs['local_serving_txt']), report_dpath, 'filter_local_serving_summary.latest.txt')
     return outputs
 
 

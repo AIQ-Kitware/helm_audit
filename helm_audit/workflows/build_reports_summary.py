@@ -284,7 +284,7 @@ def _build_end_to_end_funnel_rows(
             sankey_rows.append(flow)
             continue
         flow["tag_gate"] = "kept: suitable text tags"
-        if "no-hf-deployment" in reasons:
+        if "no-local-helm-deployment" in reasons:
             flow["deployment_gate"] = "excluded: no runnable local deployment"
             sankey_rows.append(flow)
             continue
@@ -346,7 +346,7 @@ def _build_filter_to_attempt_rows(
             sankey_rows.append(flow)
             continue
         flow["tag_gate"] = "kept: suitable text tags"
-        if "no-hf-deployment" in reasons:
+        if "no-local-helm-deployment" in reasons:
             flow["deployment_gate"] = "excluded: no runnable local deployment"
             sankey_rows.append(flow)
             continue

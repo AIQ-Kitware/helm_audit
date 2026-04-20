@@ -53,7 +53,7 @@ def test_reason_combo_and_candidate_pool_tables_preserve_top_level_breakdowns():
         {
             "candidate_pool": "eligible-model",
             "selection_status": "excluded",
-            "failure_reasons": ["no-hf-deployment"],
+            "failure_reasons": ["no-local-helm-deployment"],
             "run_spec_name": "b",
             "model": "m2",
             "benchmark": "b2",
@@ -87,11 +87,11 @@ def test_reason_combo_and_candidate_pool_tables_preserve_top_level_breakdowns():
     ]
 
     reason_combo_rows = make_reason_combo_table(inventory_rows)
-    assert reason_combo_rows[0]["reason_combo"] == "no-hf-deployment"
+    assert reason_combo_rows[0]["reason_combo"] == "no-local-helm-deployment"
     assert reason_combo_rows[0]["run_count"] == 1
 
     reason_by_model = make_reason_breakout_table(inventory_rows, "model")
-    assert reason_by_model[0]["failure_reason"] in {"no-hf-deployment", "unclassified-exclusion"}
+    assert reason_by_model[0]["failure_reason"] in {"no-local-helm-deployment", "unclassified-exclusion"}
 
 
 def test_open_access_exclusion_reason_table_ignores_non_open_models():
@@ -100,7 +100,7 @@ def test_open_access_exclusion_reason_table_ignores_non_open_models():
             {
                 "model_access": "open",
                 "selection_status": "excluded",
-                "failure_reasons": ["no-hf-deployment", "too-large"],
+                "failure_reasons": ["no-local-helm-deployment", "too-large"],
             },
             {
                 "model_access": "open",
@@ -115,13 +115,13 @@ def test_open_access_exclusion_reason_table_ignores_non_open_models():
             {
                 "model_access": "limited",
                 "selection_status": "excluded",
-                "failure_reasons": ["not-open-access", "no-hf-deployment"],
+                "failure_reasons": ["not-open-access", "no-local-helm-deployment"],
             },
         ]
     )
 
     assert rows == [
-        {"failure_reason": "no-hf-deployment", "run_count": 1},
+        {"failure_reason": "no-local-helm-deployment", "run_count": 1},
         {"failure_reason": "requires-closed-judge", "run_count": 1},
         {"failure_reason": "too-large", "run_count": 1},
         {"failure_reason": "unclassified-exclusion", "run_count": 1},
@@ -135,7 +135,7 @@ def test_open_access_exclusion_reason_by_model_table_ignores_non_open_models():
                 "model": "open-a",
                 "model_access": "open",
                 "selection_status": "excluded",
-                "failure_reasons": ["no-hf-deployment", "too-large"],
+                "failure_reasons": ["no-local-helm-deployment", "too-large"],
             },
             {
                 "model": "open-b",
@@ -147,13 +147,13 @@ def test_open_access_exclusion_reason_by_model_table_ignores_non_open_models():
                 "model": "limited-c",
                 "model_access": "limited",
                 "selection_status": "excluded",
-                "failure_reasons": ["not-open-access", "no-hf-deployment"],
+                "failure_reasons": ["not-open-access", "no-local-helm-deployment"],
             },
         ]
     )
 
     assert rows == [
-        {"model": "open-a", "reason_combo": "no-hf-deployment|too-large", "run_count": 1},
+        {"model": "open-a", "reason_combo": "no-local-helm-deployment|too-large", "run_count": 1},
         {"model": "open-b", "reason_combo": "too-large", "run_count": 1},
     ]
 
@@ -171,20 +171,20 @@ def test_open_access_exclusion_reason_by_model_table_can_filter_text_and_size_ga
                 "model": "open-b",
                 "model_access": "open",
                 "selection_status": "excluded",
-                "failure_reasons": ["too-large", "no-hf-deployment"],
+                "failure_reasons": ["too-large", "no-local-helm-deployment"],
             },
             {
                 "model": "open-c",
                 "model_access": "open",
                 "selection_status": "excluded",
-                "failure_reasons": ["no-hf-deployment"],
+                "failure_reasons": ["no-local-helm-deployment"],
             },
         ],
         excluded_reasons={"not-text-like", "excluded-tags", "too-large"},
     )
 
     assert rows == [
-        {"model": "open-c", "reason_combo": "no-hf-deployment", "run_count": 1},
+        {"model": "open-c", "reason_combo": "no-local-helm-deployment", "run_count": 1},
     ]
 
 

@@ -56,6 +56,7 @@ from loguru import logger
 
 from helm_audit.infra.api import repo_run_details_fpath, repo_run_specs_fpath
 from helm_audit.helm.run_entries import parse_run_entry_description, parse_run_name_to_kv
+from helm_audit.model_registry import local_model_registry_by_name
 
 
 MISSING_MODEL_METADATA_REASON = 'missing-model-metadata'
@@ -298,7 +299,7 @@ class CompileHelmReproListConfig(scfg.DataConfig):
             if not access_ok:
                 failure_reasons.append('not-open-access')
             if not has_local_hf_path:
-                failure_reasons.append('no-hf-deployment')
+                failure_reasons.append('no-local-helm-deployment')
 
             eligible = (
                 is_text_like and
@@ -338,7 +339,7 @@ class CompileHelmReproListConfig(scfg.DataConfig):
         if 1:
             # Which open models are we missing due to providers
             for r in model_filter_rows:
-                nonblocking_reasons =  {'no-hf-deployment'}
+                nonblocking_reasons =  {'no-local-helm-deployment'}
                 blocking_reasons = {'too-large', 'not-open-access', 'not-text-like'}
                 if len(set(r['failure_reasons']) - nonblocking_reasons) == 0:
                     print(r)
@@ -576,9 +577,9 @@ def build_failure_reason_details(
             f'Model access is {access!r}; the filter requires HELM access="open".'
         )
     if not has_local_hf_path:
-        details['no-hf-deployment'] = (
+        details['no-local-helm-deployment'] = (
             f'Model has_hf_client={has_hf_client} and override={model_name in known_hf_overrides}; '
-            'no runnable HuggingFace-style local deployment path is currently available.'
+            'no default local HELM deployment path is known to the Stage 1 automatic filter.'
         )
     return details
 
@@ -695,6 +696,7 @@ def build_filter_inventory_rows(
     chosen_model_names: set[str],
 ) -> list[dict[str, Any]]:
     model_info = {row['model']: row for row in model_filter_rows}
+    registry = local_model_registry_by_name()
     inventory_rows: list[dict[str, Any]] = []
     for row in complete_rows:
         info = describe_run_spec(row['run_spec_name'], row.get('scenario_class'))
@@ -713,6 +715,7 @@ def build_filter_inventory_rows(
         if eligible_model:
             candidate_pool = 'eligible-model' if not run_failure_reasons else 'eligible-model-out-of-scope'
         selected = row['model'] in chosen_model_names and not run_failure_reasons
+        reg_entry = registry.get(row['model'])
         inventory_rows.append({
             **row,
             **info,
@@ -740,6 +743,9 @@ def build_filter_inventory_rows(
             'model_has_hf_client': model_meta.get('has_hf_client'),
             'size_threshold_params': model_meta.get('size_threshold_params'),
             'is_structurally_incomplete': False,
+            'expected_local_served': reg_entry.expected_local_served if reg_entry else False,
+            'replaces_helm_deployment': reg_entry.replaces_helm_deployment if reg_entry else None,
+            'local_registry_source': reg_entry.source if reg_entry else None,
         })
     inventory_rows.extend(incomplete_rows)
     inventory_rows.sort(key=lambda row: (row['selection_status'], str(row.get('model')), row['run_spec_name']))

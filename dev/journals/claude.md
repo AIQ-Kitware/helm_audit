@@ -288,3 +288,33 @@ Added `_cardinality(rows)` helper and `_build_scope_cardinality_lines(filter_inv
 - `filter_analysis.py`'s TSV tables and existing summary JSON untouched
 - No cardinality data in the manifest dict (it's a plain text artifact, not machine-readable state)
 - `_write_scope_level_aliases` still only surfaces the `level_001_static` version to summary_root — the direct `level_001` alias is for convenience only
+
+## 2026-04-20 22:29:28 +0000
+
+User asked for a conservative Stage 1 improvement: add a checked-in registry of locally-servable models, rename the misleading `no-hf-deployment` failure reason, annotate inventory rows, and surface a new local serving recovery summary in the filter report.
+
+Claude Sonnet 4.6.
+
+**Problem diagnosed.** `no-hf-deployment` was applied to any model that lacked a default HuggingFace deployment path in HELM's model registry AND wasn't in the manual `KNOWN_HF_OVERRIDES` set. The name implied the model has no HuggingFace presence, which is wrong — the real issue is that Stage 1's automatic filter knows of no default local HELM deployment path for the model. Local serving knowledge was implicit and scattered across `PRESET_CONFIGS` in `adapter.py` and the `KNOWN_HF_OVERRIDES` set in `index_historic_helm_runs.py`.
+
+**Changes made.**
+
+1. `helm_audit/model_registry.py` (new): `LocalModelEntry` dataclass + `LOCAL_MODEL_REGISTRY` list populated from `PRESET_CONFIGS` and `KNOWN_HF_OVERRIDES`. Fields: `model`, `expected_local_served`, `replaces_helm_deployment` (null = off-story extension, non-null = public HELM model being reproduced), `source`, `notes`. Single `local_model_registry_by_name()` lookup helper.
+
+2. Renamed `no-hf-deployment` → `no-local-helm-deployment` across all six files: `index_historic_helm_runs.py`, `filter_analysis.py`, `build_reports_summary.py`, both test files. Updated the detail message to say "no default local HELM deployment path is known to the Stage 1 automatic filter."
+
+3. `build_filter_inventory_rows` now imports `local_model_registry_by_name()` and annotates each row with `expected_local_served`, `replaces_helm_deployment`, `local_registry_source`. Zero cost at filter time — pure dict lookup.
+
+4. New `build_local_serving_recovery_text(inventory_rows)` in `filter_analysis.py` partitions models excluded by `no-local-helm-deployment` into on-story / off-story / no-plan and renders a compact text table.
+
+5. New artifact `filter_local_serving_summary.latest.txt` emitted by `emit_filter_report_artifacts` at both `static/` and filter report root. Aliased alongside `filter_cardinality_summary.latest.txt`.
+
+**Design choice: no YAML config file.** Registry lives in Python (`model_registry.py`) rather than YAML so it gets code review and imports cleanly without a loader. The user explicitly wanted it in `helm_audit`.
+
+**What was NOT done (intentional scope constraints):**
+- No runtime verification of vllm_service profile switching — noted as TODO in `model_registry.py` docstring.
+- No backend-specific distinctions (vllm_local vs kubeai_local vs litellm_vllm_local).
+- Filter logic itself unchanged — `KNOWN_HF_OVERRIDES` still drives what passes; registry is annotation-only.
+- No new plot artifact (text table is sufficient; adding a plot would require plotly and is not clearly cheap/clean for this partition).
+
+14 filter tests pass.

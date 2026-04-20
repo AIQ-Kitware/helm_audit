@@ -71,7 +71,7 @@ def test_build_filter_inventory_rows_marks_selected_and_excluded():
         {
             "model": "openai/text-davinci-003",
             "n_runs": 1,
-            "failure_reasons": ["no-hf-deployment", "not-open-access"],
+            "failure_reasons": ["no-local-helm-deployment", "not-open-access"],
             "eligible": False,
         },
     ]
@@ -85,7 +85,7 @@ def test_build_filter_inventory_rows_marks_selected_and_excluded():
     assert statuses["boolq:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical"] == "selected"
     assert statuses["mmlu:subject=us_foreign_policy,model=openai/text-davinci-003"] == "excluded"
     excluded_row = next(row for row in inventory if row["model"] == "openai/text-davinci-003")
-    assert "no-hf-deployment" in excluded_row["failure_reasons"]
+    assert "no-local-helm-deployment" in excluded_row["failure_reasons"]
     assert excluded_row["considered_for_selection"] is True
     assert "Excluded after consideration" in excluded_row["selection_explanation"]
     selected_row = next(row for row in inventory if row["selection_status"] == "selected")
@@ -244,8 +244,8 @@ def test_emit_filter_report_artifacts_writes_tables(tmp_path: Path):
             "selection_status": "excluded",
             "outcome": "excluded",
             "eligible_model": False,
-            "failure_reasons": ["no-hf-deployment"],
-            "failure_reason_summary": "no-hf-deployment",
+            "failure_reasons": ["no-local-helm-deployment"],
+            "failure_reason_summary": "no-local-helm-deployment",
             "is_structurally_incomplete": False,
         },
     ]
@@ -306,9 +306,9 @@ def test_emit_filter_analysis_artifacts_writes_explanatory_outputs(tmp_path: Pat
             "eligible_candidate": False,
             "candidate_pool": "complete-run",
             "eligible_model": False,
-            "failure_reasons": ["no-hf-deployment"],
-            "failure_reason_summary": "no-hf-deployment",
-            "selection_explanation": "Excluded after consideration because the model failed: no-hf-deployment.",
+            "failure_reasons": ["no-local-helm-deployment"],
+            "failure_reason_summary": "no-local-helm-deployment",
+            "selection_explanation": "Excluded after consideration because the model failed: no-local-helm-deployment.",
             "is_structurally_incomplete": False,
         },
         {
