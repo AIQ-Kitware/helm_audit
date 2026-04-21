@@ -15,6 +15,10 @@ def _write_index_csv(fpath: Path, rows: list[dict[str, str]]) -> None:
         "run_dir",
         "manifest_timestamp",
         "max_eval_instances",
+        "machine_host",
+        "attempt_uuid",
+        "attempt_identity",
+        "job_dpath",
     ]
     lines = [",".join(headers)]
     for row in rows:
@@ -22,98 +26,72 @@ def _write_index_csv(fpath: Path, rows: list[dict[str, str]]) -> None:
     fpath.write_text("\n".join(lines) + "\n")
 
 
-def _write_selection(report_dir: Path, payload: dict) -> None:
-    (report_dir / "report_selection.latest.json").write_text(json.dumps(payload, indent=2))
+def _read_json(path: Path) -> dict:
+    return json.loads(path.read_text())
 
 
-def test_stored_report_selection_rebuilds_without_current_index_matches(tmp_path, monkeypatch):
-    report_dir = tmp_path / "report"
-    report_dir.mkdir()
-    left_a = tmp_path / "runs" / "left_a"
-    left_b = tmp_path / "runs" / "left_b"
-    right = tmp_path / "runs" / "official"
-    for dpath in [left_a, left_b, right]:
-        dpath.mkdir(parents=True)
-
-    selection = {
-        "run_entry": "bench:model=a",
-        "experiment_name": "exp-old",
-        "left_run_a": str(left_a),
-        "left_run_b": str(left_b),
-        "right_run_a": str(right),
-        "single_run": False,
-        "selected_local_attempt_refs": [
-            {"attempt_identity": "attempt-a", "run_dir": str(left_a)},
-            {"attempt_identity": "attempt-b", "run_dir": str(left_b)},
-        ],
-        "selected_local_attempt_identities": ["attempt-a", "attempt-b"],
+def _make_local_row(run_entry: str, experiment_name: str, run_dir: Path, *, manifest_timestamp: str, attempt_uuid: str) -> dict[str, str]:
+    job_dpath = run_dir.parent / f"{run_dir.name}_job"
+    job_dpath.mkdir(parents=True, exist_ok=True)
+    (job_dpath / "job_config.json").write_text("{}\n")
+    return {
+        "run_entry": run_entry,
+        "experiment_name": experiment_name,
+        "status": "computed",
+        "has_run_spec": "true",
+        "run_dir": str(run_dir),
+        "manifest_timestamp": manifest_timestamp,
+        "max_eval_instances": "100",
+        "machine_host": "machine-a",
+        "attempt_uuid": attempt_uuid,
+        "attempt_identity": attempt_uuid,
+        "job_dpath": str(job_dpath),
     }
-    _write_selection(report_dir, selection)
-
-    index_fpath = tmp_path / "index.csv"
-    _write_index_csv(index_fpath, [])
-
-    calls: dict[str, list] = {"core_metrics": [], "pair_samples": []}
-
-    monkeypatch.setattr(rebuild_core_report.core_metrics, "main", lambda argv: calls["core_metrics"].append(argv))
-    monkeypatch.setattr(
-        rebuild_core_report.pair_samples,
-        "write_pair_samples",
-        lambda **kwargs: calls["pair_samples"].append(kwargs),
-    )
-
-    rebuild_core_report.main(
-        [
-            "--run-entry", "bench:model=a",
-            "--experiment-name", "exp-old",
-            "--report-dpath", str(report_dir),
-            "--index-fpath", str(index_fpath),
-        ]
-    )
-
-    assert len(calls["core_metrics"]) == 1
-    argv = calls["core_metrics"][0]
-    assert str(left_a) in argv
-    assert str(left_b) in argv
-    assert str(right) in argv
-
-    refreshed = json.loads((report_dir / "report_selection.latest.json").read_text())
-    assert refreshed["selected_local_attempt_identities"] == ["attempt-a", "attempt-b"]
-    assert Path(report_dir / "kwdagger_a.run").resolve() == left_a.resolve()
-    assert Path(report_dir / "kwdagger_b.run").resolve() == left_b.resolve()
-    assert Path(report_dir / "official.run").resolve() == right.resolve()
 
 
-def test_stored_single_run_report_rebuilds_without_allow_single_repeat(tmp_path, monkeypatch):
+def _make_historic_choice(run_dir: Path) -> tuple[dict[str, str], dict[str, int]]:
+    return {"run_dir": str(run_dir)}, {"chosen_requested_max_eval_instances": 100}
+
+
+def test_single_run_core_report_writes_manifests_and_cleans_repeat_artifacts(tmp_path, monkeypatch):
     report_dir = tmp_path / "report"
     report_dir.mkdir()
-    left_a = tmp_path / "runs" / "left_a"
-    right = tmp_path / "runs" / "official"
-    for dpath in [left_a, right]:
-        dpath.mkdir(parents=True)
+    local_run = tmp_path / "runs" / "local_a"
+    official_run = tmp_path / "runs" / "official"
+    local_run.mkdir(parents=True)
+    official_run.mkdir(parents=True)
 
-    _write_selection(
-        report_dir,
-        {
-            "run_entry": "bench:model=single",
-            "experiment_name": "exp-single",
-            "left_run_a": str(left_a),
-            "left_run_b": str(left_a),
-            "right_run_a": str(right),
-            "single_run": True,
-        },
-    )
+    stale_components_dir = report_dir / "components"
+    stale_components_dir.mkdir()
+    (stale_components_dir / "old-repeat.run").symlink_to(local_run)
+    (report_dir / "kwdagger_b.run").symlink_to(local_run)
+    (report_dir / "instance_samples_local_repeat.latest.txt").write_text("stale\n")
+    (report_dir / "core_metric_three_run_distributions.latest.png").write_text("stale\n")
 
     index_fpath = tmp_path / "index.csv"
-    _write_index_csv(index_fpath, [])
+    _write_index_csv(
+        index_fpath,
+        [
+            _make_local_row(
+                "bench:model=single",
+                "exp-single",
+                local_run,
+                manifest_timestamp="10",
+                attempt_uuid="attempt-a",
+            ),
+        ],
+    )
 
-    calls: dict[str, list] = {"core_metrics": [], "pair_samples": []}
-    monkeypatch.setattr(rebuild_core_report.core_metrics, "main", lambda argv: calls["core_metrics"].append(argv))
+    core_metric_calls: list[list[str]] = []
+    pair_sample_calls: list[dict] = []
+    monkeypatch.setattr(rebuild_core_report.core_metrics, "main", lambda argv: core_metric_calls.append(argv))
     monkeypatch.setattr(
         rebuild_core_report.pair_samples,
         "write_pair_samples",
-        lambda **kwargs: calls["pair_samples"].append(kwargs),
+        lambda **kwargs: pair_sample_calls.append(kwargs),
     )
+    monkeypatch.setattr(rebuild_core_report, "collect_historic_candidates", lambda *args, **kwargs: [{"run_dir": str(official_run)}])
+    monkeypatch.setattr(rebuild_core_report, "choose_historic_candidate", lambda *args, **kwargs: _make_historic_choice(official_run))
 
     rebuild_core_report.main(
         [
@@ -121,12 +99,99 @@ def test_stored_single_run_report_rebuilds_without_allow_single_repeat(tmp_path,
             "--experiment-name", "exp-single",
             "--report-dpath", str(report_dir),
             "--index-fpath", str(index_fpath),
+            "--allow-single-repeat",
         ]
     )
 
-    argv = calls["core_metrics"][0]
-    assert "--single-run" in argv
-    assert argv[argv.index("--left-run-a") + 1] == str(left_a)
-    assert argv[argv.index("--left-run-b") + 1] == str(left_a)
-    assert len(calls["pair_samples"]) == 1
-    assert calls["pair_samples"][0]["label"] == "official_vs_kwdagger"
+    components_manifest = _read_json(report_dir / "components_manifest.latest.json")
+    comparisons_manifest = _read_json(report_dir / "comparisons_manifest.latest.json")
+    components = components_manifest["components"]
+    comparisons = comparisons_manifest["comparisons"]
+
+    assert len(components) == 2
+    assert {component["source_kind"] for component in components} == {"local", "official"}
+    assert [comparison["comparison_kind"] for comparison in comparisons] == ["official_vs_local"]
+    assert all(component["component_id"] != "kwdagger_b" for component in components)
+
+    component_links = sorted(path.name for path in (report_dir / "components").glob("*.run"))
+    assert len(component_links) == 2
+    assert not (report_dir / "kwdagger_b.run").exists()
+    assert not (report_dir / "instance_samples_local_repeat.latest.txt").exists()
+    assert not (report_dir / "core_metric_three_run_distributions.latest.png").exists()
+
+    assert len(core_metric_calls) == 1
+    assert "--components-manifest" in core_metric_calls[0]
+    assert "--comparisons-manifest" in core_metric_calls[0]
+    assert len(pair_sample_calls) == 1
+    assert pair_sample_calls[0]["label"] == "official_vs_local"
+
+
+def test_multi_run_core_report_writes_multiple_local_components_and_both_comparisons(tmp_path, monkeypatch):
+    report_dir = tmp_path / "report"
+    report_dir.mkdir()
+    local_a = tmp_path / "runs" / "local_a"
+    local_b = tmp_path / "runs" / "local_b"
+    official_run = tmp_path / "runs" / "official"
+    for dpath in [local_a, local_b, official_run]:
+        dpath.mkdir(parents=True)
+
+    index_fpath = tmp_path / "index.csv"
+    _write_index_csv(
+        index_fpath,
+        [
+            _make_local_row(
+                "bench:model=multi",
+                "exp-multi",
+                local_a,
+                manifest_timestamp="20",
+                attempt_uuid="attempt-a",
+            ),
+            _make_local_row(
+                "bench:model=multi",
+                "exp-multi",
+                local_b,
+                manifest_timestamp="10",
+                attempt_uuid="attempt-b",
+            ),
+        ],
+    )
+
+    core_metric_calls: list[list[str]] = []
+    pair_sample_calls: list[dict] = []
+    monkeypatch.setattr(rebuild_core_report.core_metrics, "main", lambda argv: core_metric_calls.append(argv))
+    monkeypatch.setattr(
+        rebuild_core_report.pair_samples,
+        "write_pair_samples",
+        lambda **kwargs: pair_sample_calls.append(kwargs),
+    )
+    monkeypatch.setattr(rebuild_core_report, "collect_historic_candidates", lambda *args, **kwargs: [{"run_dir": str(official_run)}])
+    monkeypatch.setattr(rebuild_core_report, "choose_historic_candidate", lambda *args, **kwargs: _make_historic_choice(official_run))
+
+    rebuild_core_report.main(
+        [
+            "--run-entry", "bench:model=multi",
+            "--experiment-name", "exp-multi",
+            "--report-dpath", str(report_dir),
+            "--index-fpath", str(index_fpath),
+        ]
+    )
+
+    components_manifest = _read_json(report_dir / "components_manifest.latest.json")
+    comparisons_manifest = _read_json(report_dir / "comparisons_manifest.latest.json")
+    components = components_manifest["components"]
+    comparisons = comparisons_manifest["comparisons"]
+
+    local_components = [component for component in components if component["source_kind"] == "local"]
+    assert len(local_components) == 2
+    assert any("repeat" in component["tags"] for component in local_components)
+    assert {comparison["comparison_kind"] for comparison in comparisons} == {"official_vs_local", "local_repeat"}
+
+    comparison_ids = {comparison["comparison_id"]: comparison for comparison in comparisons}
+    official_vs_local = comparison_ids["official_vs_local"]
+    local_repeat = comparison_ids["local_repeat"]
+    assert official_vs_local["reference_component_id"] in official_vs_local["component_ids"]
+    assert local_repeat["reference_component_id"] in local_repeat["component_ids"]
+
+    assert len(pair_sample_calls) == 2
+    assert {call["label"] for call in pair_sample_calls} == {"official_vs_local", "local_repeat"}
+    assert len(core_metric_calls) == 1

@@ -219,6 +219,23 @@ Design takeaways:
 2. If reports remain browsable in-repo while indexes and manifests move out, the path defaults must be updated together or operators will fall into mismatched partial migrations.
 3. Documentation drift is often a boundary-design smell: when prose and CLI shape disagree, the storage model is usually muddier than it first appears.
 
+## 2026-04-21 22:44:27 +0000
+
+Summary of user intent: make a focused first-step refactor of the core report layer only so a core report becomes an explicit manifest-driven audit packet made of selected components plus declared comparisons, remove the hardcoded `kwdagger_a` / `kwdagger_b` / `official` structure from the core layer, keep single-run reports natural, and add focused tests for manifest writing, stale artifact cleanup, and comparability text.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+The heart of this pass is choosing a single semantic center of gravity for the core report. The old design used fixed filenames and CLI slots as the real model, then wrote JSON/text summaries after the fact. That made the report directory easy to produce once but harder to reason about later because the meaning of the packet lived partly in symlink names, partly in argv shape, and partly in implicit assumptions about there always being one official run and two local repeats. The new design should invert that: first declare which components belong to the packet, then declare which comparisons are meaningful, then render only the artifacts implied by those declarations. That is the cleanest way to make single-run behavior stop feeling like a special-case hack.
+
+I am intentionally resisting a broad compatibility project here. The user was clear that this is the first slice of a larger refactor and that preserving confusing old structure would only create more technical debt. The main tradeoff is that some later-stage code still assumes old labels or selection files. For this slice I want the core-report layer itself to become simpler and more honest, while deferring experiment-wide and aggregate adaptations to later passes. If I keep any legacy-looking artifact names, they need to remain derived convenience surfaces rather than sources of truth.
+
+The main uncertainty is how much of the existing downstream surface can stay stable without reintroducing the old mental model. My working bias is to keep the packet semantics explicit in the manifests and in the human-readable comparability block, while keeping the rendering code fairly direct: load manifests, resolve enabled comparisons, build pair metrics, write only the artifacts that correspond to those comparisons, and clean up stale repeat-only outputs when a report becomes single-run. I am confident in the direction because it replaces hidden structure with visible declarations, but I still want to watch for accidental dual sources of truth and for tests that reveal stale assumptions.
+
+Design takeaways:
+1. A report directory becomes easier to trust when its semantics live in small explicit manifests rather than in positional filenames or CLI argument conventions.
+2. Single-run support is mostly a modeling problem, not a plotting problem: if the comparisons manifest omits repeatability, the rest of the cleanup becomes straightforward.
+3. Convenience symlinks are fine, but only after the manifests have already answered “what is in this packet?” and “what claims is this packet making?”
+
 ## 2026-04-21 00:18:44 +0000
 
 Summary of user intent: make a narrow presentation-layer fix in `helm_audit/workflows/build_reports_summary.py` so aggregate-summary plots keep full data and full HTML labels, but static JPG/PNG exports become bounded, slide-usable, and more readable for categorical axes without truncating categories or redesigning the report set.

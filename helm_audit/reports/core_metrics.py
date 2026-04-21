@@ -20,7 +20,10 @@ from helm_audit.compat.helm_outputs import HelmRun
 from helm_audit.helm.analysis import HelmRunAnalysis
 from helm_audit.helm.diff import HelmRunDiff
 from helm_audit.helm import metrics as helm_metrics
+from helm_audit.indexing.schema import extract_run_spec_fields
+from helm_audit.infra.fs_publish import safe_unlink
 from helm_audit.reports.paper_labels import load_paper_label_manager
+from helm_audit.reports.core_packet import load_packet_manifests
 from helm_audit.utils.numeric import safe_float as _safe_float, quantile as _quantile
 
 
@@ -151,7 +154,11 @@ def _run_diagnostics(run_path: str) -> dict[str, Any]:
     }
 
 
-def _diagnostic_flags(run_diagnostics: dict[str, dict[str, Any]]) -> list[str]:
+def _diagnostic_flags(
+    run_diagnostics: dict[str, dict[str, Any]],
+    components: list[dict[str, Any]],
+    comparisons: list[dict[str, Any]],
+) -> list[str]:
     flags = []
     for label, diag in run_diagnostics.items():
         rate = diag.get('empty_completion_rate')
@@ -160,12 +167,34 @@ def _diagnostic_flags(run_diagnostics: dict[str, dict[str, Any]]) -> list[str]:
             flags.append(f'{label}:high_empty_completion_rate')
         if mean_tokens is not None and mean_tokens < 1.0:
             flags.append(f'{label}:near_zero_mean_output_tokens')
-    official = run_diagnostics.get('official', {})
-    kwdagger_a = run_diagnostics.get('kwdagger_a', {})
-    off_rate = official.get('empty_completion_rate')
-    kwa_rate = kwdagger_a.get('empty_completion_rate')
-    if off_rate is not None and kwa_rate is not None and off_rate < 0.01 and kwa_rate > 0.1:
-        flags.append('official_vs_kwdagger_a:empty_completion_pathology')
+    component_lookup = {component['component_id']: component for component in components}
+    official_vs_local = next(
+        (
+            comparison
+            for comparison in comparisons
+            if comparison.get('comparison_kind') == 'official_vs_local' and comparison.get('enabled', True)
+        ),
+        None,
+    )
+    if official_vs_local is not None:
+        component_ids = official_vs_local.get('component_ids') or []
+        if len(component_ids) == 2:
+            left_component = component_lookup.get(component_ids[0], {})
+            right_component = component_lookup.get(component_ids[1], {})
+            left_diag = run_diagnostics.get(component_ids[0], {})
+            right_diag = run_diagnostics.get(component_ids[1], {})
+            left_rate = left_diag.get('empty_completion_rate')
+            right_rate = right_diag.get('empty_completion_rate')
+            if (
+                left_component.get('source_kind') == 'official'
+                and left_rate is not None
+                and right_rate is not None
+                and left_rate < 0.01
+                and right_rate > 0.1
+            ):
+                flags.append(
+                    f"{official_vs_local['comparison_id']}:empty_completion_pathology"
+                )
     return flags
 
 
@@ -927,23 +956,152 @@ def _strip_private(obj: Any) -> Any:
     return obj
 
 
+def _find_pair(report: dict[str, Any], comparison_kind: str) -> dict[str, Any] | None:
+    return next(
+        (pair for pair in report.get('pairs', []) if pair.get('comparison_kind') == comparison_kind),
+        None,
+    )
+
+
+def _load_run_spec_json(component: dict[str, Any]) -> dict[str, Any] | None:
+    run_spec_fpath = Path(component['run_path']) / 'run_spec.json'
+    if not run_spec_fpath.exists():
+        return None
+    try:
+        data = json.loads(run_spec_fpath.read_text())
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _component_spec_metadata(component: dict[str, Any]) -> dict[str, Any]:
+    run_spec = _load_run_spec_json(component) or {}
+    fields = extract_run_spec_fields(Path(component['run_path']) / 'run_spec.json')
+    adapter = run_spec.get('adapter_spec') or {}
+    return {
+        'base_model': fields.get('model'),
+        'scenario_class': fields.get('scenario_class'),
+        'deployment': fields.get('model_deployment'),
+        'adapter_instructions': (
+            adapter.get('instructions')
+            if isinstance(adapter, dict) else None
+        ),
+        'max_eval_instances': (
+            adapter.get('max_eval_instances')
+            if isinstance(adapter, dict) and adapter.get('max_eval_instances') is not None
+            else component.get('max_eval_instances')
+        ),
+    }
+
+
+def _same_value_fact(values: list[Any]) -> dict[str, Any]:
+    present = [value for value in values if value not in {None, ''}]
+    unique = []
+    for value in present:
+        if value not in unique:
+            unique.append(value)
+    if not present:
+        return {'status': 'unknown', 'values': []}
+    if len(unique) == 1:
+        return {'status': 'yes', 'values': unique}
+    return {'status': 'no', 'values': unique}
+
+
+def _comparability_summary(components: list[dict[str, Any]]) -> dict[str, Any]:
+    metadata_by_component = {
+        component['component_id']: _component_spec_metadata(component)
+        for component in components
+    }
+    facts = {
+        'same_base_model': _same_value_fact([meta.get('base_model') for meta in metadata_by_component.values()]),
+        'same_scenario_class': _same_value_fact([meta.get('scenario_class') for meta in metadata_by_component.values()]),
+        'same_deployment': _same_value_fact([meta.get('deployment') for meta in metadata_by_component.values()]),
+        'same_adapter_instructions': _same_value_fact([meta.get('adapter_instructions') for meta in metadata_by_component.values()]),
+        'same_max_eval_instances': _same_value_fact([meta.get('max_eval_instances') for meta in metadata_by_component.values()]),
+    }
+    return {
+        'component_metadata': metadata_by_component,
+        'facts': facts,
+    }
+
+
+def _write_comparison_runlevel_table(
+    out_dpath: Path,
+    stamp: str,
+    comparisons: list[dict[str, Any]],
+    component_lookup: dict[str, dict[str, Any]],
+) -> tuple[Path, Path | None]:
+    rows = []
+    for comparison in comparisons:
+        component_ids = comparison.get('component_ids') or []
+        if len(component_ids) != 2:
+            continue
+        left_component = component_lookup[component_ids[0]]
+        right_component = component_lookup[component_ids[1]]
+        idx_left = _single_run_core_stat_index(left_component['run_path'])
+        idx_right = _single_run_core_stat_index(right_component['run_path'])
+        for key in sorted(set(idx_left) & set(idx_right)):
+            left = idx_left[key]
+            right = idx_right[key]
+            rows.append({
+                'comparison_id': comparison['comparison_id'],
+                'comparison_kind': comparison.get('comparison_kind'),
+                'left_component_id': left_component['component_id'],
+                'left_display_name': left_component['display_name'],
+                'right_component_id': right_component['component_id'],
+                'right_display_name': right_component['display_name'],
+                'stat_key': key,
+                'metric': left.metric,
+                'left_mean': left.mean,
+                'right_mean': right.mean,
+                'abs_delta': None if left.mean is None or right.mean is None else abs(left.mean - right.mean),
+            })
+    table = pd.DataFrame(rows)
+    csv_fpath = out_dpath / f'core_runlevel_table_{stamp}.csv'
+    md_fpath = out_dpath / f'core_runlevel_table_{stamp}.md'
+    table.to_csv(csv_fpath, index=False)
+    try:
+        md_fpath.write_text(table.to_markdown(index=False) + '\n')
+    except ImportError:
+        md_fpath = None
+    return csv_fpath, md_fpath
+
+
 def _write_text(report: dict[str, Any], out_fpath: Path) -> None:
     pairs = report['pairs']
-    left = next((p for p in pairs if p.get('label') == 'kwdagger_repeat'), None)
-    right = next((p for p in pairs if p.get('label') != 'kwdagger_repeat'), None) or (pairs[-1] if pairs else {})
+    local_repeat = _find_pair(report, 'local_repeat')
+    official_vs_local = _find_pair(report, 'official_vs_local') or (pairs[-1] if pairs else {})
     lines = []
     lines.append('Core Metric Report')
     lines.append('')
     lines.append(f"generated_utc: {report['generated_utc']}")
     lines.append(f"run_spec_name: {report['run_spec_name']}")
-    if report.get('single_run_mode'):
-        lines.append('single_run_mode: true  # repeat pair not computed (only one local run)')
-    lines.append(f"left_label: {left['label'] if left else 'not_computed'}")
-    lines.append(f"right_label: {right.get('label', 'unknown')}")
+    lines.append(f"report_dpath: {report['report_dpath']}")
+    lines.append(f"components_manifest: {report['components_manifest_path']}")
+    lines.append(f"comparisons_manifest: {report['comparisons_manifest_path']}")
+    lines.append(f"single_run_mode: {str(report.get('single_run_mode', False)).lower()}")
     lines.append(f"diagnostic_flags: {report.get('diagnostic_flags', [])}")
     lines.append('')
+    lines.append('selected_components:')
+    for component in report.get('components', []):
+        lines.append(
+            f"  - {component['component_id']}: tags={component.get('tags', [])} "
+            f"run_path={component.get('run_path')}"
+        )
+    lines.append('')
+    lines.append('comparisons:')
+    for comparison in report.get('comparisons', []):
+        lines.append(
+            f"  - {comparison['comparison_id']}: kind={comparison.get('comparison_kind')} "
+            f"enabled={comparison.get('enabled')} component_ids={comparison.get('component_ids')}"
+        )
+    lines.append('')
+    lines.append('comparability:')
+    for fact_name, fact in (report.get('comparability') or {}).get('facts', {}).items():
+        lines.append(f"  {fact_name}: {fact.get('status')} values={fact.get('values')}")
+    lines.append('')
     lines.append('core_metrics:')
-    ref_pair = left or right
+    ref_pair = local_repeat or official_vs_local
     for metric in ref_pair.get('core_metrics', []):
         lines.append(f'  - {metric}')
     lines.append('')
@@ -958,7 +1116,8 @@ def _write_text(report: dict[str, Any], out_fpath: Path) -> None:
         lines.append(f"    stats_means: {json.dumps(diag.get('stats_means'))}")
     lines.append('')
     for pair in report['pairs']:
-        lines.append(f"pair: {pair['label']}")
+        lines.append(f"pair: {pair['comparison_id']}")
+        lines.append(f"  comparison_kind: {pair.get('comparison_kind')}")
         lines.append(f"  diagnosis: {pair['diagnosis'].get('label')}")
         lines.append(f"  primary_reason_names: {pair['diagnosis'].get('primary_reason_names')}")
         lines.append(f"  run_level_n: {pair['run_level']['n_rows']}")
@@ -991,18 +1150,38 @@ def _find_curve_value(rows: list[dict[str, Any]], abs_tol: float) -> float | Non
 
 def _write_management_summary(report: dict[str, Any], out_fpath: Path) -> None:
     pairs = report['pairs']
-    left = next((p for p in pairs if p.get('label') == 'kwdagger_repeat'), None)
-    right = next((p for p in pairs if p.get('label') != 'kwdagger_repeat'), None) or (pairs[-1] if pairs else {})
-    ref_pair = left or right
+    local_repeat = _find_pair(report, 'local_repeat')
+    official_vs_local = _find_pair(report, 'official_vs_local') or (pairs[-1] if pairs else {})
+    ref_pair = local_repeat or official_vs_local
     lines = []
     lines.append('Core Metric Executive Summary')
     lines.append('')
     lines.append(f"generated_utc: {report['generated_utc']}")
     lines.append(f"run_spec_name: {report['run_spec_name']}")
-    if report.get('single_run_mode'):
-        lines.append('single_run_mode: true  # repeat pair not computed (only one local run)')
+    lines.append(f"report_dpath: {report['report_dpath']}")
+    lines.append(f"components_manifest: {report['components_manifest_path']}")
+    lines.append(f"comparisons_manifest: {report['comparisons_manifest_path']}")
+    lines.append(f"single_run_mode: {str(report.get('single_run_mode', False)).lower()}")
     lines.append(f"core_metrics: {', '.join(ref_pair.get('core_metrics', []))}")
     lines.append(f"diagnostic_flags: {report.get('diagnostic_flags', [])}")
+    lines.append('')
+    lines.append('selected_components:')
+    for component in report.get('components', []):
+        lines.append(
+            f"  - {component['component_id']}: tags={component.get('tags', [])} "
+            f"run_path={component.get('run_path')}"
+        )
+    lines.append('')
+    lines.append('comparisons:')
+    for comparison in report.get('comparisons', []):
+        lines.append(
+            f"  - {comparison['comparison_id']}: kind={comparison.get('comparison_kind')} "
+            f"enabled={comparison.get('enabled')} component_ids={comparison.get('component_ids')}"
+        )
+    lines.append('')
+    lines.append('comparability:')
+    for fact_name, fact in (report.get('comparability') or {}).get('facts', {}).items():
+        lines.append(f"  {fact_name}: {fact.get('status')} values={fact.get('values')}")
     lines.append('')
     lines.append('metric_descriptions:')
     for metric in ref_pair.get('core_metrics', []):
@@ -1023,42 +1202,42 @@ def _write_management_summary(report: dict[str, Any], out_fpath: Path) -> None:
         lines.append(f"    num_output_tokens_from_stats: {(diag.get('stats_means') or {}).get('num_output_tokens')}")
         lines.append(f"    finish_reason_unknown_from_stats: {(diag.get('stats_means') or {}).get('finish_reason_unknown')}")
     lines.append('')
-    if left is not None:
-        lines.append(f"{left['label']}:")
-        lines.append(f"  diagnosis: {left['diagnosis'].get('label')}")
-        lines.append(f"  run-level N: {left['run_level']['n_rows']}")
-        lines.append(f"  instance-level N: {left['instance_level']['n_rows']}")
+    if local_repeat is not None:
+        lines.append(f"{local_repeat['comparison_id']}:")
+        lines.append(f"  diagnosis: {local_repeat['diagnosis'].get('label')}")
+        lines.append(f"  run-level N: {local_repeat['run_level']['n_rows']}")
+        lines.append(f"  instance-level N: {local_repeat['instance_level']['n_rows']}")
         lines.append(
-            f"  instance agreement at abs_tol=0.0: {_find_curve_value(left['instance_level']['agreement_vs_abs_tol'], 0.0)}"
+            f"  instance agreement at abs_tol=0.0: {_find_curve_value(local_repeat['instance_level']['agreement_vs_abs_tol'], 0.0)}"
         )
         lines.append(
-            f"  run-level abs delta max: {left['run_level']['overall_quantiles']['abs_delta']['max']}"
+            f"  run-level abs delta max: {local_repeat['run_level']['overall_quantiles']['abs_delta']['max']}"
         )
         lines.append(
-            f"  instance-level abs delta max: {left['instance_level']['overall_quantiles']['abs_delta']['max']}"
+            f"  instance-level abs delta max: {local_repeat['instance_level']['overall_quantiles']['abs_delta']['max']}"
         )
         lines.append('')
     else:
-        lines.append('kwdagger_repeat: not_computed (single_run_mode)')
+        lines.append('local_repeat: not_computed')
         lines.append('')
-    lines.append(f"{right['label']}:")
-    lines.append(f"  diagnosis: {right['diagnosis'].get('label')}")
-    lines.append(f"  run-level N: {right['run_level']['n_rows']}")
-    lines.append(f"  instance-level N: {right['instance_level']['n_rows']}")
+    lines.append(f"{official_vs_local['comparison_id']}:")
+    lines.append(f"  diagnosis: {official_vs_local['diagnosis'].get('label')}")
+    lines.append(f"  run-level N: {official_vs_local['run_level']['n_rows']}")
+    lines.append(f"  instance-level N: {official_vs_local['instance_level']['n_rows']}")
     for tol in [0.0, 1e-3, 1e-2, 1e-1, 2.5e-1, 5e-1, 1.0]:
         lines.append(
             f"  instance agreement at abs_tol={tol}: "
-            f"{_find_curve_value(right['instance_level']['agreement_vs_abs_tol'], tol)}"
+            f"{_find_curve_value(official_vs_local['instance_level']['agreement_vs_abs_tol'], tol)}"
         )
     lines.append(
         f"  run-level abs delta p90/max: "
-        f"{right['run_level']['overall_quantiles']['abs_delta']['p90']} / "
-        f"{right['run_level']['overall_quantiles']['abs_delta']['max']}"
+        f"{official_vs_local['run_level']['overall_quantiles']['abs_delta']['p90']} / "
+        f"{official_vs_local['run_level']['overall_quantiles']['abs_delta']['max']}"
     )
     lines.append(
         f"  instance-level abs delta p99/max: "
-        f"{right['instance_level']['overall_quantiles']['abs_delta']['p99']} / "
-        f"{right['instance_level']['overall_quantiles']['abs_delta']['max']}"
+        f"{official_vs_local['instance_level']['overall_quantiles']['abs_delta']['p99']} / "
+        f"{official_vs_local['instance_level']['overall_quantiles']['abs_delta']['max']}"
     )
     out_fpath.write_text('\n'.join(lines) + '\n')
 
@@ -1077,21 +1256,9 @@ def _write_latest_alias(src: Path | None, latest_root: Path, latest_name: str) -
 def main(argv: list[str] | None = None) -> None:
     setup_cli_logging()
     parser = argparse.ArgumentParser()
-    parser.add_argument('--left-run-a', required=True)
-    parser.add_argument('--left-run-b', required=True)
-    parser.add_argument('--left-label', required=True)
-    parser.add_argument('--right-run-a', required=True)
-    parser.add_argument('--right-run-b', required=True)
-    parser.add_argument('--right-label', required=True)
     parser.add_argument('--report-dpath', required=True)
-    parser.add_argument(
-        '--single-run',
-        action='store_true',
-        help=(
-            'Only one local run is available; skip the kwdagger_repeat pair comparison '
-            'and compute only official_vs_kwdagger. Avoids a meaningless self-comparison.'
-        ),
-    )
+    parser.add_argument('--components-manifest', default=None)
+    parser.add_argument('--comparisons-manifest', default=None)
     args = parser.parse_args(argv)
 
     thresholds = [0.0, 1e-12, 1e-9, 1e-6, 1e-4, 1e-3, 1e-2, 2e-2, 5e-2, 1e-1, 2.5e-1, 5e-1, 1.0]
@@ -1100,135 +1267,79 @@ def main(argv: list[str] | None = None) -> None:
     stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime('%Y%m%dT%H%M%SZ')
     history_dpath = report_dpath / '.history' / stamp[:8]
     history_dpath.mkdir(parents=True, exist_ok=True)
-    run_spec_name = _infer_run_spec_name(args.left_run_a, args.left_run_b, args.right_run_a)
+    (
+        components_manifest_fpath,
+        components_manifest,
+        comparisons_manifest_fpath,
+        comparisons_manifest,
+    ) = load_packet_manifests(
+        report_dpath=report_dpath,
+        components_manifest=args.components_manifest,
+        comparisons_manifest=args.comparisons_manifest,
+    )
+    components = components_manifest.get('components') or []
+    comparisons = [comparison for comparison in (comparisons_manifest.get('comparisons') or []) if comparison.get('enabled', True)]
+    component_lookup = {component['component_id']: component for component in components}
+    run_spec_name = _infer_run_spec_name(*(component['run_path'] for component in components))
 
-    right = _build_pair(args.right_run_a, args.right_run_b, args.right_label, thresholds)
-    if args.single_run:
-        # Only one local run: skip the repeat pair to avoid a meaningless self-comparison.
-        left = None
-        run_diagnostics = {
-            'kwdagger_a': _run_diagnostics(args.left_run_a),
-            'official': _run_diagnostics(args.right_run_a),
-        }
-        pairs = [right]
-    else:
-        left = _build_pair(args.left_run_a, args.left_run_b, args.left_label, thresholds)
-        run_diagnostics = {
-            'kwdagger_a': _run_diagnostics(args.left_run_a),
-            'kwdagger_b': _run_diagnostics(args.left_run_b),
-            'official': _run_diagnostics(args.right_run_a),
-        }
-        pairs = [left, right]
+    pairs = []
+    for comparison in comparisons:
+        component_ids = comparison.get('component_ids') or []
+        if len(component_ids) != 2:
+            continue
+        run_a = component_lookup[component_ids[0]]['run_path']
+        run_b = component_lookup[component_ids[1]]['run_path']
+        pair = _build_pair(run_a, run_b, str(comparison['comparison_id']), thresholds)
+        pair['comparison_id'] = comparison['comparison_id']
+        pair['comparison_kind'] = comparison.get('comparison_kind')
+        pair['component_ids'] = component_ids
+        pair['reference_component_id'] = comparison.get('reference_component_id')
+        pair['label'] = comparison['comparison_id']
+        pairs.append(pair)
+
+    run_diagnostics = {
+        component['component_id']: _run_diagnostics(component['run_path'])
+        for component in components
+    }
+    single_run_mode = not any(
+        comparison.get('comparison_kind') == 'local_repeat'
+        for comparison in comparisons
+    )
+    comparability = _comparability_summary(components)
 
     report = {
         'generated_utc': stamp,
         'run_spec_name': run_spec_name,
+        'report_dpath': str(report_dpath),
+        'components_manifest_path': str(components_manifest_fpath),
+        'comparisons_manifest_path': str(comparisons_manifest_fpath),
         'thresholds': thresholds,
+        'components': components,
+        'comparisons': comparisons,
         'pairs': pairs,
         'run_diagnostics': run_diagnostics,
-        'diagnostic_flags': _diagnostic_flags(run_diagnostics),
-        'single_run_mode': args.single_run,
+        'diagnostic_flags': _diagnostic_flags(run_diagnostics, components, comparisons),
+        'single_run_mode': single_run_mode,
+        'comparability': comparability,
     }
 
     json_fpath = history_dpath / f'core_metric_report_{stamp}.json'
     txt_fpath = history_dpath / f'core_metric_report_{stamp}.txt'
     mgmt_fpath = history_dpath / f'core_metric_management_summary_{stamp}.txt'
+    official_vs_local = _find_pair(report, 'official_vs_local') or (pairs[-1] if pairs else None)
+    local_repeat = _find_pair(report, 'local_repeat')
 
-    if args.single_run or left is None:
-        fig_fpath = _plot_single_pair_summary(history_dpath, stamp, right, run_spec_name)
-        dist_fig_fpath = _plot_pair_metric_distributions(history_dpath, stamp, [right], run_spec_name)
-        three_run_dist_fpath = None
-        overlay_dist_fpath = _plot_run_metric_distributions(
-            history_dpath,
-            stamp,
-            [
-                (args.left_run_a, 'kwdagger A'),
-                (args.right_run_a, 'official'),
-            ],
-            run_spec_name,
-            out_name='core_metric_overlay_distributions',
-            title='Overlay of Per-Instance Core Metric Score Distributions by Run',
-            subtitle='Single-run mode: only the available local kwdagger run is compared against the official HELM run.',
-        )
-        ecdf_fig_fpath = _plot_run_metric_distributions(
-            history_dpath,
-            stamp,
-            [
-                (args.left_run_a, 'kwdagger A'),
-                (args.right_run_a, 'official'),
-            ],
-            run_spec_name,
-            out_name='core_metric_ecdfs',
-            title='ECDF of Per-Instance Core Metric Scores by Run',
-            subtitle='Single-run mode: only the available local kwdagger run is compared against the official HELM run.',
-            ecdf=True,
-        )
-        per_metric_agree_fpath = _plot_per_metric_agreement(
-            history_dpath,
-            stamp,
-            right,
-            level_key='instance_level',
-            thresholds=thresholds,
-        )
-        runlevel_csv_fpath, runlevel_md_fpath = _write_two_run_runlevel_table(
-            history_dpath,
-            stamp,
-            args.left_run_a,
-            args.right_run_a,
-        )
+    if official_vs_local is None:
+        raise SystemExit('No enabled comparisons were available to render a core metric report')
+
+    if len(pairs) == 1:
+        fig_fpath = _plot_single_pair_summary(history_dpath, stamp, official_vs_local, run_spec_name)
     else:
         fig_fpath = history_dpath / f'core_metric_report_{stamp}.png'
-        dist_fig_fpath = _plot_metric_distributions(history_dpath, stamp, left, right, run_spec_name)
-        three_run_dist_fpath = _plot_three_run_metric_distributions(
-            history_dpath,
-            stamp,
-            args.left_run_a,
-            args.left_run_b,
-            args.right_run_a,
-            run_spec_name,
-        )
-        overlay_dist_fpath = _plot_overlay_metric_distributions(
-            history_dpath,
-            stamp,
-            args.left_run_a,
-            args.left_run_b,
-            args.right_run_a,
-            run_spec_name,
-        )
-        ecdf_fig_fpath = _plot_overlay_metric_ecdfs(
-            history_dpath,
-            stamp,
-            args.left_run_a,
-            args.left_run_b,
-            args.right_run_a,
-            run_spec_name,
-        )
-        per_metric_agree_fpath = _plot_per_metric_agreement(
-            history_dpath,
-            stamp,
-            left,
-            right,
-            level_key='instance_level',
-            thresholds=thresholds,
-        )
-        runlevel_csv_fpath, runlevel_md_fpath = _write_three_run_runlevel_table(
-            history_dpath,
-            stamp,
-            args.left_run_a,
-            args.left_run_b,
-            args.right_run_a,
-        )
-
-    report = kwutil.Json.ensure_serializable(_strip_private(report))
-    json_fpath.write_text(json.dumps(report, indent=2))
-    _write_text(report, txt_fpath)
-    _write_management_summary(report, mgmt_fpath)
-
-    if left is not None:
         extra_pair = _load_optional_cross_machine_pair(report_dpath)
         paper_labels = load_paper_label_manager(style='paper_short')
         extra_label = extra_pair['label'] if extra_pair is not None else None
-        pair_line = f'Pairs: {left["label"]} vs {right["label"]}'
+        pair_line = 'Pairs: ' + ' vs '.join(pair['comparison_id'] for pair in pairs)
         if extra_label is not None:
             pair_line += f' + {extra_label}'
         pair_line = paper_labels.relabel_text(pair_line)
@@ -1236,34 +1347,72 @@ def main(argv: list[str] | None = None) -> None:
         fig, axes = plt.subplots(2, 2, figsize=(24, 14.5), constrained_layout=True)
         _plot_quantiles(
             axes[0, 0],
-            left,
-            right,
+            local_repeat or official_vs_local,
+            official_vs_local,
             'run_level',
             'Run-Level Delta Quantiles'
         )
         _plot_quantiles(
             axes[0, 1],
-            left,
-            right,
+            local_repeat or official_vs_local,
+            official_vs_local,
             'instance_level',
             'Instance-Level Delta Quantiles'
         )
-        _plot_distribution(axes[1, 0], left, right, extra_pair, level_key='run_level')
+        _plot_distribution(axes[1, 0], *(pairs + ([extra_pair] if extra_pair is not None else [])), level_key='run_level')
         axes[1, 0].set_title('Run-Level Agreement vs Tolerance', fontsize=11)
-        _plot_distribution(axes[1, 1], left, right, extra_pair, level_key='instance_level')
+        _plot_distribution(axes[1, 1], *(pairs + ([extra_pair] if extra_pair is not None else [])), level_key='instance_level')
         axes[1, 1].set_title('Instance-Level Agreement vs Tolerance', fontsize=11)
         axes[0, 0].title.set_fontsize(11)
         axes[0, 1].title.set_fontsize(11)
         fig.suptitle(
             'Core Metric Agreement and Difference Summary\n'
             f'Run Spec: {run_spec_name}\n'
-            f'{pair_line}\n'
-            f'Run-level N: {left["run_level"]["n_rows"]} vs {right["run_level"]["n_rows"]} | '
-            f'Instance-level N: {left["instance_level"]["n_rows"]} vs {right["instance_level"]["n_rows"]}',
+            f'{pair_line}',
             fontsize=15,
         )
         fig.savefig(fig_fpath, dpi=180)
         plt.close(fig)
+
+    dist_fig_fpath = _plot_pair_metric_distributions(history_dpath, stamp, pairs, run_spec_name)
+    run_specs = [(component['run_path'], component['display_name']) for component in components]
+    overlay_dist_fpath = _plot_run_metric_distributions(
+        history_dpath,
+        stamp,
+        run_specs,
+        run_spec_name,
+        out_name='core_metric_overlay_distributions',
+        title='Overlay of Per-Instance Core Metric Score Distributions by Component',
+        subtitle='Each series comes from a selected report component declared in the components manifest.',
+    )
+    ecdf_fig_fpath = _plot_run_metric_distributions(
+        history_dpath,
+        stamp,
+        run_specs,
+        run_spec_name,
+        out_name='core_metric_ecdfs',
+        title='ECDF of Per-Instance Core Metric Scores by Component',
+        subtitle='Each series comes from a selected report component declared in the components manifest.',
+        ecdf=True,
+    )
+    per_metric_agree_fpath = _plot_per_metric_agreement(
+        history_dpath,
+        stamp,
+        *pairs,
+        level_key='instance_level',
+        thresholds=thresholds,
+    )
+    runlevel_csv_fpath, runlevel_md_fpath = _write_comparison_runlevel_table(
+        history_dpath,
+        stamp,
+        comparisons,
+        component_lookup,
+    )
+
+    report = kwutil.Json.ensure_serializable(_strip_private(report))
+    json_fpath.write_text(json.dumps(report, indent=2))
+    _write_text(report, txt_fpath)
+    _write_management_summary(report, mgmt_fpath)
 
     latest_map = {
         json_fpath: 'core_metric_report.latest.json',
@@ -1274,8 +1423,6 @@ def main(argv: list[str] | None = None) -> None:
     }
     if dist_fig_fpath is not None:
         latest_map[dist_fig_fpath] = 'core_metric_distributions.latest.png'
-    if three_run_dist_fpath is not None:
-        latest_map[three_run_dist_fpath] = 'core_metric_three_run_distributions.latest.png'
     if overlay_dist_fpath is not None:
         latest_map[overlay_dist_fpath] = 'core_metric_overlay_distributions.latest.png'
     if ecdf_fig_fpath is not None:
@@ -1286,6 +1433,21 @@ def main(argv: list[str] | None = None) -> None:
         latest_map[per_metric_agree_fpath] = 'core_metric_per_metric_agreement.latest.png'
     for src, latest_name in latest_map.items():
         _write_latest_alias(src, report_dpath, latest_name)
+    known_latest_names = {
+        'core_metric_report.latest.json',
+        'core_metric_report.latest.txt',
+        'core_metric_management_summary.latest.txt',
+        'core_metric_report.latest.png',
+        'core_metric_distributions.latest.png',
+        'core_metric_three_run_distributions.latest.png',
+        'core_metric_overlay_distributions.latest.png',
+        'core_metric_ecdfs.latest.png',
+        'core_metric_per_metric_agreement.latest.png',
+        'core_runlevel_table.latest.csv',
+        'core_runlevel_table.latest.md',
+    }
+    for latest_name in known_latest_names - set(latest_map.values()):
+        safe_unlink(report_dpath / latest_name)
 
     print(f'Wrote core metric report: {json_fpath}')
     print(f'Wrote core metric text: {txt_fpath}')
@@ -1293,8 +1455,6 @@ def main(argv: list[str] | None = None) -> None:
     print(f'Wrote core metric plot: {fig_fpath}')
     if dist_fig_fpath is not None:
         print(f'Wrote core metric distributions: {dist_fig_fpath}')
-    if three_run_dist_fpath is not None:
-        print(f'Wrote core metric three-run distributions: {three_run_dist_fpath}')
     if overlay_dist_fpath is not None:
         print(f'Wrote core metric overlay distributions: {overlay_dist_fpath}')
     if ecdf_fig_fpath is not None:
