@@ -909,3 +909,20 @@ Design takeaways:
 1. A count label is only as good as the metadata field that feeds it.
 2. When a report has a clear visible grouping, the title should prefer the grouping the reader can verify in the figure.
 3. Narrow fallback chains are safer than ad hoc guessing because they make the semantic intent visible in code.
+
+## 2026-04-21 00:51:01 +0000
+
+Summary of user intent: make a very narrow follow-up patch in `helm_audit/workflows/build_reports_summary.py` so the agreement-curve title’s `n_scenarios` count uses a row-wise fallback chain rather than a field-global one, while preserving the plotted-subset semantics and the existing legend/layout improvements.
+
+Model and configuration: GPT-5.4, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+The important distinction here is between “what field exists anywhere in the subset” and “what value should each row contribute.” The earlier helper was still undercounting because it decided the count field one layer too early: if any `scenario` values existed at all, rows missing `scenario` stopped contributing via `benchmark`, even though those rows still represent visible benchmark-like diversity in the chart.
+
+I’m fixing that by making the fallback happen per row. Each contributing row now resolves its own scenario-like label in order: `scenario`, then `benchmark`, then `suite`, skipping blanks and placeholder values. Only after that resolution do we take the distinct count. That keeps the title honest in mixed-metadata cases without widening the scope or changing the plotted data.
+
+The tradeoff is intentionally small and local. This remains a presentation-only patch in the agreement-curve writer. If the title still looks off after this, the next thing to inspect would be the upstream metadata population, not the rendering path.
+
+Design takeaways:
+1. Global fallbacks can accidentally suppress valid per-row signal.
+2. When metadata quality is mixed, row-wise normalization is usually the right boundary for title counts.
+3. The more a report mirrors visible grouping, the more useful its title cardinality becomes.

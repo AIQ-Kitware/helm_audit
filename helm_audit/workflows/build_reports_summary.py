@@ -1499,16 +1499,25 @@ def _write_agreement_curve_plot(
         (str(r.get("experiment_name")), str(r.get("run_entry"))): r
         for r in enriched_rows
     }
-    def _distinct_cardinality(rows: list[dict[str, Any]], keys: tuple[str, ...]) -> int:
-        for key in keys:
-            values = {
-                str(row.get(key)).strip()
-                for row in rows
-                if str(row.get(key) or "").strip() and str(row.get(key)).strip().lower() not in {"unknown", "none", "nan"}
-            }
-            if values:
-                return len(values)
-        return 0
+    def _clean_value(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if text.lower() in {"unknown", "none", "nan"}:
+            return ""
+        return text
+
+    def _rowwise_cardinality(rows: list[dict[str, Any]], keys: tuple[str, ...]) -> int:
+        values: set[str] = set()
+        for row in rows:
+            resolved = ""
+            for key in keys:
+                resolved = _clean_value(row.get(key))
+                if resolved:
+                    break
+            if resolved:
+                values.add(resolved)
+        return len(values)
 
     curve_data: list[dict[str, Any]] = []
     curve_rows: list[dict[str, Any]] = []
@@ -1530,8 +1539,8 @@ def _write_agreement_curve_plot(
     contributing_rows = [meta_lookup.get((str(row.get("experiment_name")), str(row.get("run_entry")))) for row in curve_rows]
     contributing_rows = [row for row in contributing_rows if row is not None]
     n_runs = len({(str(row.get("experiment_name")), str(row.get("run_entry"))) for row in curve_rows})
-    n_models = _distinct_cardinality(contributing_rows, ("model",))
-    n_scenarios = _distinct_cardinality(contributing_rows, ("scenario", "benchmark", "suite"))
+    n_models = _rowwise_cardinality(contributing_rows, ("model",))
+    n_scenarios = _rowwise_cardinality(contributing_rows, ("scenario", "benchmark", "suite"))
     title_text = title
     if scope_title is not None:
         title_text = (
