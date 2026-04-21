@@ -1484,23 +1484,32 @@ def emit_filter_analysis_artifacts(
         'sel_excl_by_scenario_tsv': str(_write_stamped_table(report_dpath, tables_dpath, 'filter_candidate_selection_by_scenario', stamp, selected_excluded_by_scenario_rows)),
     }
 
+    selected_fraction_by_model_rows = [
+        row for row in by_model_rows
+        if (row.get('fraction_selected_of_eligible') or 0) > 0
+    ]
+    selected_fraction_by_dataset_rows = [
+        row for row in by_dataset_rows
+        if (row.get('fraction_selected_of_eligible') or 0) > 0
+    ]
+
     outputs['selected_fraction_by_model_chart'] = _emit_bar_chart(
-        by_model_rows,
+        selected_fraction_by_model_rows,
         report_dpath=report_dpath,
         x='model',
-        y='fraction_selected_of_all',
-        title='Selected Fraction of Candidate Runs by Model',
+        y='fraction_selected_of_eligible',
+        title='Selected Fraction of Eligible Runs by Model',
         stem='filter_candidate_fraction_selected_by_model',
         stamp=stamp,
         interactive_dpath=interactive_dpath,
         static_dpath=figures_dpath,
     )
     outputs['selected_fraction_by_dataset_chart'] = _emit_bar_chart(
-        by_dataset_rows,
+        selected_fraction_by_dataset_rows,
         report_dpath=report_dpath,
         x='dataset',
-        y='fraction_selected_of_all',
-        title='Selected Fraction of Candidate Runs by Dataset Slice',
+        y='fraction_selected_of_eligible',
+        title='Selected Fraction of Eligible Runs by Dataset Slice',
         stem='filter_candidate_fraction_selected_by_dataset',
         stamp=stamp,
         interactive_dpath=interactive_dpath,

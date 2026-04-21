@@ -236,6 +236,21 @@ Design takeaways:
 2. Bounding raster size is not the same as truncating data; keep the data complete and only compact the presentation layer.
 3. Abbreviating tick labels is acceptable when the axis title still carries the full count semantics and the full labels remain available in HTML.
 
+## 2026-04-21 00:06:08 +0000
+
+Summary of user intent: retune the filter-analysis “selected fraction” plots so they answer the eligible-runs question instead of the broader discovered-runs question, with the dataset plot dropping zero bars and no change to the underlying table generation.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+The issue here was not the summary tables themselves; the counts already exist in the row data. The problem was interpretive: `fraction_selected_of_all` made the chart tell a story about the whole corpus, which is too broad for these two plots, while `fraction_selected_of_considered` would have dragged the view back toward an intermediate gate that is not the story we want. Reusing `fraction_selected_of_eligible` keeps the denominator aligned with the actual question these plots are supposed to answer: once a run has cleared the model-level gates, what fraction survives to selection?
+
+I also filtered the plotted rows down to nonzero eligible fractions for both charts. That is a display choice, not a data choice. The dataset-slice version was especially noisy with zeros, so removing those bars improves readability without changing the tables or the canonical inventory. I did not add any truncation or top-K logic because that would have changed the meaning of the plots; the only thing that changed is which already-computed rows are shown in these two charts.
+
+Design takeaways:
+1. The denominator of a plot is part of its narrative, not just a numeric detail.
+2. Filtering display rows to remove zero-valued bars can improve usefulness without weakening the underlying data if the full table remains intact.
+3. When a metric already exists in the table rows, the safest edit is to reuse it rather than invent a new aggregation path.
+
 ## 2026-04-09 22:45:14 +0000
 
 Summary of user intent: improve the historic grid aggregate report so it shows a model-separated histogram of run specs that were filtered out versus included.
