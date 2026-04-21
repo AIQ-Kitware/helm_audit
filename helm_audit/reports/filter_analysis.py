@@ -1774,8 +1774,8 @@ def main(argv: list[str] | None = None) -> None:
         stamp=stamp,
         inventory_rows=inventory_rows,
     )
-    logger.info(f"Wrote filter inventory/report bundle: {outputs['report']['inventory_json']}")
-    logger.info(f"Wrote filter candidate analysis: {outputs['analysis']['summary_json']}")
+    logger.info(f"Wrote filter inventory/report bundle: {rich_link(outputs['report']['inventory_json'])}")
+    logger.info(f"Wrote filter candidate analysis: {rich_link(outputs['analysis']['summary_json'])}")
 
 
 if __name__ == '__main__':
