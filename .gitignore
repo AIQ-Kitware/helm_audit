@@ -33,3 +33,7 @@ outputs.json
 run_infos.json
 run_infos.yaml
 rundiff.jsonl
+
+in-progress-notes/
+reports/
+old-backup-reports/
