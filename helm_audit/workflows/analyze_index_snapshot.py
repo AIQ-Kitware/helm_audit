@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -25,6 +26,7 @@ from loguru import logger
 
 from helm_audit.infra.logging import setup_cli_logging
 from helm_audit.infra.paths import index_snapshot_analysis_dpath
+from helm_audit.infra.plotly_env import configure_plotly_chrome
 
 
 class AnalyzeIndexSnapshotConfig(scfg.DataConfig):
@@ -225,33 +227,36 @@ def analyze_index_snapshot(index_fpath: Path, out_dpath: Path) -> dict:
     _write_csv(by_benchmark, 'index_snapshot_by_benchmark.latest.csv')
     _write_csv(by_entry_kind, 'index_snapshot_by_entry_kind.latest.csv')
 
-    # HTML figures
-    _write_html_bar(
+    # HTML + JPG figures
+    _write_plotly_figure_bundle(
         by_track, y_col='public_track', x_col='total_rows',
         title='HELM Index Snapshot — Rows by Track',
-        fpath=out_dpath / 'index_snapshot_tracks.latest.html',
+        html_fpath=out_dpath / 'index_snapshot_tracks.latest.html',
+        jpg_fpath=out_dpath / 'index_snapshot_tracks.latest.jpg',
     )
-    _write_html_bar(
+    _write_plotly_figure_bundle(
         by_suite, y_col='suite_version', x_col='total_rows',
         title='HELM Index Snapshot — Rows by Suite Version',
-        fpath=out_dpath / 'index_snapshot_suite_versions.latest.html',
+        html_fpath=out_dpath / 'index_snapshot_suite_versions.latest.html',
+        jpg_fpath=out_dpath / 'index_snapshot_suite_versions.latest.jpg',
     )
-    _write_html_bar(
+    _write_plotly_figure_bundle(
         by_model, y_col='model', x_col='total_runs',
-        title='HELM Index Snapshot — Runs by Model (top 30)',
-        fpath=out_dpath / 'index_snapshot_models.latest.html',
-        max_bars=30,
+        title='HELM Index Snapshot — Runs by Model',
+        html_fpath=out_dpath / 'index_snapshot_models.latest.html',
+        jpg_fpath=out_dpath / 'index_snapshot_models.latest.jpg',
     )
-    _write_html_bar(
+    _write_plotly_figure_bundle(
         by_benchmark, y_col='benchmark_group', x_col='total_runs',
-        title='HELM Index Snapshot — Runs by Benchmark Group (top 30)',
-        fpath=out_dpath / 'index_snapshot_benchmarks.latest.html',
-        max_bars=30,
+        title='HELM Index Snapshot — Runs by Benchmark Group',
+        html_fpath=out_dpath / 'index_snapshot_benchmarks.latest.html',
+        jpg_fpath=out_dpath / 'index_snapshot_benchmarks.latest.jpg',
     )
-    _write_html_bar(
+    _write_plotly_figure_bundle(
         by_entry_kind, y_col='entry_kind', x_col='total_rows',
         title='HELM Index Snapshot — Rows by Entry Kind',
-        fpath=out_dpath / 'index_snapshot_entry_kinds.latest.html',
+        html_fpath=out_dpath / 'index_snapshot_entry_kinds.latest.html',
+        jpg_fpath=out_dpath / 'index_snapshot_entry_kinds.latest.jpg',
     )
 
     print(summary_text)
@@ -303,24 +308,33 @@ def _agg_by_group(
     return result
 
 
-def _write_html_bar(
+def _write_plotly_figure_bundle(
     df: pd.DataFrame,
     y_col: str,
     x_col: str,
     title: str,
-    fpath: Path,
-    max_bars: int = 200,
-) -> Path:
-    """Write a horizontal bar chart to an HTML file using Plotly."""
+    html_fpath: Path,
+    jpg_fpath: Path,
+) -> None:
+    """Write a horizontal bar chart as both HTML and JPG."""
     import plotly.express as px
 
-    df_plot = df[[y_col, x_col]].dropna(subset=[y_col]).head(max_bars)
+    df_plot = df[[y_col, x_col]].dropna(subset=[y_col])
     fig = px.bar(df_plot, x=x_col, y=y_col, orientation='h', title=title)
     if not df_plot.empty:
         fig.update_layout(yaxis={'categoryorder': 'total ascending'})
-    fig.write_html(str(fpath), include_plotlyjs='cdn')
-    logger.success('Wrote {}', fpath)
-    return fpath
+
+    fig.write_html(str(html_fpath), include_plotlyjs='cdn')
+    logger.success('Wrote {}', html_fpath)
+
+    skip_static = os.environ.get('HELM_AUDIT_SKIP_STATIC_IMAGES', '') in {'1', 'true', 'yes'}
+    if not skip_static:
+        configure_plotly_chrome()
+        try:
+            fig.write_image(str(jpg_fpath), scale=3.0)
+            logger.success('Wrote {}', jpg_fpath)
+        except Exception as ex:
+            logger.warning('unable to write JPG {}: {!r}', jpg_fpath, ex)
 
 
 def _absent(flag: bool) -> str:
