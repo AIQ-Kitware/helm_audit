@@ -24,6 +24,7 @@ from helm_audit.model_registry import local_model_registry_by_name
 from helm_audit.utils.numeric import nested_get
 from helm_audit.utils.sankey import emit_sankey_artifacts
 from helm_audit.utils import sankey_builder
+from helm_audit.workflows.rebuild_core_report import main as rebuild_core_report_main
 
 from loguru import logger
 
@@ -37,6 +38,11 @@ DEFAULT_BREAKDOWN_DIMS = [
 ]
 
 CANONICAL_AGREEMENT_TOL = 0.05
+PRIORITIZED_EXAMPLE_ARTIFACTS = [
+    "core_metric_report.latest.png",
+    "core_metric_management_summary.latest.txt",
+    "instance_samples_official_vs_kwdagger.latest.txt",
+]
 
 
 def latest_index_csv(index_dpath: Path) -> Path:
@@ -2071,6 +2077,18 @@ def _build_prioritized_breakdown_summary(
     for row in flattened_rows:
         include_values_by_dim[str(row["dimension"])].add(str(row["dimension_value"]))
 
+    def _serialize_example_row(row: dict[str, Any]) -> dict[str, Any]:
+        keep = [
+            "experiment_name",
+            "run_entry",
+            "report_dir",
+            "report_json",
+            "official_instance_agree_bucket",
+            "official_instance_agree_005",
+            "analysis_single_run",
+        ]
+        return {key: row.get(key) for key in keep if key in row}
+
     return {
         "definitions": {
             "rank_population": "breakdown groups ranked from analyzed reproducibility rows; attempted/completed counts are added from all indexed rows in the same group; machine_host membership uses selected attempt provenance when available",
@@ -2085,8 +2103,14 @@ def _build_prioritized_breakdown_summary(
         "selected_by_section": {
             key: [
                 {
-                    k: v for k, v in row.items()
-                    if k != "rows" and k != "example_rows"
+                    **{
+                        k: v for k, v in row.items()
+                        if k != "rows" and k != "example_rows"
+                    },
+                    "example_rows": [
+                        _serialize_example_row(example_row)
+                        for example_row in (row.get("example_rows") or [])
+                    ],
                 }
                 for row in value
             ]
@@ -2157,6 +2181,162 @@ def _format_prioritized_breakdown_summary_text(
                 for item in example_reports:
                     lines.append(f"    - {item}")
     return lines
+
+
+def _iter_prioritized_example_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for section_rows in (summary.get("selected_by_section") or {}).values():
+        for row in section_rows or []:
+            for example_row in row.get("example_rows") or []:
+                key = (
+                    str(example_row.get("experiment_name") or ""),
+                    str(example_row.get("run_entry") or ""),
+                    str(example_row.get("report_dir") or ""),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(example_row)
+    return rows
+
+
+def _report_artifact_is_usable(fpath: Path) -> bool:
+    return fpath.exists()
+
+
+def _prioritized_example_missing_artifacts(report_dir: Path) -> list[str]:
+    return [
+        name for name in PRIORITIZED_EXAMPLE_ARTIFACTS
+        if not _report_artifact_is_usable(report_dir / name)
+    ]
+
+
+def _repair_prioritized_example_reports(
+    *,
+    summary: dict[str, Any],
+    index_fpath: Path,
+) -> list[dict[str, Any]]:
+    repairs: list[dict[str, Any]] = []
+    for example_row in _iter_prioritized_example_rows(summary):
+        report_dir_text = _clean_optional_text(example_row.get("report_dir"))
+        run_entry = _clean_optional_text(example_row.get("run_entry"))
+        if not report_dir_text or not run_entry:
+            continue
+        report_dir = Path(report_dir_text).expanduser()
+        if not report_dir.exists():
+            repairs.append(
+                {
+                    "report_dir": str(report_dir),
+                    "run_entry": run_entry,
+                    "status": "missing_report_dir",
+                    "missing_artifacts": PRIORITIZED_EXAMPLE_ARTIFACTS,
+                }
+            )
+            continue
+        missing = _prioritized_example_missing_artifacts(report_dir)
+        if not missing:
+            repairs.append(
+                {
+                    "report_dir": str(report_dir),
+                    "run_entry": run_entry,
+                    "status": "already_ok",
+                    "missing_artifacts": [],
+                }
+            )
+            continue
+        argv = [
+            "--run-entry", run_entry,
+            "--report-dpath", str(report_dir),
+            "--index-fpath", str(index_fpath),
+        ]
+        experiment_name = _clean_optional_text(example_row.get("experiment_name"))
+        if experiment_name:
+            argv.extend(["--experiment-name", experiment_name])
+        if bool(example_row.get("analysis_single_run")):
+            argv.append("--allow-single-repeat")
+        rebuild_core_report_main(argv)
+        remaining = _prioritized_example_missing_artifacts(report_dir)
+        repairs.append(
+            {
+                "report_dir": str(report_dir),
+                "run_entry": run_entry,
+                "status": "repaired" if not remaining else "repair_incomplete",
+                "missing_artifacts": remaining,
+            }
+        )
+    return repairs
+
+
+def _publish_prioritized_examples_tree(
+    *,
+    level_002: Path,
+    generated_utc: str,
+    summary: dict[str, Any],
+    repair_results: list[dict[str, Any]] | None = None,
+) -> Path:
+    tree_root = level_002 / f"prioritized_examples_{generated_utc}"
+    tree_root.mkdir(parents=True, exist_ok=True)
+    repairs_by_dir = {
+        str(item.get("report_dir") or ""): item
+        for item in (repair_results or [])
+        if item.get("report_dir")
+    }
+    for section_name in ["good", "mid", "bad", "flagged"]:
+        section_dpath = tree_root / section_name
+        section_dpath.mkdir(parents=True, exist_ok=True)
+        for row in (summary.get("selected_by_section") or {}).get(section_name, []):
+            dim = str(row.get("dimension") or "unknown")
+            value = str(row.get("dimension_value") or "unknown")
+            rank = int(row.get("priority_rank") or 0)
+            rec_dpath = section_dpath / f"{rank:02d}-{slugify(dim)}-{slugify(value)}"
+            rec_dpath.mkdir(parents=True, exist_ok=True)
+            metadata = {
+                "bucket_class": section_name,
+                "priority_rank": rank,
+                "dimension": dim,
+                "dimension_value": value,
+                "selection_reason": row.get("selection_reason"),
+                "breakdown_dir": row.get("breakdown_dir"),
+                "breakdown_index_dir": row.get("breakdown_index_dir"),
+                "interesting_flags": row.get("interesting_flags") or [],
+                "example_report_dirs": [ex.get("report_dir") for ex in (row.get("example_rows") or []) if ex.get("report_dir")],
+            }
+            _write_json(metadata, rec_dpath / "metadata.json")
+            breakdown_dir = _clean_optional_text(row.get("breakdown_dir"))
+            if breakdown_dir and Path(breakdown_dir).exists():
+                symlink_to(breakdown_dir, rec_dpath / "breakdown_dir")
+            breakdown_index_dir = _clean_optional_text(row.get("breakdown_index_dir"))
+            if breakdown_index_dir and Path(breakdown_index_dir).exists():
+                symlink_to(breakdown_index_dir, rec_dpath / "breakdown_index_dir")
+            for ex_idx, example_row in enumerate(row.get("example_rows") or [], start=1):
+                run_entry = str(example_row.get("run_entry") or f"example-{ex_idx}")
+                ex_dpath = rec_dpath / f"example_{ex_idx:02d}-{slugify(run_entry)}"
+                ex_dpath.mkdir(parents=True, exist_ok=True)
+                example_report_dir = _clean_optional_text(example_row.get("report_dir"))
+                if example_report_dir and Path(example_report_dir).exists():
+                    symlink_to(example_report_dir, ex_dpath / "report_dir")
+                    for artifact_name in [
+                        *PRIORITIZED_EXAMPLE_ARTIFACTS,
+                        "report_selection.latest.json",
+                    ]:
+                        artifact_fpath = Path(example_report_dir) / artifact_name
+                        if artifact_fpath.exists():
+                            symlink_to(artifact_fpath, ex_dpath / artifact_name)
+                repair_info = repairs_by_dir.get(str(example_report_dir or ""))
+                if repair_info is not None:
+                    _write_json(repair_info, ex_dpath / "repair_status.json")
+    readme_lines = [
+        "Prioritized Examples",
+        "",
+        f"generated_utc: {generated_utc}",
+        "This tree is filesystem-first navigation for the prioritized breakdown shortlist.",
+        "Each recommendation directory links to the selected breakdown, its parent index, and example report dirs with key latest artifacts.",
+    ]
+    _write_text(readme_lines, tree_root / "README.txt")
+    write_latest_alias(tree_root / "README.txt", tree_root, "README.latest.txt")
+    write_latest_alias(tree_root, level_002, "prioritized_examples.latest")
+    return tree_root
 
 
 _AXIS_COUNT_TAGS = {
@@ -2658,10 +2838,11 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
             write_latest_alias(src, summary_root, src_name)
     for src_name in [
         "prioritized_breakdowns.latest.txt",
+        "prioritized_examples.latest",
         "off_story_summary.latest.txt",
         "run_multiplicity_summary.latest.txt",
     ]:
-        src = level_002_static / src_name
+        src = level_002_static / src_name if src_name.endswith(".txt") else level_002 / src_name
         if src.exists() or src.is_symlink():
             write_latest_alias(src, summary_root, src_name)
     for src_name in [
@@ -4054,6 +4235,16 @@ def _render_scope_summary(
         machine_dpath=level_002_machine,
         static_dpath=level_002_static,
     )
+    prioritized_example_repairs = _repair_prioritized_example_reports(
+        summary=prioritized_breakdowns_summary,
+        index_fpath=index_fpath,
+    )
+    prioritized_examples_tree = _publish_prioritized_examples_tree(
+        level_002=level_002,
+        generated_utc=generated_utc,
+        summary=prioritized_breakdowns_summary,
+        repair_results=prioritized_example_repairs,
+    )
 
     if include_visuals:
         benchmark_plot = _write_plotly_bar(
@@ -4178,6 +4369,7 @@ def _render_scope_summary(
         "  - run_inventory.latest.csv: one row per scheduled job with completion, failure, repro, and attempt identity/provenance fields",
         "  - reproducibility_rows.latest.csv: analyzed per-run reproducibility cases in this scope",
         "  - prioritized_breakdowns.latest.{txt,csv,json}: ranked triage shortlist of breakdowns and example cases to inspect next",
+        "  - prioritized_examples.latest/: filesystem-first symlink tree for the shortlisted breakdowns and example report artifacts",
         "  - off_story_summary.latest.{txt,csv,json}: off-story local extensions plus on-story context counts",
         "  - run_multiplicity_summary.latest.{txt,csv,json}: logical-run multiplicity, attempt identity, machine spread, and experiment spread",
     ]
@@ -4215,6 +4407,7 @@ def _render_scope_summary(
     ]
     for src, root, name in latest_pairs:
         write_latest_alias(src, root, name)
+    write_latest_alias(prioritized_examples_tree, level_002, "prioritized_examples.latest")
 
     if include_visuals:
         for base_name, artifact in [
@@ -4269,6 +4462,10 @@ def _render_scope_summary(
         "failure_taxonomy_plot": failure_taxonomy_plot,
         "filter_selection_by_model_plot": filter_selection_by_model_plot,
         "prioritized_breakdowns": prioritized_breakdowns_table,
+        "prioritized_examples": {
+            "tree_root": str(prioritized_examples_tree),
+            "repairs": prioritized_example_repairs,
+        },
         "off_story_summary": off_story_table,
         "run_multiplicity_summary": run_multiplicity_table,
         "identity_contract": run_multiplicity_summary.get("definitions"),
@@ -4332,6 +4529,7 @@ def _render_scope_summary(
         "",
         "Supplementary",
         "  prioritized_breakdowns.latest.txt: triage-first shortlist of good/mid/bad/flagged breakdowns with direct paths",
+        "  prioritized_examples.latest/: filesystem-first symlink tree for direct inspection of shortlisted examples",
         "  off_story_summary.latest.txt: off-story local extensions with stage counts and provenance",
         "  run_multiplicity_summary.latest.txt: logical-result identity, repeated attempts, machines, experiments, UUIDs",
         "  sankey_repro_by_metric: per-metric drift (max |official - local| across runs)",

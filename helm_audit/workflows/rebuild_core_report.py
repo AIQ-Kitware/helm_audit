@@ -121,6 +121,87 @@ def _write_latest_selection(report_dpath: Path, selection: dict[str, Any]) -> Pa
     return write_latest_alias(history_fpath, report_dpath, 'report_selection.latest.json')
 
 
+def _load_json_if_exists(fpath: Path) -> dict[str, Any] | None:
+    if not fpath.exists():
+        return None
+    try:
+        data = json.loads(fpath.read_text())
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _load_validated_stored_selection(
+    report_dpath: Path,
+    *,
+    requested_run_entry: str,
+    requested_experiment_name: str | None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    selection_fpath = report_dpath / 'report_selection.latest.json'
+    selection = _load_json_if_exists(selection_fpath)
+    if selection is None:
+        return None, [f'missing or unreadable stored selection: {selection_fpath}']
+    problems = []
+    stored_run_entry = _clean_optional_text(selection.get('run_entry'))
+    if stored_run_entry != requested_run_entry:
+        problems.append(
+            f'stored selection run_entry mismatch: expected {requested_run_entry!r}, found {stored_run_entry!r}'
+        )
+    if requested_experiment_name is not None:
+        stored_experiment_name = _clean_optional_text(selection.get('experiment_name'))
+        if stored_experiment_name != requested_experiment_name:
+            problems.append(
+                'stored selection experiment_name mismatch: '
+                f'expected {requested_experiment_name!r}, found {stored_experiment_name!r}'
+            )
+    if problems:
+        return None, problems
+    return selection, []
+
+
+def _resolve_report_local_run_link(report_dpath: Path, link_name: str) -> str | None:
+    link_fpath = report_dpath / link_name
+    if not (link_fpath.exists() or link_fpath.is_symlink()):
+        return None
+    try:
+        return str(link_fpath.expanduser().resolve())
+    except Exception:
+        return None
+
+
+def _existing_run_path(value: Any) -> str | None:
+    text = _clean_optional_text(value)
+    if not text:
+        return None
+    try:
+        path = Path(text).expanduser().resolve()
+    except Exception:
+        return None
+    if not path.exists():
+        return None
+    return str(path)
+
+
+def _format_local_selection_failure(
+    *,
+    run_entry: str,
+    experiment_name: str | None,
+    report_dpath: Path,
+    local_problems: list[str],
+    index_failure: str,
+) -> str:
+    base = (
+        f'Unable to resolve local kwdagger runs for run_entry={run_entry!r}'
+        if experiment_name is None else
+        f'Unable to resolve local kwdagger runs for run_entry={run_entry!r} within experiment_name={experiment_name!r}'
+    )
+    details = '; '.join(local_problems) if local_problems else 'no reusable report-local selection was found'
+    return (
+        f'{base}. Existing report-local selection missing/unusable in {report_dpath}: {details}. '
+        f'Current index fallback also failed: {index_failure}'
+    )
+
+
 def _find_kwdagger_job_dpath(run_dpath: str | os.PathLike[str]) -> Path | None:
     current = Path(run_dpath).expanduser().resolve()
     for cand in [current, *current.parents]:
@@ -163,87 +244,203 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument('--experiment-name', default=None)
     args = parser.parse_args(argv)
 
-    index_fpath = (
-        Path(args.index_fpath).expanduser().resolve()
-        if args.index_fpath else
-        latest_index_csv(Path(args.index_dpath).expanduser().resolve())
-    )
-    rows = load_rows(index_fpath)
-    matches = matching_rows(rows, args.run_entry, experiment_name=args.experiment_name)
-    if not matches:
-        if args.experiment_name is not None:
-            raise SystemExit(
-                f'No indexed kwdagger runs found for run_entry={args.run_entry!r} '
-                f'within experiment_name={args.experiment_name!r}'
-            )
-        raise SystemExit(f'No indexed kwdagger runs found for run_entry={args.run_entry!r}')
-
-    if len(matches) >= 2:
-        left_a_row = matches[0]
-        left_b_row = matches[1]
-        left_a = matches[0]['run_dir']
-        left_b = matches[1]['run_dir']
-        single_run = False
-    elif args.allow_single_repeat:
-        left_a_row = matches[0]
-        left_b_row = matches[0]
-        left_a = matches[0]['run_dir']
-        left_b = matches[0]['run_dir']
-        single_run = True
-        print(f'single_run=True: only one local run found; repeat pair will be skipped')
-    else:
-        raise SystemExit(
-            f'Need at least 2 matching kwdagger runs for run_entry={args.run_entry!r}; '
-            f'found {len(matches)}. Use --allow-single-repeat to skip the repeat pair.'
-        )
-
-    desired_max = None
-    try:
-        desired_max = int(matches[0].get('max_eval_instances')) if matches[0].get('max_eval_instances') else None
-    except Exception:
-        desired_max = None
-
-    historic_candidates = collect_historic_candidates(args.precomputed_root, args.run_entry)
-    chosen_historic, info = choose_historic_candidate(historic_candidates, desired_max)
-    if chosen_historic is None:
-        raise SystemExit(f'No historic HELM candidate found for run_entry={args.run_entry!r}')
-
     report_dpath = Path(args.report_dpath) if args.report_dpath else (
         core_run_reports_root() / 'manual' / f'core-metrics-{slugify(args.run_entry)}'
     )
     report_dpath = report_dpath.expanduser().resolve()
     report_dpath.mkdir(parents=True, exist_ok=True)
 
-    print(f'index_fpath={index_fpath}')
+    stored_selection, stored_selection_problems = _load_validated_stored_selection(
+        report_dpath,
+        requested_run_entry=args.run_entry,
+        requested_experiment_name=args.experiment_name,
+    )
+    if stored_selection is not None:
+        print(f'Using stored report selection from {report_dpath / "report_selection.latest.json"} as primary replay source')
+
+    local_resolution_problems = list(stored_selection_problems)
+    selection_sources: dict[str, str] = {}
+    selection_seed = dict(stored_selection or {})
+
+    left_a_row = None
+    left_b_row = None
+    left_a = _existing_run_path(selection_seed.get('left_run_a'))
+    if left_a:
+        selection_sources['left_run_a'] = 'stored_selection'
+    left_b = _existing_run_path(selection_seed.get('left_run_b'))
+    if left_b:
+        selection_sources['left_run_b'] = 'stored_selection'
+    right_run_a = _existing_run_path(selection_seed.get('right_run_a'))
+    if right_run_a:
+        selection_sources['right_run_a'] = 'stored_selection'
+    single_run = bool(selection_seed.get('single_run'))
+
+    if left_a is None:
+        left_a = _resolve_report_local_run_link(report_dpath, 'kwdagger_a.run')
+        if left_a:
+            selection_sources['left_run_a'] = 'report_symlink'
+    if left_b is None:
+        left_b = _resolve_report_local_run_link(report_dpath, 'kwdagger_b.run')
+        if left_b:
+            selection_sources['left_run_b'] = 'report_symlink'
+    if right_run_a is None:
+        right_run_a = _resolve_report_local_run_link(report_dpath, 'official.run')
+        if right_run_a:
+            selection_sources['right_run_a'] = 'report_symlink'
+
+    if left_a and left_b:
+        try:
+            if Path(left_a).resolve() == Path(left_b).resolve():
+                single_run = True
+        except Exception:
+            pass
+    if single_run and left_a and not left_b:
+        left_b = left_a
+        selection_sources['left_run_b'] = selection_sources.get('left_run_a', 'single_run_reuse')
+    if single_run and left_b and not left_a:
+        left_a = left_b
+        selection_sources['left_run_a'] = selection_sources.get('left_run_b', 'single_run_reuse')
+
+    rows: list[dict[str, Any]] | None = None
+    matches: list[dict[str, Any]] | None = None
+    index_fpath: Path | None = None
+
+    def _ensure_matches() -> list[dict[str, Any]]:
+        nonlocal rows, matches, index_fpath
+        if matches is not None:
+            return matches
+        index_fpath = (
+            Path(args.index_fpath).expanduser().resolve()
+            if args.index_fpath else
+            latest_index_csv(Path(args.index_dpath).expanduser().resolve())
+        )
+        rows = load_rows(index_fpath)
+        matches = matching_rows(rows, args.run_entry, experiment_name=args.experiment_name)
+        return matches
+
+    need_left_replay = left_a is None or left_b is None or (not single_run and left_a == left_b)
+    if need_left_replay:
+        match_rows = _ensure_matches()
+        if not match_rows:
+            if args.experiment_name is not None:
+                index_failure = (
+                    f'no matching completed rows for run_entry={args.run_entry!r} '
+                    f'within experiment_name={args.experiment_name!r}'
+                )
+            else:
+                index_failure = f'no matching completed rows for run_entry={args.run_entry!r}'
+            raise SystemExit(
+                _format_local_selection_failure(
+                    run_entry=args.run_entry,
+                    experiment_name=args.experiment_name,
+                    report_dpath=report_dpath,
+                    local_problems=local_resolution_problems,
+                    index_failure=index_failure,
+                )
+            )
+        if len(match_rows) >= 2:
+            left_a_row = match_rows[0]
+            left_b_row = match_rows[1]
+            left_a = str(Path(match_rows[0]['run_dir']).expanduser().resolve())
+            left_b = str(Path(match_rows[1]['run_dir']).expanduser().resolve())
+            selection_sources['left_run_a'] = 'current_index'
+            selection_sources['left_run_b'] = 'current_index'
+            single_run = False
+        elif args.allow_single_repeat or single_run:
+            left_a_row = match_rows[0]
+            left_b_row = match_rows[0]
+            left_a = str(Path(match_rows[0]['run_dir']).expanduser().resolve())
+            left_b = left_a
+            selection_sources['left_run_a'] = 'current_index'
+            selection_sources['left_run_b'] = 'current_index_reused'
+            single_run = True
+            print('single_run=True: only one local run found; repeat pair will be skipped')
+        else:
+            raise SystemExit(
+                f'Need at least 2 matching kwdagger runs for run_entry={args.run_entry!r}; '
+                f'found {len(match_rows)}. Use --allow-single-repeat to skip the repeat pair.'
+            )
+
+    desired_max = None
+    preferred_row = left_a_row or left_b_row
+    if preferred_row is None and stored_selection is not None:
+        for ref in [
+            selection_seed.get('left_attempt_a_ref'),
+            selection_seed.get('left_attempt_b_ref'),
+            *(selection_seed.get('selected_local_attempt_refs') or []),
+        ]:
+            if isinstance(ref, dict):
+                preferred_row = ref
+                break
+    if preferred_row is None:
+        cached_matches = _ensure_matches() if (right_run_a is None or stored_selection is None) else []
+        preferred_row = cached_matches[0] if cached_matches else None
+    try:
+        desired_max = int(preferred_row.get('max_eval_instances')) if preferred_row and preferred_row.get('max_eval_instances') else None
+    except Exception:
+        desired_max = None
+
+    info = selection_seed.get('historic_info')
+    if right_run_a is None:
+        historic_candidates = collect_historic_candidates(args.precomputed_root, args.run_entry)
+        chosen_historic, info = choose_historic_candidate(historic_candidates, desired_max)
+        if chosen_historic is None:
+            raise SystemExit(f'No historic HELM candidate found for run_entry={args.run_entry!r}')
+        right_run_a = str(Path(chosen_historic['run_dir']).expanduser().resolve())
+        selection_sources['right_run_a'] = 'historic_index'
+    else:
+        info = info or {'reused_from': 'stored_selection_or_report_symlink'}
+
+    if left_a is None or left_b is None or right_run_a is None:
+        raise SystemExit(
+            f'Failed to resolve rebuild inputs for run_entry={args.run_entry!r}; '
+            f'left_run_a={left_a!r} left_run_b={left_b!r} right_run_a={right_run_a!r}'
+        )
+
+    effective_index_fpath = index_fpath
+    if effective_index_fpath is None:
+        stored_index = _clean_optional_text(selection_seed.get('index_fpath'))
+        if stored_index:
+            effective_index_fpath = Path(stored_index).expanduser()
+
+    print(f'index_fpath={effective_index_fpath}')
     print(f'left_run_a={left_a}')
     print(f'left_run_b={left_b}')
-    print(f'right_run_a={chosen_historic["run_dir"]}')
+    print(f'right_run_a={right_run_a}')
     print(f'report_dpath={report_dpath}')
     print(f'historic_info={info}')
     selection = {
-        'index_fpath': str(index_fpath),
+        **selection_seed,
+        'index_fpath': str(effective_index_fpath) if effective_index_fpath is not None else None,
         'run_entry': args.run_entry,
         'left_run_a': str(left_a),
         'left_run_b': str(left_b),
-        'right_run_a': str(chosen_historic['run_dir']),
+        'right_run_a': str(right_run_a),
         'left_label': args.left_label,
         'right_label': args.right_label,
         'report_dpath': str(report_dpath),
-        'experiment_name': args.experiment_name,
+        'experiment_name': args.experiment_name if args.experiment_name is not None else selection_seed.get('experiment_name'),
         'historic_info': info,
         'single_run': single_run,
-        'left_attempt_a_ref': _attempt_ref(left_a_row),
-        'left_attempt_b_ref': _attempt_ref(left_b_row),
+        'left_attempt_a_ref': selection_seed.get('left_attempt_a_ref') or _attempt_ref(left_a_row),
+        'left_attempt_b_ref': selection_seed.get('left_attempt_b_ref') or _attempt_ref(left_b_row),
+        'selection_sources': selection_sources,
     }
-    selection['selected_local_attempt_refs'] = [
-        ref for ref in [selection.get('left_attempt_a_ref'), selection.get('left_attempt_b_ref')]
-        if ref is not None
-    ]
-    selection['selected_local_attempt_identities'] = [
-        ref['attempt_identity']
-        for ref in selection['selected_local_attempt_refs']
-        if ref.get('attempt_identity')
-    ]
+    if selection_seed.get('selected_local_attempt_refs'):
+        selection['selected_local_attempt_refs'] = selection_seed.get('selected_local_attempt_refs')
+    else:
+        selection['selected_local_attempt_refs'] = [
+            ref for ref in [selection.get('left_attempt_a_ref'), selection.get('left_attempt_b_ref')]
+            if ref is not None
+        ]
+    if selection_seed.get('selected_local_attempt_identities'):
+        selection['selected_local_attempt_identities'] = selection_seed.get('selected_local_attempt_identities')
+    else:
+        selection['selected_local_attempt_identities'] = [
+            ref['attempt_identity']
+            for ref in selection['selected_local_attempt_refs']
+            if ref.get('attempt_identity')
+        ]
     selection_fpath = _write_latest_selection(report_dpath, selection)
     link_info = _write_selected_run_symlinks(report_dpath, selection)
     selection['selected_run_links'] = link_info
@@ -253,7 +450,7 @@ def main(argv: list[str] | None = None) -> None:
         '--left-run-a', str(left_a),
         '--left-run-b', str(left_b),
         '--left-label', args.left_label,
-        '--right-run-a', str(chosen_historic['run_dir']),
+        '--right-run-a', str(right_run_a),
         '--right-run-b', str(left_a),
         '--right-label', args.right_label,
         '--report-dpath', str(report_dpath),
@@ -270,7 +467,7 @@ def main(argv: list[str] | None = None) -> None:
             report_dpath=report_dpath,
         )
     pair_samples.write_pair_samples(
-        run_a=str(chosen_historic['run_dir']),
+        run_a=str(right_run_a),
         run_b=str(left_a),
         label=args.right_label,
         report_dpath=report_dpath,
@@ -281,7 +478,7 @@ def main(argv: list[str] | None = None) -> None:
         '--run-entry',
         args.run_entry,
         '--index-fpath',
-        str(index_fpath),
+        str(effective_index_fpath) if effective_index_fpath is not None else '',
         '--precomputed-root',
         str(args.precomputed_root),
         '--report-dpath',
@@ -293,6 +490,9 @@ def main(argv: list[str] | None = None) -> None:
         *( ['--allow-single-repeat'] if args.allow_single_repeat else [] ),
         *( ['--experiment-name', args.experiment_name] if args.experiment_name else [] ),
     ]
+    if not effective_index_fpath:
+        drop_idx = cmd_parts.index('--index-fpath')
+        del cmd_parts[drop_idx: drop_idx + 2]
     reproduce_fpath = write_reproduce_script(report_dpath / 'reproduce.latest.sh', [
         '#!/usr/bin/env bash',
         'set -euo pipefail',

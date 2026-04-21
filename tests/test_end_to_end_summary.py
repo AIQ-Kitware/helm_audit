@@ -12,6 +12,8 @@ from helm_audit.workflows.build_reports_summary import (
     _build_filter_to_attempt_rows,
     _build_filter_selection_by_model_rows,
     _build_run_multiplicity_summary,
+    _publish_prioritized_examples_tree,
+    _repair_prioritized_example_reports,
 )
 
 
@@ -673,3 +675,119 @@ def test_prioritized_breakdown_summary_uses_selected_attempt_machine_host_for_an
     row = next(row for row in machine_good_rows if row["dimension_value"] == "host-a")
     assert row["machine_host_membership_source"] == "selected_attempt_refs.machine_host"
     assert row["example_report_dirs"] == ["/reports/multi"]
+
+
+def test_prioritized_example_symlink_tree_is_created_and_points_to_real_targets(tmp_path):
+    level_002 = tmp_path / "level_002"
+    breakdown_dir = level_002 / "breakdowns" / "by_benchmark" / "bench-good"
+    breakdown_index_dir = level_002 / "breakdowns" / "by_benchmark"
+    breakdown_dir.mkdir(parents=True)
+    breakdown_index_dir.mkdir(parents=True, exist_ok=True)
+    report_dir = tmp_path / "reports" / "good"
+    report_dir.mkdir(parents=True)
+    for name in [
+        "core_metric_report.latest.png",
+        "core_metric_management_summary.latest.txt",
+        "instance_samples_official_vs_kwdagger.latest.txt",
+        "report_selection.latest.json",
+    ]:
+        (report_dir / name).write_text(name)
+
+    summary = {
+        "selected_by_section": {
+            "good": [
+                {
+                    "priority_rank": 1,
+                    "dimension": "benchmark",
+                    "dimension_value": "bench-good",
+                    "selection_reason": "good exemplar",
+                    "breakdown_dir": str(breakdown_dir),
+                    "breakdown_index_dir": str(breakdown_index_dir),
+                    "interesting_flags": [],
+                    "example_rows": [
+                        {
+                            "experiment_name": "exp-good",
+                            "run_entry": "bench-good:model=a",
+                            "report_dir": str(report_dir),
+                        }
+                    ],
+                }
+            ],
+            "mid": [],
+            "bad": [],
+            "flagged": [],
+        }
+    }
+
+    tree_root = _publish_prioritized_examples_tree(
+        level_002=level_002,
+        generated_utc="20260421T154116Z",
+        summary=summary,
+        repair_results=[],
+    )
+
+    assert (level_002 / "prioritized_examples.latest").is_symlink()
+    rec_dir = tree_root / "good" / "01-benchmark-bench-good"
+    example_dir = rec_dir / "example_01-bench-good-model-a"
+    assert rec_dir.exists()
+    assert example_dir.exists()
+    assert (rec_dir / "breakdown_dir").resolve() == breakdown_dir.resolve()
+    assert (rec_dir / "breakdown_index_dir").resolve() == breakdown_index_dir.resolve()
+    assert (example_dir / "report_dir").resolve() == report_dir.resolve()
+    assert (example_dir / "core_metric_report.latest.png").resolve() == (report_dir / "core_metric_report.latest.png").resolve()
+
+
+def test_prioritized_example_repairs_missing_latest_artifacts(tmp_path, monkeypatch):
+    report_dir = tmp_path / "reports" / "needs-repair"
+    report_dir.mkdir(parents=True)
+    summary = {
+        "selected_by_section": {
+            "good": [
+                {
+                    "priority_rank": 1,
+                    "dimension": "benchmark",
+                    "dimension_value": "bench-repair",
+                    "selection_reason": "repair me",
+                    "breakdown_dir": str(tmp_path / "breakdowns" / "bench-repair"),
+                    "breakdown_index_dir": str(tmp_path / "breakdowns"),
+                    "example_rows": [
+                        {
+                            "experiment_name": "exp-repair",
+                            "run_entry": "bench-repair:model=a",
+                            "report_dir": str(report_dir),
+                            "analysis_single_run": True,
+                        }
+                    ],
+                }
+            ],
+            "mid": [],
+            "bad": [],
+            "flagged": [],
+        }
+    }
+
+    calls = []
+
+    def _fake_rebuild(argv):
+        calls.append(argv)
+        for name in [
+            "core_metric_report.latest.png",
+            "core_metric_management_summary.latest.txt",
+            "instance_samples_official_vs_kwdagger.latest.txt",
+        ]:
+            (report_dir / name).write_text("repaired")
+
+    monkeypatch.setattr(
+        "helm_audit.workflows.build_reports_summary.rebuild_core_report_main",
+        _fake_rebuild,
+    )
+
+    repairs = _repair_prioritized_example_reports(
+        summary=summary,
+        index_fpath=tmp_path / "index.csv",
+    )
+
+    assert len(calls) == 1
+    assert "--allow-single-repeat" in calls[0]
+    assert repairs[0]["status"] == "repaired"
+    assert repairs[0]["missing_artifacts"] == []

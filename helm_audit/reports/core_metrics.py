@@ -530,16 +530,28 @@ def _distribution_rows(pair: dict[str, Any]) -> pd.DataFrame:
 
 
 def _plot_metric_distributions(fig_dpath: Path, stamp: str, left: dict[str, Any], right: dict[str, Any], run_spec_name: str) -> Path | None:
+    return _plot_pair_metric_distributions(fig_dpath, stamp, [left, right], run_spec_name)
+
+
+def _plot_pair_metric_distributions(
+    fig_dpath: Path,
+    stamp: str,
+    pairs: list[dict[str, Any]],
+    run_spec_name: str,
+) -> Path | None:
+    pairs = [pair for pair in pairs if pair]
+    if not pairs:
+        return None
     df = pd.concat([
-        _distribution_rows(left),
-        _distribution_rows(right),
+        _distribution_rows(pair)
+        for pair in pairs
     ], ignore_index=True)
     if df.empty or 'metric' not in df.columns:
         return None
     metrics = sorted(df['metric'].dropna().unique().tolist())
     if not metrics:
         return None
-    pair_order = [left['label'], right['label']]
+    pair_order = [pair['label'] for pair in pairs]
     fig, axes = plt.subplots(
         len(pair_order),
         len(metrics),
@@ -582,6 +594,85 @@ def _plot_metric_distributions(fig_dpath: Path, stamp: str, left: dict[str, Any]
         fontsize=16,
     )
     out_fpath = fig_dpath / f'core_metric_distributions_{stamp}.png'
+    fig.savefig(out_fpath, dpi=180)
+    plt.close(fig)
+    return out_fpath
+
+
+def _plot_run_metric_distributions(
+    fig_dpath: Path,
+    stamp: str,
+    run_specs: list[tuple[str, str]],
+    run_spec_name: str,
+    *,
+    out_name: str = 'core_metric_overlay_distributions',
+    title: str = 'Overlay of Per-Instance Core Metric Score Distributions by Run',
+    subtitle: str = 'This shows the raw score distributions for each core metric across the selected runs.',
+    ecdf: bool = False,
+) -> Path | None:
+    frames = [
+        _single_run_instance_core_rows(run_path, label)
+        for run_path, label in run_specs
+    ]
+    df = pd.concat(frames, ignore_index=True)
+    if df.empty or 'metric' not in df.columns:
+        return None
+    metrics = sorted(df['metric'].dropna().unique().tolist())
+    if not metrics:
+        return None
+    fig, axes = plt.subplots(
+        len(metrics),
+        1,
+        figsize=(10, 3.2 * len(metrics)),
+        constrained_layout=True,
+    )
+    if len(metrics) == 1:
+        axes = [axes]
+    for ax, metric in zip(axes, metrics):
+        sub = df[df['metric'] == metric].copy()
+        if ecdf:
+            sns.ecdfplot(
+                data=sub,
+                x='value',
+                hue='run',
+                ax=ax,
+            )
+            desc = _metric_descriptor(metric)
+            ax.set_title(
+                f"{metric} ECDF ({desc['kind']}, {desc['range']}, {desc['direction']})"
+            )
+            ax.set_ylabel('Cumulative fraction of instances')
+        else:
+            discrete = _should_treat_as_discrete(sub['value'].tolist())
+            sns.histplot(
+                data=sub,
+                x='value',
+                hue='run',
+                stat='probability',
+                common_norm=False,
+                element='step',
+                fill=False,
+                multiple='layer',
+                discrete=discrete,
+                bins=None if discrete else 20,
+                ax=ax,
+            )
+            desc = _metric_descriptor(metric)
+            ax.set_title(
+                f"{metric} ({desc['kind']}, {desc['range']}, {desc['direction']})"
+            )
+            ax.set_ylabel('Probability')
+        ax.set_xlabel('Instance-level metric value')
+        legend = ax.get_legend()
+        if legend is not None:
+            legend.set_title('')
+    fig.suptitle(
+        f'{title}\n'
+        f'Run Spec: {run_spec_name}\n'
+        f'{subtitle}',
+        fontsize=16,
+    )
+    out_fpath = fig_dpath / f'{out_name}_{stamp}.png'
     fig.savefig(out_fpath, dpi=180)
     plt.close(fig)
     return out_fpath
@@ -681,59 +772,19 @@ def _plot_overlay_metric_distributions(
     official_run: str,
     run_spec_name: str,
 ) -> Path | None:
-    df = pd.concat([
-        _single_run_instance_core_rows(kwdagger_a_run, 'kwdagger A'),
-        _single_run_instance_core_rows(kwdagger_b_run, 'kwdagger B'),
-        _single_run_instance_core_rows(official_run, 'official'),
-    ], ignore_index=True)
-    if df.empty or 'metric' not in df.columns:
-        return None
-    metrics = sorted(df['metric'].dropna().unique().tolist())
-    if not metrics:
-        return None
-    fig, axes = plt.subplots(
-        len(metrics),
-        1,
-        figsize=(10, 3.2 * len(metrics)),
-        constrained_layout=True,
+    return _plot_run_metric_distributions(
+        fig_dpath,
+        stamp,
+        [
+            (kwdagger_a_run, 'kwdagger A'),
+            (kwdagger_b_run, 'kwdagger B'),
+            (official_run, 'official'),
+        ],
+        run_spec_name,
+        out_name='core_metric_overlay_distributions',
+        title='Overlay of Per-Instance Core Metric Score Distributions by Run',
+        subtitle='This shows the raw score distributions for each core metric across kwdagger repeats and the official HELM run.',
     )
-    if len(metrics) == 1:
-        axes = [axes]
-    for ax, metric in zip(axes, metrics):
-        sub = df[df['metric'] == metric].copy()
-        discrete = _should_treat_as_discrete(sub['value'].tolist())
-        sns.histplot(
-            data=sub,
-            x='value',
-            hue='run',
-            stat='probability',
-            common_norm=False,
-            element='step',
-            fill=False,
-            multiple='layer',
-            discrete=discrete,
-            bins=None if discrete else 20,
-            ax=ax,
-        )
-        desc = _metric_descriptor(metric)
-        ax.set_title(
-            f"{metric} ({desc['kind']}, {desc['range']}, {desc['direction']})"
-        )
-        ax.set_xlabel('Instance-level metric value')
-        ax.set_ylabel('Probability')
-        legend = ax.get_legend()
-        if legend is not None:
-            legend.set_title('')
-    fig.suptitle(
-        'Overlay of Per-Instance Core Metric Score Distributions by Run\n'
-        f'Run Spec: {run_spec_name}\n'
-        'This shows the raw score distributions for each core metric across kwdagger repeats and the official HELM run.',
-        fontsize=16,
-    )
-    out_fpath = fig_dpath / f'core_metric_overlay_distributions_{stamp}.png'
-    fig.savefig(out_fpath, dpi=180)
-    plt.close(fig)
-    return out_fpath
 
 
 def _plot_overlay_metric_ecdfs(
@@ -744,51 +795,20 @@ def _plot_overlay_metric_ecdfs(
     official_run: str,
     run_spec_name: str,
 ) -> Path | None:
-    df = pd.concat([
-        _single_run_instance_core_rows(kwdagger_a_run, 'kwdagger A'),
-        _single_run_instance_core_rows(kwdagger_b_run, 'kwdagger B'),
-        _single_run_instance_core_rows(official_run, 'official'),
-    ], ignore_index=True)
-    if df.empty or 'metric' not in df.columns:
-        return None
-    metrics = sorted(df['metric'].dropna().unique().tolist())
-    if not metrics:
-        return None
-    fig, axes = plt.subplots(
-        len(metrics),
-        1,
-        figsize=(10, 3.2 * len(metrics)),
-        constrained_layout=True,
+    return _plot_run_metric_distributions(
+        fig_dpath,
+        stamp,
+        [
+            (kwdagger_a_run, 'kwdagger A'),
+            (kwdagger_b_run, 'kwdagger B'),
+            (official_run, 'official'),
+        ],
+        run_spec_name,
+        out_name='core_metric_ecdfs',
+        title='ECDF of Per-Instance Core Metric Scores by Run',
+        subtitle='This often communicates sparse or zero-heavy metric distributions more clearly than histograms.',
+        ecdf=True,
     )
-    if len(metrics) == 1:
-        axes = [axes]
-    for ax, metric in zip(axes, metrics):
-        sub = df[df['metric'] == metric].copy()
-        sns.ecdfplot(
-            data=sub,
-            x='value',
-            hue='run',
-            ax=ax,
-        )
-        desc = _metric_descriptor(metric)
-        ax.set_title(
-            f"{metric} ECDF ({desc['kind']}, {desc['range']}, {desc['direction']})"
-        )
-        ax.set_xlabel('Instance-level metric value')
-        ax.set_ylabel('Cumulative fraction of instances')
-        legend = ax.get_legend()
-        if legend is not None:
-            legend.set_title('')
-    fig.suptitle(
-        'ECDF of Per-Instance Core Metric Scores by Run\n'
-        f'Run Spec: {run_spec_name}\n'
-        'This often communicates sparse or zero-heavy metric distributions more clearly than histograms.',
-        fontsize=16,
-    )
-    out_fpath = fig_dpath / f'core_metric_ecdfs_{stamp}.png'
-    fig.savefig(out_fpath, dpi=180)
-    plt.close(fig)
-    return out_fpath
 
 
 def _single_run_core_stat_index(run_path: str) -> dict[str, Any]:
@@ -831,6 +851,68 @@ def _write_three_run_runlevel_table(
     except ImportError:
         md_fpath = None
     return csv_fpath, md_fpath
+
+
+def _write_two_run_runlevel_table(
+    out_dpath: Path,
+    stamp: str,
+    kwdagger_run: str,
+    official_run: str,
+) -> tuple[Path, Path | None]:
+    idx_kw = _single_run_core_stat_index(kwdagger_run)
+    idx_off = _single_run_core_stat_index(official_run)
+    keys = sorted(set(idx_kw) & set(idx_off))
+    rows = []
+    for key in keys:
+        kw = idx_kw[key]
+        off = idx_off[key]
+        rows.append({
+            'stat_key': key,
+            'metric': kw.metric,
+            'kwdagger': kw.mean,
+            'official': off.mean,
+            'delta_official_vs_kwdagger': None if kw.mean is None or off.mean is None else abs(off.mean - kw.mean),
+        })
+    table = pd.DataFrame(rows)
+    csv_fpath = out_dpath / f'core_runlevel_table_{stamp}.csv'
+    md_fpath = out_dpath / f'core_runlevel_table_{stamp}.md'
+    table.to_csv(csv_fpath, index=False)
+    try:
+        md_fpath.write_text(table.to_markdown(index=False) + '\n')
+    except ImportError:
+        md_fpath = None
+    return csv_fpath, md_fpath
+
+
+def _plot_single_pair_summary(
+    fig_dpath: Path,
+    stamp: str,
+    pair: dict[str, Any],
+    run_spec_name: str,
+) -> Path:
+    sns.set_theme(style='whitegrid', context='talk')
+    fig, axes = plt.subplots(1, 2, figsize=(18, 7.5), constrained_layout=True)
+    quantiles = pair['instance_level']['overall_quantiles']['abs_delta']
+    labels = ['p50', 'p90', 'p95', 'p99', 'max']
+    axes[0].plot(range(len(labels)), [quantiles[k] for k in labels], marker='o', color='#4C72B0')
+    axes[0].set_xticks(range(len(labels)), labels)
+    axes[0].set_yscale('symlog', linthresh=1e-12)
+    axes[0].set_title('Official vs Local Instance-Level Delta Quantiles')
+    axes[0].set_xlabel('Quantile')
+    axes[0].set_ylabel('Absolute Difference in Core Metric Value')
+    _plot_distribution(axes[1], pair, level_key='instance_level')
+    axes[1].set_title('Official vs Local Agreement vs Tolerance')
+    fig.suptitle(
+        'Core Metric Agreement and Difference Summary\n'
+        f'Run Spec: {run_spec_name}\n'
+        f'Pair: {pair["label"]}\n'
+        f'Instance-level N: {pair["instance_level"]["n_rows"]}',
+        fontsize=15,
+    )
+    fig_fpath = fig_dpath / f'core_metric_report_{stamp}.png'
+    fig.savefig(fig_fpath, dpi=180)
+    plt.close(fig)
+    return fig_fpath
 
 
 def _strip_private(obj: Any) -> Any:
@@ -1052,16 +1134,48 @@ def main(argv: list[str] | None = None) -> None:
     txt_fpath = history_dpath / f'core_metric_report_{stamp}.txt'
     mgmt_fpath = history_dpath / f'core_metric_management_summary_{stamp}.txt'
 
-    # Plots that require both runs (left_a ≠ left_b) are skipped in single-run mode.
     if args.single_run or left is None:
-        fig_fpath = None
-        dist_fig_fpath = None
+        fig_fpath = _plot_single_pair_summary(history_dpath, stamp, right, run_spec_name)
+        dist_fig_fpath = _plot_pair_metric_distributions(history_dpath, stamp, [right], run_spec_name)
         three_run_dist_fpath = None
-        overlay_dist_fpath = None
-        ecdf_fig_fpath = None
-        per_metric_agree_fpath = None
-        runlevel_csv_fpath = None
-        runlevel_md_fpath = None
+        overlay_dist_fpath = _plot_run_metric_distributions(
+            history_dpath,
+            stamp,
+            [
+                (args.left_run_a, 'kwdagger A'),
+                (args.right_run_a, 'official'),
+            ],
+            run_spec_name,
+            out_name='core_metric_overlay_distributions',
+            title='Overlay of Per-Instance Core Metric Score Distributions by Run',
+            subtitle='Single-run mode: only the available local kwdagger run is compared against the official HELM run.',
+        )
+        ecdf_fig_fpath = _plot_run_metric_distributions(
+            history_dpath,
+            stamp,
+            [
+                (args.left_run_a, 'kwdagger A'),
+                (args.right_run_a, 'official'),
+            ],
+            run_spec_name,
+            out_name='core_metric_ecdfs',
+            title='ECDF of Per-Instance Core Metric Scores by Run',
+            subtitle='Single-run mode: only the available local kwdagger run is compared against the official HELM run.',
+            ecdf=True,
+        )
+        per_metric_agree_fpath = _plot_per_metric_agreement(
+            history_dpath,
+            stamp,
+            right,
+            level_key='instance_level',
+            thresholds=thresholds,
+        )
+        runlevel_csv_fpath, runlevel_md_fpath = _write_two_run_runlevel_table(
+            history_dpath,
+            stamp,
+            args.left_run_a,
+            args.right_run_a,
+        )
     else:
         fig_fpath = history_dpath / f'core_metric_report_{stamp}.png'
         dist_fig_fpath = _plot_metric_distributions(history_dpath, stamp, left, right, run_spec_name)
