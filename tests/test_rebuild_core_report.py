@@ -66,6 +66,7 @@ def test_single_run_core_report_writes_manifests_and_cleans_repeat_artifacts(tmp
     (stale_components_dir / "old-repeat.run").symlink_to(local_run)
     (report_dir / "kwdagger_b.run").symlink_to(local_run)
     (report_dir / "instance_samples_local_repeat.latest.txt").write_text("stale\n")
+    (report_dir / "instance_samples_official_vs_kwdagger.latest.txt").write_text("stale\n")
     (report_dir / "core_metric_three_run_distributions.latest.png").write_text("stale\n")
 
     index_fpath = tmp_path / "index.csv"
@@ -112,11 +113,14 @@ def test_single_run_core_report_writes_manifests_and_cleans_repeat_artifacts(tmp
     assert {component["source_kind"] for component in components} == {"local", "official"}
     assert [comparison["comparison_kind"] for comparison in comparisons] == ["official_vs_local"]
     assert all(component["component_id"] != "kwdagger_b" for component in components)
+    assert all("reference" not in component["tags"] for component in components)
+    assert comparisons[0]["reference_component_id"] in comparisons[0]["component_ids"]
 
     component_links = sorted(path.name for path in (report_dir / "components").glob("*.run"))
     assert len(component_links) == 2
     assert not (report_dir / "kwdagger_b.run").exists()
     assert not (report_dir / "instance_samples_local_repeat.latest.txt").exists()
+    assert not (report_dir / "instance_samples_official_vs_kwdagger.latest.txt").exists()
     assert not (report_dir / "core_metric_three_run_distributions.latest.png").exists()
 
     assert len(core_metric_calls) == 1
@@ -184,6 +188,7 @@ def test_multi_run_core_report_writes_multiple_local_components_and_both_compari
     local_components = [component for component in components if component["source_kind"] == "local"]
     assert len(local_components) == 2
     assert any("repeat" in component["tags"] for component in local_components)
+    assert all("reference" not in component["tags"] for component in components)
     assert {comparison["comparison_kind"] for comparison in comparisons} == {"official_vs_local", "local_repeat"}
 
     comparison_ids = {comparison["comparison_id"]: comparison for comparison in comparisons}

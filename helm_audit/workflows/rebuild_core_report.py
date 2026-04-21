@@ -183,12 +183,10 @@ def _component_display_name(source_kind: str, index: int, run_path: str) -> str:
     return f"local {index}: {base}"
 
 
-def _build_local_component(row: dict[str, Any], index: int, used_ids: set[str], *, is_reference: bool, is_repeat: bool) -> dict[str, Any]:
+def _build_local_component(row: dict[str, Any], index: int, used_ids: set[str], *, is_repeat: bool) -> dict[str, Any]:
     run_path = str(Path(row["run_dir"]).expanduser().resolve())
     attempt_ref = _attempt_ref(row)
     tags = ["local"]
-    if is_reference:
-        tags.append("reference")
     if is_repeat:
         tags.append("repeat")
     component_id = _allocate_component_id(
@@ -224,7 +222,7 @@ def _build_official_component(
 ) -> dict[str, Any]:
     run_path = str(Path(run_path).expanduser().resolve())
     component_id = _allocate_component_id(used_ids, "official", run_path)
-    tags = ["official", "reference"]
+    tags = ["official"]
     return {
         "component_id": component_id,
         "run_path": run_path,
@@ -302,9 +300,8 @@ def _cleanup_legacy_report_surfaces(report_dpath: Path, comparison_ids: list[str
     ]:
         safe_unlink(report_dpath / name)
     keep_names = {f"instance_samples_{slugify_identifier(comparison_id)}.latest.txt" for comparison_id in comparison_ids}
-    keep_names.add("instance_samples_official_vs_kwdagger.latest.txt")
     for path in report_dpath.glob("instance_samples_*.latest.txt"):
-        if path.name not in keep_names and "official_vs_kwdagger" not in path.name:
+        if path.name not in keep_names:
             safe_unlink(path)
 
 
@@ -379,7 +376,6 @@ def main(argv: list[str] | None = None) -> None:
                     row,
                     index,
                     used_ids,
-                    is_reference=(index == 1),
                     is_repeat=(index > 1),
                 )
             )

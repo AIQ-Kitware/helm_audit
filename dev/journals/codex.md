@@ -236,6 +236,23 @@ Design takeaways:
 2. Single-run support is mostly a modeling problem, not a plotting problem: if the comparisons manifest omits repeatability, the rest of the cleanup becomes straightforward.
 3. Convenience symlinks are fine, but only after the manifests have already answered “what is in this packet?” and “what claims is this packet making?”
 
+## 2026-04-21 23:07:29 +0000
+
+Summary of user intent: tighten the recent core-report manifest refactor without redesigning it by removing the remaining semantic duplication around `reference`, deleting old `official_vs_kwdagger` cleanup residue, and making diagnostics depend on manifest semantics rather than component ordering.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This cleanup pass is small but important because it decides whether the new manifests are merely present or actually authoritative. The remaining `reference` tags on components were a semantic leak from the old structure: once `reference_component_id` exists on each comparison, having components also claim to be “reference” creates a second channel that can drift. The right move here is subtraction, not a new abstraction. Components should describe what they are globally (`official`, `local`, `repeat`), while comparisons describe the claim being made and which component is the reference inside that claim.
+
+The diagnostics change follows the same principle. The previous official-vs-local pathology check still smuggled in ordering assumptions by effectively asking whether the first component in the comparison happened to be official. That is exactly the kind of hidden semantics the manifest refactor is supposed to eliminate. The more durable pattern is: identify the relevant comparison by `comparison_kind`, use `reference_component_id` as the declared comparison-level anchor, and use `source_kind` to determine which selected component is official or local. This is slightly more explicit in code, but it is also much easier to trust when someone edits the manifest by hand or changes component ordering later.
+
+I also removed the legacy `official_vs_kwdagger` sample-artifact preservation from the core-report cleanup path. That residue would have kept teaching maintainers that the old names still matter inside the new packet layer. For this slice, it is better for the report directory to be honestly aligned with the new manifest comparison ids, even if some later-stage code elsewhere in the repo still expects older names and will need its own refactor later.
+
+Design takeaways:
+1. If a manifest field already expresses a concept precisely, delete any weaker duplicate channel instead of trying to keep them “consistent.”
+2. Ordering should never stand in for semantics once the data model contains the semantic fields directly.
+3. Cleaning up old filenames matters because directory surfaces teach future maintainers what the real model is.
+
 ## 2026-04-21 00:18:44 +0000
 
 Summary of user intent: make a narrow presentation-layer fix in `helm_audit/workflows/build_reports_summary.py` so aggregate-summary plots keep full data and full HTML labels, but static JPG/PNG exports become bounded, slide-usable, and more readable for categorical axes without truncating categories or redesigning the report set.

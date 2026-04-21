@@ -178,23 +178,47 @@ def _diagnostic_flags(
     )
     if official_vs_local is not None:
         component_ids = official_vs_local.get('component_ids') or []
-        if len(component_ids) == 2:
-            left_component = component_lookup.get(component_ids[0], {})
-            right_component = component_lookup.get(component_ids[1], {})
-            left_diag = run_diagnostics.get(component_ids[0], {})
-            right_diag = run_diagnostics.get(component_ids[1], {})
-            left_rate = left_diag.get('empty_completion_rate')
-            right_rate = right_diag.get('empty_completion_rate')
-            if (
-                left_component.get('source_kind') == 'official'
-                and left_rate is not None
-                and right_rate is not None
-                and left_rate < 0.01
-                and right_rate > 0.1
-            ):
-                flags.append(
-                    f"{official_vs_local['comparison_id']}:empty_completion_pathology"
-                )
+        comparison_components = [
+            component_lookup.get(component_id, {})
+            for component_id in component_ids
+        ]
+        reference_component = component_lookup.get(
+            official_vs_local.get('reference_component_id'),
+            {},
+        )
+        official_component = next(
+            (component for component in comparison_components if component.get('source_kind') == 'official'),
+            None,
+        )
+        local_component = next(
+            (component for component in comparison_components if component.get('source_kind') == 'local'),
+            None,
+        )
+        if reference_component and reference_component.get('source_kind') == 'official':
+            official_component = reference_component
+        elif reference_component and reference_component.get('source_kind') == 'local':
+            local_component = reference_component
+        official_diag = (
+            run_diagnostics.get(official_component.get('component_id'), {})
+            if official_component is not None else {}
+        )
+        local_diag = (
+            run_diagnostics.get(local_component.get('component_id'), {})
+            if local_component is not None else {}
+        )
+        official_rate = official_diag.get('empty_completion_rate')
+        local_rate = local_diag.get('empty_completion_rate')
+        if (
+            official_component is not None
+            and local_component is not None
+            and official_rate is not None
+            and local_rate is not None
+            and official_rate < 0.01
+            and local_rate > 0.1
+        ):
+            flags.append(
+                f"{official_vs_local['comparison_id']}:empty_completion_pathology"
+            )
     return flags
 
 

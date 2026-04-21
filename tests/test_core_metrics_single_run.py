@@ -44,7 +44,7 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
                 "run_path": str(local_run),
                 "job_path": None,
                 "source_kind": "local",
-                "tags": ["local", "reference"],
+                "tags": ["local"],
                 "display_name": "local 1: local-run",
                 "attempt_uuid": "attempt-a",
                 "attempt_identity": "attempt-a",
@@ -57,7 +57,7 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
                 "run_path": str(official_run),
                 "job_path": None,
                 "source_kind": "official",
-                "tags": ["official", "reference"],
+                "tags": ["official"],
                 "display_name": "official: official-run",
                 "attempt_uuid": None,
                 "attempt_identity": None,
@@ -171,3 +171,41 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
     assert "selected_components:" in text
     assert "comparisons:" in text
     assert "comparability:" in text
+
+
+def test_diagnostic_flags_use_manifest_semantics_not_component_order():
+    components = [
+        {
+            "component_id": "local-attempt-a",
+            "source_kind": "local",
+            "tags": ["local"],
+        },
+        {
+            "component_id": "official-run",
+            "source_kind": "official",
+            "tags": ["official"],
+        },
+    ]
+    comparisons = [
+        {
+            "comparison_id": "official_vs_local",
+            "comparison_kind": "official_vs_local",
+            "component_ids": ["local-attempt-a", "official-run"],
+            "enabled": True,
+            "reference_component_id": "official-run",
+        }
+    ]
+    run_diagnostics = {
+        "local-attempt-a": {
+            "empty_completion_rate": 0.3,
+            "output_token_count": {"mean": 3.0},
+        },
+        "official-run": {
+            "empty_completion_rate": 0.0,
+            "output_token_count": {"mean": 3.0},
+        },
+    }
+
+    flags = core_metrics._diagnostic_flags(run_diagnostics, components, comparisons)
+
+    assert "official_vs_local:empty_completion_pathology" in flags
