@@ -823,6 +823,62 @@ def _write_table_artifacts(
     return {"json": str(json_fpath), "csv": str(csv_fpath), "txt": str(txt_fpath)}
 
 
+_AXIS_COUNT_TAGS = {
+    "benchmark": "n_benchmarks",
+    "model": "n_models",
+    "dataset": "n_datasets",
+    "scenario": "n_scenarios",
+    "official_instance_agree_bucket": "n_buckets",
+    "agreement_bucket": "n_buckets",
+    "failure_reason": "n_failure_reasons",
+    "category": "n_categories",
+    "group_value": "n_categories",
+}
+
+
+def _ordered_unique_values(rows: list[dict[str, Any]], key: str) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        value = str(row.get(key) or "unknown")
+        if value not in seen:
+            seen.add(value)
+            values.append(value)
+    return values
+
+
+def _abbreviate_label(text: str, *, max_chars: int = 24) -> str:
+    if len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return "." * max_chars
+    return text[: max_chars - 3].rstrip() + "..."
+
+
+def _bar_count_label(axis_key: str, n_bars: int, *, axis_title: str | None = None) -> str:
+    label = axis_title if axis_title is not None else axis_key.replace("_", " ").title()
+    count_tag = _AXIS_COUNT_TAGS.get(axis_key, "n_categories")
+    return f"{label} ({count_tag}={n_bars}, n_bars={n_bars})"
+
+
+def _bar_tickangle(n_bars: int) -> int:
+    if n_bars > 50:
+        return 90
+    if n_bars > 25:
+        return 75
+    if n_bars > 12:
+        return 60
+    return -45
+
+
+def _compact_bar_figure_size(unique_x: list[str]) -> tuple[int, int]:
+    longest_label = max((len(value) for value in unique_x), default=0)
+    n_bars = max(len(unique_x), 1)
+    width = min(max(1100, 36 * n_bars, 14 * longest_label * n_bars), 1600)
+    height = min(max(520, 14 * n_bars + 240), 1000)
+    return width, height
+
+
 def _write_plotly_bar(
     *,
     rows: list[dict[str, Any]],
@@ -836,6 +892,7 @@ def _write_plotly_bar(
     static_dpath: Path | None = None,
     xaxis_title: str | None = None,
     yaxis_title: str | None = None,
+    xaxis_count_key: str | None = None,
 ) -> dict[str, str | None]:
     if machine_dpath is not None:
         machine_dpath.mkdir(parents=True, exist_ok=True)
@@ -854,52 +911,85 @@ def _write_plotly_bar(
     jpg_out = None
     png_out = None
     plotly_error = None
+    unique_x = _ordered_unique_values(rows, x)
+    color_values = _ordered_unique_values(rows, color)
+    count_label = _bar_count_label(xaxis_count_key or x, len(unique_x), axis_title=xaxis_title)
     if os.environ.get("HELM_AUDIT_SKIP_PLOTLY", "") not in {"1", "true", "yes"}:
         try:
             configure_plotly_chrome()
             import plotly.express as px
 
-            fig = px.bar(rows, x=x, y=y, color=color, title=title, barmode="stack")
+            fig = px.bar(
+                rows,
+                x=x,
+                y=y,
+                color=color,
+                title=title,
+                barmode="stack",
+                category_orders={x: unique_x, color: color_values},
+            )
             fig.update_layout(
-                xaxis_title=xaxis_title if xaxis_title is not None else x.replace("_", " "),
+                xaxis_title=count_label,
                 yaxis_title=yaxis_title if yaxis_title is not None else y.replace("_", " "),
+            )
+            fig.update_xaxes(
+                categoryorder="array",
+                categoryarray=unique_x,
+                tickmode="array",
+                tickvals=unique_x,
+                ticktext=unique_x,
+                tickangle=-45,
+                automargin=True,
             )
             fig.write_html(str(html_fpath), include_plotlyjs="cdn")
             html_out = str(html_fpath)
             if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
-                fig.write_image(str(jpg_fpath), scale=2.0)
+                static_width, static_height = _compact_bar_figure_size(unique_x)
+                fig.update_layout(width=static_width, height=static_height, margin={"b": min(max(120, 8 * max((len(v) for v in unique_x), default=0)), 220), "t": 80, "l": 70, "r": 30})
+                fig.update_xaxes(
+                    ticktext=[_abbreviate_label(value) for value in unique_x],
+                    tickangle=_bar_tickangle(len(unique_x)),
+                    tickfont={"size": 8 if len(unique_x) > 12 else 10},
+                )
+                fig.write_image(str(jpg_fpath), scale=1.0)
                 jpg_out = str(jpg_fpath)
         except Exception as ex:
             plotly_error = f"unable to write bar HTML/images: {ex!r}"
     else:
         plotly_error = "skipped plotly bar rendering by configuration"
-    try:
-        import matplotlib.pyplot as plt
+    if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
+        try:
+            import matplotlib.pyplot as plt
 
-        if rows:
-            x_values = sorted({str(row.get(x, "")) for row in rows})
-            color_values = sorted({str(row.get(color, "")) for row in rows})
-            counts = {(str(row.get(x, "")), str(row.get(color, ""))): float(row.get(y, 0) or 0) for row in rows}
-            bottoms = [0.0 for _ in x_values]
-            fig, ax = plt.subplots(figsize=(12, 6))
-            for color_value in color_values:
-                vals = [counts.get((xv, color_value), 0.0) for xv in x_values]
-                ax.bar(x_values, vals, bottom=bottoms, label=color_value)
-                bottoms = [a + b for a, b in zip(bottoms, vals)]
-            ax.set_title(title)
-            ax.set_xlabel(x.replace("_", " "))
-            ax.set_ylabel(y.replace("_", " "))
-            ax.tick_params(axis="x", rotation=45)
-            ax.legend(fontsize=8)
-            fig.tight_layout()
-            fig.savefig(png_fpath, dpi=200)
-            png_out = str(png_fpath)
-            if jpg_out is None:
-                fig.savefig(jpg_fpath, dpi=200)
-                jpg_out = str(jpg_fpath)
-            plt.close(fig)
-    except Exception:
-        pass
+            if rows:
+                x_values = unique_x
+                counts = {(str(row.get(x, "")), str(row.get(color, ""))): float(row.get(y, 0) or 0) for row in rows}
+                bottoms = [0.0 for _ in x_values]
+                width_px, height_px = _compact_bar_figure_size(unique_x)
+                dpi = 120
+                fig, ax = plt.subplots(figsize=(width_px / dpi, height_px / dpi), dpi=dpi)
+                positions = list(range(len(x_values)))
+                for color_value in color_values:
+                    vals = [counts.get((xv, color_value), 0.0) for xv in x_values]
+                    ax.bar(positions, vals, bottom=bottoms, label=color_value)
+                    bottoms = [a + b for a, b in zip(bottoms, vals)]
+                ax.set_title(title)
+                ax.set_xlabel(count_label)
+                ax.set_ylabel(y.replace("_", " "))
+                ax.tick_params(axis="x", rotation=_bar_tickangle(len(x_values)))
+                if x_values:
+                    ax.set_xticks(positions)
+                    ax.set_xticklabels([_abbreviate_label(value) for value in x_values], fontsize=8 if len(x_values) > 12 else 10)
+                ax.legend(fontsize=8)
+                fig.tight_layout()
+                fig.savefig(png_fpath, dpi=dpi)
+                png_out = str(png_fpath)
+                if jpg_out is None:
+                    fig.savefig(jpg_fpath, dpi=dpi)
+                    jpg_out = str(jpg_fpath)
+                plt.close(fig)
+        except Exception:
+            pass
     return {
         "json": str(json_fpath),
         "html": html_out,
@@ -1488,7 +1578,9 @@ def _write_agreement_curve_plot(
             fig.write_html(str(html_fpath), include_plotlyjs="cdn")
             html_out = str(html_fpath)
             if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
-                fig.write_image(str(jpg_fpath), scale=2.0)
+                static_width = min(max(1100, 80 * max(len(benchmarks), 1)), 1600)
+                static_height = 760
+                fig.write_image(str(jpg_fpath), width=static_width, height=static_height, scale=1.0)
                 jpg_out = str(jpg_fpath)
         except Exception as ex:
             plotly_error = f"unable to write agreement curve: {ex!r}"
@@ -1640,7 +1732,9 @@ def _write_per_metric_agreement_plot(
             fig.write_html(str(html_fpath), include_plotlyjs="cdn")
             html_out = str(html_fpath)
             if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
-                fig.write_image(str(jpg_fpath), scale=2.0)
+                static_width = min(max(1100, 420 * n_cols), 1600)
+                static_height = min(max(520, 320 * n_rows), 1200)
+                fig.write_image(str(jpg_fpath), width=static_width, height=static_height, scale=1.0)
                 jpg_out = str(jpg_fpath)
         except Exception as ex:
             plotly_error = f"unable to write per-metric agreement: {ex!r}"
@@ -1807,7 +1901,25 @@ def _write_coverage_matrix_plot(
             fig.write_html(str(html_fpath), include_plotlyjs="cdn")
             html_out = str(html_fpath)
             if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
-                fig.write_image(str(jpg_fpath), scale=2.0)
+                static_benchmark_labels = [_abbreviate_label(value) for value in benchmarks]
+                static_model_labels = [_abbreviate_label(value) for value in models]
+                benchmark_angle = 90 if len(benchmarks) > 40 else 75 if len(benchmarks) > 25 else 60 if len(benchmarks) > 12 else -45
+                fig.update_xaxes(
+                    tickmode="array",
+                    tickvals=benchmarks,
+                    ticktext=static_benchmark_labels,
+                    tickangle=benchmark_angle,
+                    automargin=True,
+                )
+                fig.update_yaxes(
+                    tickmode="array",
+                    tickvals=models,
+                    ticktext=static_model_labels,
+                    automargin=True,
+                )
+                static_width = min(max(1100, 22 * max(len(benchmarks), 1) + 12 * max((len(label) for label in benchmarks), default=0)), 1800)
+                static_height = min(max(520, 18 * max(len(models), 1) + 220), 1200)
+                fig.write_image(str(jpg_fpath), width=static_width, height=static_height, scale=1.0)
                 jpg_out = str(jpg_fpath)
         except Exception as ex:
             plotly_error = f"unable to write coverage matrix: {ex!r}"
@@ -1859,6 +1971,7 @@ def _write_failure_taxonomy_plot(
     html_out = None
     jpg_out = None
     plotly_error = None
+    count_label = _bar_count_label("benchmark", len(bench_order), axis_title="Benchmark")
     if os.environ.get("HELM_AUDIT_SKIP_PLOTLY", "") in {"1", "true", "yes"}:
         plotly_error = "skipped by configuration"
     elif not bar_rows:
@@ -1891,14 +2004,28 @@ def _write_failure_taxonomy_plot(
             fig.update_layout(
                 title=title,
                 barmode="stack",
-                xaxis={"title": "Benchmark", "tickangle": -45, "categoryorder": "array", "categoryarray": bench_order},
+                xaxis={"title": count_label, "tickangle": -45, "categoryorder": "array", "categoryarray": bench_order},
                 yaxis={"title": "Failed Job Count"},
                 legend={"title": "Root Cause Category"},
+            )
+            fig.update_xaxes(
+                tickmode="array",
+                tickvals=bench_order,
+                ticktext=bench_order,
+                tickangle=-45,
+                automargin=True,
             )
             fig.write_html(str(html_fpath), include_plotlyjs="cdn")
             html_out = str(html_fpath)
             if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
-                fig.write_image(str(jpg_fpath), scale=2.0)
+                static_width, static_height = _compact_bar_figure_size(bench_order)
+                fig.update_layout(width=static_width, height=static_height, margin={"b": min(max(120, 8 * max((len(v) for v in bench_order), default=0)), 220), "t": 80, "l": 70, "r": 30})
+                fig.update_xaxes(
+                    ticktext=[_abbreviate_label(value) for value in bench_order],
+                    tickangle=_bar_tickangle(len(bench_order)),
+                    tickfont={"size": 8 if len(bench_order) > 12 else 10},
+                )
+                fig.write_image(str(jpg_fpath), scale=1.0)
                 jpg_out = str(jpg_fpath)
         except Exception as ex:
             plotly_error = f"unable to write failure taxonomy: {ex!r}"
@@ -2420,6 +2547,7 @@ def _render_scope_summary(
             interactive_dpath=level_001_interactive,
             static_dpath=level_001_static,
             xaxis_title="Benchmark",
+            xaxis_count_key="benchmark",
             yaxis_title="Job Count",
         )
         repro_bucket_plot = _write_plotly_bar(
@@ -2432,7 +2560,8 @@ def _render_scope_summary(
             machine_dpath=level_001_machine,
             interactive_dpath=level_001_interactive,
             static_dpath=level_001_static,
-            xaxis_title="Agreement Bucket (fraction of instances with |official - local| == 0)",
+            xaxis_title="Agreement Bucket",
+            xaxis_count_key="official_instance_agree_bucket",
             yaxis_title="Run Count",
         )
         agreement_curve_plot = _write_agreement_curve_plot(
@@ -2481,6 +2610,7 @@ def _render_scope_summary(
             interactive_dpath=level_001_interactive,
             static_dpath=level_001_static,
             xaxis_title="Model",
+            xaxis_count_key="model",
             yaxis_title="Run Spec Count",
         )
     else:

@@ -219,6 +219,23 @@ Design takeaways:
 2. If reports remain browsable in-repo while indexes and manifests move out, the path defaults must be updated together or operators will fall into mismatched partial migrations.
 3. Documentation drift is often a boundary-design smell: when prose and CLI shape disagree, the storage model is usually muddier than it first appears.
 
+## 2026-04-21 00:18:44 +0000
+
+Summary of user intent: make a narrow presentation-layer fix in `helm_audit/workflows/build_reports_summary.py` so aggregate-summary plots keep full data and full HTML labels, but static JPG/PNG exports become bounded, slide-usable, and more readable for categorical axes without truncating categories or redesigning the report set.
+
+Model and configuration: GPT-5.4, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+I’ve been tracing the aggregate-summary rendering path against the newer filter-analysis helpers and the mismatch is exactly what the user suspected: the summary workflow still treats HTML and static export as mostly the same figure, which leaves the static outputs oversized and the categorical axes too literal. The right fix is not to reshape the data or invent new plots. It is to split the presentation contract inside the existing helper functions so HTML stays richly inspectable while static exports become deliberately compact.
+
+The main tradeoff I am keeping in mind is that this should remain a pure presentation change. That means no top-K, no dropping categories, no new artifact families, and no semantic changes to the plotted measures. The risk is overfitting the static layout logic and accidentally making HTML less useful, so I’m being careful to keep the richer labels and the full category set in the interactive path while only abbreviating tick labels and bounding dimensions for static exports. The filter-analysis implementation gives a good template for that separation, but I’m grounding the changes in the current aggregate-summary helpers rather than copying code wholesale.
+
+What I’m confident about so far: the update can stay in one file, the key bar-chart writers are centralized enough to benefit from shared helpers, and the heatmap/curve plots can be bounded with static-only sizing without altering the underlying rows. The only thing I’m still watching is keeping the categorical axis count metadata semantically clear for the different plot families, especially where the x field name is generic like `group_value` but the business meaning is still “benchmark.”
+
+Design takeaways:
+1. Rendering contracts get clearer when the figure data and the export layout are treated as separate concerns.
+2. Static readability fixes should prefer display-only abbreviations and bounded dimensions over any data reduction.
+3. A narrow helper layer inside the existing workflow is usually enough when the report family is already centralized.
+
 ## 2026-04-20 23:50:15 +0000
 
 Summary of user intent: keep `helm_audit/reports/filter_analysis.py` plotting the full canonical data while making static PNG exports slide-friendly by separating HTML fidelity from PNG compactness, without reintroducing truncation or new artifact families.
