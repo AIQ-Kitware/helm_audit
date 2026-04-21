@@ -27,7 +27,7 @@ from helm_audit.cli.index_historic_helm_runs import (
     _normalize_for_hash,
     _scan_benchmark_output_dir,
 )
-from helm_audit.workflows.analyze_official_index import analyze_official_index
+from helm_audit.workflows.analyze_index_snapshot import analyze_index_snapshot
 
 
 # ---------------------------------------------------------------------------
@@ -269,18 +269,18 @@ def test_scan_missing_runs_dir(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Part 4 — analyze_official_index: required artifacts and correctness
+# Part 4 — analyze_index_snapshot: required artifacts and correctness
 # ---------------------------------------------------------------------------
 
 REQUIRED_ARTIFACTS = [
-    'official_index_summary.latest.txt',
-    'official_index_summary.latest.json',
-    'official_index_by_track.latest.csv',
-    'official_index_by_suite_version.latest.csv',
-    'official_index_by_model.latest.csv',
-    'official_index_by_benchmark.latest.csv',
-    'official_index_duplicates_by_run_name.latest.csv',
-    'official_index_version_drift.latest.csv',
+    'index_snapshot_summary.latest.txt',
+    'index_snapshot_summary.latest.json',
+    'index_snapshot_by_track.latest.csv',
+    'index_snapshot_by_suite_version.latest.csv',
+    'index_snapshot_by_model.latest.csv',
+    'index_snapshot_by_benchmark.latest.csv',
+    'index_snapshot_duplicates_by_run_name.latest.csv',
+    'index_snapshot_version_drift.latest.csv',
 ]
 
 
@@ -314,7 +314,7 @@ def _make_analysis_index(tmp_path: Path) -> Path:
 def test_analysis_produces_all_required_artifacts(tmp_path):
     index_fpath = _make_analysis_index(tmp_path)
     out_dpath = tmp_path / 'analysis'
-    analyze_official_index(index_fpath=index_fpath, out_dpath=out_dpath)
+    analyze_index_snapshot(index_fpath=index_fpath, out_dpath=out_dpath)
     for artifact in REQUIRED_ARTIFACTS:
         assert (out_dpath / artifact).exists(), f'Missing: {artifact}'
 
@@ -322,7 +322,7 @@ def test_analysis_produces_all_required_artifacts(tmp_path):
 def test_analysis_summary_counts(tmp_path):
     index_fpath = _make_analysis_index(tmp_path)
     out_dpath = tmp_path / 'analysis'
-    summary = analyze_official_index(index_fpath=index_fpath, out_dpath=out_dpath)
+    summary = analyze_index_snapshot(index_fpath=index_fpath, out_dpath=out_dpath)
 
     assert summary['total_rows'] == 6
     assert summary['n_benchmark_runs'] == 5
@@ -346,9 +346,9 @@ def test_duplicates_report_multi_version_runs(tmp_path):
     _write_index(rows, index_fpath)
 
     out_dpath = tmp_path / 'analysis'
-    analyze_official_index(index_fpath=index_fpath, out_dpath=out_dpath)
+    analyze_index_snapshot(index_fpath=index_fpath, out_dpath=out_dpath)
 
-    dups = pd.read_csv(out_dpath / 'official_index_duplicates_by_run_name.latest.csv')
+    dups = pd.read_csv(out_dpath / 'index_snapshot_duplicates_by_run_name.latest.csv')
     assert len(dups) == 1
     row = dups.iloc[0]
     assert row['run_name'] == 'boolq:model=foo'
@@ -362,9 +362,9 @@ def test_duplicates_report_excludes_single_occurrence_runs(tmp_path):
     _write_index(rows, index_fpath)
 
     out_dpath = tmp_path / 'analysis'
-    analyze_official_index(index_fpath=index_fpath, out_dpath=out_dpath)
+    analyze_index_snapshot(index_fpath=index_fpath, out_dpath=out_dpath)
 
-    dups = pd.read_csv(out_dpath / 'official_index_duplicates_by_run_name.latest.csv')
+    dups = pd.read_csv(out_dpath / 'index_snapshot_duplicates_by_run_name.latest.csv')
     assert len(dups) == 0
 
 
@@ -383,9 +383,9 @@ def test_version_drift_detects_hash_differences(tmp_path):
     _write_index(rows, index_fpath)
 
     out_dpath = tmp_path / 'analysis'
-    analyze_official_index(index_fpath=index_fpath, out_dpath=out_dpath)
+    analyze_index_snapshot(index_fpath=index_fpath, out_dpath=out_dpath)
 
-    drift = pd.read_csv(out_dpath / 'official_index_version_drift.latest.csv')
+    drift = pd.read_csv(out_dpath / 'index_snapshot_version_drift.latest.csv')
     assert len(drift) == 1
     assert drift.iloc[0]['run_name'] == 'boolq:model=foo'
     assert int(drift.iloc[0]['n_distinct_hashes']) == 2
@@ -400,9 +400,9 @@ def test_version_drift_empty_when_no_drift(tmp_path):
     _write_index(rows, index_fpath)
 
     out_dpath = tmp_path / 'analysis'
-    analyze_official_index(index_fpath=index_fpath, out_dpath=out_dpath)
+    analyze_index_snapshot(index_fpath=index_fpath, out_dpath=out_dpath)
 
-    drift = pd.read_csv(out_dpath / 'official_index_version_drift.latest.csv')
+    drift = pd.read_csv(out_dpath / 'index_snapshot_version_drift.latest.csv')
     assert len(drift) == 0
 
 
@@ -415,9 +415,9 @@ def test_version_drift_ignores_rows_without_hash(tmp_path):
     _write_index(rows, index_fpath)
 
     out_dpath = tmp_path / 'analysis'
-    analyze_official_index(index_fpath=index_fpath, out_dpath=out_dpath)
+    analyze_index_snapshot(index_fpath=index_fpath, out_dpath=out_dpath)
 
-    drift = pd.read_csv(out_dpath / 'official_index_version_drift.latest.csv')
+    drift = pd.read_csv(out_dpath / 'index_snapshot_version_drift.latest.csv')
     assert len(drift) == 0
 
 
@@ -435,10 +435,83 @@ def test_dedup_views_in_summary(tmp_path):
     _write_index(rows, index_fpath)
 
     out_dpath = tmp_path / 'analysis'
-    summary = analyze_official_index(index_fpath=index_fpath, out_dpath=out_dpath)
+    summary = analyze_index_snapshot(index_fpath=index_fpath, out_dpath=out_dpath)
 
     dv = summary['dedup_views']
     assert dv['raw_benchmark_run_rows'] == 3
     assert dv['distinct_run_name'] == 2          # boolq and mmlu
     assert dv['distinct_run_name_x_track'] == 2  # both in 'main' track
     assert dv['distinct_run_spec_hash'] == 3     # h1, h2, h3 are all distinct
+
+
+# ---------------------------------------------------------------------------
+# Part 8 — graceful degradation when optional columns are absent
+# ---------------------------------------------------------------------------
+
+def _minimal_row(run_name: str, model: str = 'foo') -> dict:
+    """Minimal row with only run_name and model — no provenance columns."""
+    return {
+        'run_name': run_name,
+        'model': model,
+        'benchmark_group': run_name.split(':')[0],
+        'scenario_class': 'TestScenario',
+    }
+
+
+def test_analysis_degrades_without_suite_version_and_track(tmp_path):
+    """Index with no suite_version or public_track should still produce all 8 artifacts."""
+    rows = [
+        _minimal_row('boolq:model=foo'),
+        _minimal_row('boolq:model=foo'),  # duplicate run_name
+        _minimal_row('mmlu:model=bar'),
+    ]
+    df = pd.DataFrame(rows)
+    index_fpath = tmp_path / 'minimal.csv'
+    df.to_csv(index_fpath, index=False)
+
+    out_dpath = tmp_path / 'analysis'
+    summary = analyze_index_snapshot(index_fpath=index_fpath, out_dpath=out_dpath)
+
+    for artifact in REQUIRED_ARTIFACTS:
+        assert (out_dpath / artifact).exists(), f'Missing: {artifact}'
+
+    assert summary['has_suite_version'] is False
+    assert summary['has_public_track'] is False
+    assert summary['n_tracks'] == 0
+    assert summary['n_suite_versions'] == 0
+    assert summary['distinct_run_names'] == 2
+    assert summary['n_benchmark_runs'] == 3
+
+    # Drift report should be empty (no run_spec_hash column)
+    drift = pd.read_csv(out_dpath / 'index_snapshot_version_drift.latest.csv')
+    assert len(drift) == 0
+
+    # Summary text should mention absent columns
+    txt = (out_dpath / 'index_snapshot_summary.latest.txt').read_text()
+    assert 'no suite_version' in txt
+    assert 'no public_track' in txt or 'no run_spec_hash' in txt
+
+
+def test_analysis_degrades_without_run_spec_hash(tmp_path):
+    """Index with suite_version/track but no run_spec_hash: drift report is empty."""
+    rows = [
+        {**_minimal_row('boolq:model=foo'), 'suite_version': 'v0.2.2', 'public_track': 'main'},
+        {**_minimal_row('boolq:model=foo'), 'suite_version': 'v0.3.0', 'public_track': 'main'},
+    ]
+    df = pd.DataFrame(rows)
+    index_fpath = tmp_path / 'idx.csv'
+    df.to_csv(index_fpath, index=False)
+
+    out_dpath = tmp_path / 'analysis'
+    summary = analyze_index_snapshot(index_fpath=index_fpath, out_dpath=out_dpath)
+
+    assert summary['has_run_spec_hash'] is False
+    assert summary['n_run_names_with_hash_drift'] == 0
+
+    drift = pd.read_csv(out_dpath / 'index_snapshot_version_drift.latest.csv')
+    assert len(drift) == 0
+
+    # But duplicate detection still works from suite_version
+    dups = pd.read_csv(out_dpath / 'index_snapshot_duplicates_by_run_name.latest.csv')
+    assert len(dups) == 1
+    assert int(dups.iloc[0]['n_suite_versions']) == 2

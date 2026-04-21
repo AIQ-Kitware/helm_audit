@@ -59,9 +59,14 @@ def official_public_index_dpath() -> Path:
     return generated_indexes_root()
 
 
+def index_snapshot_analysis_dpath() -> Path:
+    """Default output directory for index-snapshot analysis artifacts."""
+    return audit_store_root() / "analysis" / "index-snapshot"
+
+
 def official_public_analysis_dpath() -> Path:
-    """Directory for official/public index analysis outputs."""
-    return audit_store_root() / "analysis" / "official-public-index"
+    """Backwards-compat alias for index_snapshot_analysis_dpath()."""
+    return index_snapshot_analysis_dpath()
 
 
 def paper_label_config_fpath() -> Path:
