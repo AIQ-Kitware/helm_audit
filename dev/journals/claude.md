@@ -378,3 +378,43 @@ Using `components_manifest.latest.json` in the render script (rather than the ti
 `test_rebuild_core_report.py`: both test functions assert `--render-pairwise-interactives` absent from `core_metrics.main()` calls by default; assert `render_pairwise_interactives.latest.sh` written; assert script content contains flag and canonical manifest names. Two new tests cover the explicit selection mechanism.
 
 6 tests, all passing.
+
+## 2026-04-22 00:30:00 +0000
+
+User intent: Refine the "heavy pairwise plots on demand" patch from the same session. Two problems: (1) the script name said "interactives" but no Plotly/HTML was generated — only heavy PNG plots; (2) the candidate-of-interest selection hook keyed on `comparison_kind`, which is too coarse (enabling `official_vs_local` would silently re-enable heavy rendering for most reports).
+
+Model and configuration: claude-sonnet-4-6, Claude Code CLI.
+
+**Rename: interactives → heavy_pairwise_plots**
+
+All three surfaces updated consistently:
+- CLI flag: `--render-pairwise-interactives` → `--render-heavy-pairwise-plots`
+- Script: `render_pairwise_interactives.latest.sh` → `render_heavy_pairwise_plots.latest.sh` / `.sh` symlink
+- Management summary key: `on_demand_pairwise_interactives` → `on_demand_heavy_pairwise_plots`
+- Description text: "interactives" → "heavy per-pair PNG plots"
+
+The old script names are now cleaned up in `_cleanup_legacy_report_surfaces` so existing report directories don't accumulate stale symlinks.
+
+**Refined selection hook**
+
+Replaced `_CANDIDATE_OF_INTEREST_KINDS: frozenset[str]` (a module-level constant keyed on comparison_kind) with:
+
+```python
+def _should_auto_render_heavy_pairwise_plots(
+    packet: dict[str, Any],
+    comparisons: list[dict[str, Any]],
+    report_dpath: Path,
+) -> bool:
+    return False
+```
+
+Key differences:
+- Takes the full packet (packet_id, run_entry, warnings, flags, etc.)
+- Takes the full comparisons list (comparison_ids, not just kinds)
+- Takes report_dpath (path-based selection is possible)
+- Returns False unconditionally by default
+- Documented with concrete extension examples (packet_id set, diagnostic flag check)
+
+This prevents the "I added official_vs_local and suddenly 200 reports render heavy plots" accident. Any extension must be explicit about *which specific packet or report* warrants heavy rendering.
+
+Design insight: name and interface shape together signal intent. `frozenset[str]` of comparison kinds says "broad category match"; a function taking `(packet, comparisons, report_dpath)` says "narrow predicate over full context." The interface shape is itself the policy documentation.

@@ -240,19 +240,28 @@ def _enabled_comparisons(comparisons_manifest: dict[str, Any]) -> list[dict[str,
     return [comparison for comparison in comparisons if comparison.get("enabled", True)]
 
 
-# Comparison kinds for which heavy pairwise interactive artifacts are auto-rendered.
-# Empty by default: heavy artifacts are generated on demand via render_pairwise_interactives.sh.
-# Add a comparison kind here to make its report directory auto-render the full detail plots.
-_CANDIDATE_OF_INTEREST_KINDS: frozenset[str] = frozenset()
+def _should_auto_render_heavy_pairwise_plots(
+    packet: dict[str, Any],
+    comparisons: list[dict[str, Any]],
+    report_dpath: Path,
+) -> bool:
+    """Policy point for auto-rendering heavy pairwise PNG plots.
 
+    Default: False (conservative). Extend this function — keyed on packet id,
+    diagnostic flags, shortlist membership, specific comparison ids, or any
+    other report/packet metadata — to auto-render for selected cases.
 
-def _should_render_pairwise_interactives(comparisons: list[dict[str, Any]]) -> bool:
-    """Return True if any enabled comparison is designated as a candidate of interest."""
-    return any(
-        comparison.get('comparison_kind') in _CANDIDATE_OF_INTEREST_KINDS
-        for comparison in comparisons
-        if comparison.get('enabled', True)
-    )
+    Deliberately richer than a comparison-kind check so that enabling heavy
+    rendering for one specific packet does not silently pull in all reports
+    of the same comparison kind.
+
+    Examples of narrow extensions:
+        if packet.get('packet_id') in {'boolq::vicuna-7b::official::v1'}:
+            return True
+        if any(f.startswith('empty_completion_pathology') for f in packet.get('diagnostic_flags', [])):
+            return True
+    """
+    return False
 
 
 def _cleanup_legacy_report_surfaces(report_dpath: Path, enabled_comparison_ids: list[str]) -> None:
@@ -264,6 +273,9 @@ def _cleanup_legacy_report_surfaces(report_dpath: Path, enabled_comparison_ids: 
         "kwdagger_b.job",
         "report_selection.latest.json",
         "core_metric_three_run_distributions.latest.png",
+        # Renamed: was render_pairwise_interactives.* before the heavy-plots rename
+        "render_pairwise_interactives.latest.sh",
+        "render_pairwise_interactives.sh",
     ]:
         safe_unlink(report_dpath / name)
     keep_names = {
@@ -372,7 +384,7 @@ def main(argv: list[str] | None = None) -> None:
         [str(comparison["comparison_id"]) for comparison in enabled_comparisons if comparison.get("comparison_id")],
     )
 
-    render_pairwise = _should_render_pairwise_interactives(enabled_comparisons)
+    render_heavy = _should_auto_render_heavy_pairwise_plots(packet, enabled_comparisons, report_dpath)
     logger.info(f"Rendering core report packet_id={packet.get('packet_id')} into {rich_link(report_dpath)}")
     core_metrics_argv = [
         "--report-dpath",
@@ -382,8 +394,8 @@ def main(argv: list[str] | None = None) -> None:
         "--comparisons-manifest",
         str(comparisons_fpath),
     ]
-    if render_pairwise:
-        core_metrics_argv.append("--render-pairwise-interactives")
+    if render_heavy:
+        core_metrics_argv.append("--render-heavy-pairwise-plots")
     core_metrics.main(core_metrics_argv)
 
     component_lookup = {
@@ -408,7 +420,7 @@ def main(argv: list[str] | None = None) -> None:
             report_dpath=report_dpath,
         )
 
-    pairwise_cmd_parts = [
+    heavy_plots_cmd_parts = [
         "-m",
         "helm_audit.reports.core_metrics",
         "--report-dpath",
@@ -417,23 +429,23 @@ def main(argv: list[str] | None = None) -> None:
         str(report_dpath / "components_manifest.latest.json"),
         "--comparisons-manifest",
         str(report_dpath / "comparisons_manifest.latest.json"),
-        "--render-pairwise-interactives",
+        "--render-heavy-pairwise-plots",
     ]
-    pairwise_render_fpath = write_reproduce_script(
-        report_dpath / "render_pairwise_interactives.latest.sh",
+    heavy_plots_render_fpath = write_reproduce_script(
+        report_dpath / "render_heavy_pairwise_plots.latest.sh",
         [
             "#!/usr/bin/env bash",
             "set -euo pipefail",
-            "# Renders the heavier per-pair distribution and per-metric agreement plots on demand.",
+            "# Renders heavy per-pair PNG plots on demand (histograms, ECDFs, per-metric agreement curves).",
             "# Canonical lightweight outputs are already present in this directory.",
             *portable_repo_root_lines(),
             'cd "$REPO_ROOT"',
             'PYTHONPATH="$REPO_ROOT" "$PYTHON_BIN" '
-            + " ".join(shlex.quote(part) for part in pairwise_cmd_parts)
+            + " ".join(shlex.quote(part) for part in heavy_plots_cmd_parts)
             + ' "$@"',
         ],
     )
-    write_latest_alias(pairwise_render_fpath, report_dpath, "render_pairwise_interactives.sh")
+    write_latest_alias(heavy_plots_render_fpath, report_dpath, "render_heavy_pairwise_plots.sh")
 
     cmd_parts = [
         "-m",
@@ -467,7 +479,7 @@ def main(argv: list[str] | None = None) -> None:
     logger.info(f"Wrote components manifest: {rich_link(components_fpath)}")
     logger.info(f"Wrote comparisons manifest: {rich_link(comparisons_fpath)}")
     logger.info(f"Wrote reproduce script: {rich_link(reproduce_fpath)}")
-    logger.info(f"Wrote pairwise render script: {rich_link(pairwise_render_fpath)}")
+    logger.info(f"Wrote heavy pairwise plots script: {rich_link(heavy_plots_render_fpath)}")
 
 
 if __name__ == "__main__":

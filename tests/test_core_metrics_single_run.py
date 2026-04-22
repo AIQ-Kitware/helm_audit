@@ -183,7 +183,7 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
     ]:
         assert (report_dpath / name).exists(), f"canonical output missing: {name}"
 
-    # Heavy pairwise interactives are NOT rendered by default
+    # Heavy pairwise PNG plots are NOT rendered by default
     for name in [
         "core_metric_distributions.latest.png",
         "core_metric_overlay_distributions.latest.png",
@@ -202,13 +202,13 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
     assert "selected_components:" in text
     assert "comparisons:" in text
     assert "comparability:" in text
-    assert "on_demand_pairwise_interactives" in text, "management summary must note on-demand rendering"
-    assert "render_pairwise_interactives.sh" in text
+    assert "on_demand_heavy_pairwise_plots" in text, "management summary must note on-demand rendering"
+    assert "render_heavy_pairwise_plots.sh" in text
     warnings_payload = json.loads((report_dpath / "warnings.latest.json").read_text())
     assert warnings_payload["packet_warnings"] == ["comparability_drift:same_deployment"]
 
-    # With --render-pairwise-interactives flag, heavy outputs ARE written
-    core_metrics.main(base_argv + ["--render-pairwise-interactives"])
+    # With --render-heavy-pairwise-plots flag, heavy outputs ARE written
+    core_metrics.main(base_argv + ["--render-heavy-pairwise-plots"])
 
     for name in [
         "core_metric_distributions.latest.png",
@@ -216,7 +216,7 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
         "core_metric_ecdfs.latest.png",
         "core_metric_per_metric_agreement.latest.png",
     ]:
-        assert (report_dpath / name).exists(), f"heavy artifact missing with --render-pairwise-interactives: {name}"
+        assert (report_dpath / name).exists(), f"heavy PNG plot missing with --render-heavy-pairwise-plots: {name}"
 
 
 def test_diagnostic_flags_use_manifest_semantics_not_component_order():

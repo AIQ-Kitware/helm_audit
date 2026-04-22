@@ -8,8 +8,7 @@ from helm_audit.planning.core_report_planner import build_planning_artifact
 from helm_audit.reports.core_packet import comparison_sample_latest_name
 from helm_audit.workflows import rebuild_core_report
 from helm_audit.workflows.rebuild_core_report import (
-    _CANDIDATE_OF_INTEREST_KINDS,
-    _should_render_pairwise_interactives,
+    _should_auto_render_heavy_pairwise_plots,
 )
 
 
@@ -197,14 +196,14 @@ def test_single_run_core_report_uses_planner_packet_and_cleans_repeat_artifacts(
     assert len(pair_sample_calls) == 1
     assert pair_sample_calls[0]["label"].startswith("official_vs_local::")
 
-    # Canonical heavy artifacts are NOT auto-rendered; --render-pairwise-interactives absent
-    assert "--render-pairwise-interactives" not in core_metric_calls[0]
+    # Canonical heavy artifacts are NOT auto-rendered; --render-heavy-pairwise-plots absent
+    assert "--render-heavy-pairwise-plots" not in core_metric_calls[0]
 
-    # render_pairwise_interactives.latest.sh is written
-    render_script = report_dir / "render_pairwise_interactives.latest.sh"
+    # render_heavy_pairwise_plots.latest.sh is written
+    render_script = report_dir / "render_heavy_pairwise_plots.latest.sh"
     assert render_script.exists(), "render script must be written"
     script_text = render_script.read_text()
-    assert "--render-pairwise-interactives" in script_text
+    assert "--render-heavy-pairwise-plots" in script_text
     assert "helm_audit.reports.core_metrics" in script_text
     assert "components_manifest.latest.json" in script_text
     assert "comparisons_manifest.latest.json" in script_text
@@ -246,41 +245,54 @@ def test_multi_run_core_report_renders_only_declared_planner_comparisons(tmp_pat
     assert len(core_metric_calls) == 1
 
     # Heavy pairwise interactives not auto-rendered by default
-    assert "--render-pairwise-interactives" not in core_metric_calls[0]
+    assert "--render-heavy-pairwise-plots" not in core_metric_calls[0]
 
-    # render_pairwise_interactives.latest.sh written and references canonical manifests
-    render_script = report_dir / "render_pairwise_interactives.latest.sh"
+    # render_heavy_pairwise_plots.latest.sh written and references canonical manifests
+    render_script = report_dir / "render_heavy_pairwise_plots.latest.sh"
     assert render_script.exists(), "render script must be written"
     script_text = render_script.read_text()
-    assert "--render-pairwise-interactives" in script_text
+    assert "--render-heavy-pairwise-plots" in script_text
     assert "helm_audit.reports.core_metrics" in script_text
     assert "components_manifest.latest.json" in script_text
     assert "comparisons_manifest.latest.json" in script_text
 
 
-def test_candidate_of_interest_selection_is_explicit():
-    """_CANDIDATE_OF_INTEREST_KINDS is the single named selection point for auto-rendered heavy artifacts.
-    By default it is empty so no heavy rendering is triggered.
-    """
-    assert isinstance(_CANDIDATE_OF_INTEREST_KINDS, frozenset)
-    assert len(_CANDIDATE_OF_INTEREST_KINDS) == 0
-
+def test_auto_render_policy_is_conservative_by_default(tmp_path):
+    """_should_auto_render_heavy_pairwise_plots returns False for any normal packet."""
+    packet = {"packet_id": "some-packet", "run_entry": "bench:model=test"}
     comparisons = [
         {"comparison_kind": "official_vs_local", "enabled": True},
         {"comparison_kind": "local_repeat", "enabled": True},
     ]
-    assert not _should_render_pairwise_interactives(comparisons)
+    assert not _should_auto_render_heavy_pairwise_plots(packet, comparisons, tmp_path)
 
 
-def test_candidate_of_interest_triggers_render_when_kind_present(monkeypatch):
-    """Adding a kind to _CANDIDATE_OF_INTEREST_KINDS enables auto-rendering for that comparison kind."""
+def test_auto_render_policy_accepts_packet_and_report_dpath(tmp_path):
+    """Policy hook operates on full packet metadata and report_dpath, not comparison_kind alone.
+
+    This test verifies the interface: the function accepts packet, comparisons, and
+    report_dpath so that extensions can key on packet_id, diagnostic flags, or any
+    other report metadata — not just comparison_kind.
+    """
+    import inspect
+    sig = inspect.signature(_should_auto_render_heavy_pairwise_plots)
+    param_names = list(sig.parameters)
+    assert "packet" in param_names
+    assert "comparisons" in param_names
+    assert "report_dpath" in param_names
+    # No comparison_kind shortcut; the function gets the full comparison list
+    assert "comparison_kind" not in param_names
+
+
+def test_auto_render_policy_can_be_overridden_via_monkeypatch(tmp_path, monkeypatch):
+    """The policy function is the single extension point; patching it enables heavy rendering."""
     monkeypatch.setattr(
         rebuild_core_report,
-        "_CANDIDATE_OF_INTEREST_KINDS",
-        frozenset({"official_vs_local"}),
+        "_should_auto_render_heavy_pairwise_plots",
+        lambda packet, comparisons, report_dpath: True,
     )
+    packet = {"packet_id": "interesting-packet"}
     comparisons = [{"comparison_kind": "official_vs_local", "enabled": True}]
-    assert rebuild_core_report._should_render_pairwise_interactives(comparisons)
-
-    comparisons_other = [{"comparison_kind": "local_repeat", "enabled": True}]
-    assert not rebuild_core_report._should_render_pairwise_interactives(comparisons_other)
+    assert rebuild_core_report._should_auto_render_heavy_pairwise_plots(
+        packet, comparisons, tmp_path
+    )

@@ -1295,8 +1295,8 @@ def _write_management_summary(report: dict[str, Any], out_fpath: Path) -> None:
     for fact_name, fact in (report.get('comparability') or {}).get('facts', {}).items():
         lines.append(f"  {fact_name}: {fact.get('status')} values={fact.get('values')}")
     lines.append('')
-    lines.append('on_demand_pairwise_interactives: render_pairwise_interactives.sh (in this directory)')
-    lines.append('  (histogram/ECDF distributions and per-metric agreement curves not rendered by default)')
+    lines.append('on_demand_heavy_pairwise_plots: render_heavy_pairwise_plots.sh (in this directory)')
+    lines.append('  (histogram/ECDF distributions and per-metric agreement PNG plots; not rendered by default)')
     lines.append('')
     lines.append('metric_descriptions:')
     for metric in ref_pair.get('core_metrics', []):
@@ -1375,12 +1375,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument('--components-manifest', default=None)
     parser.add_argument('--comparisons-manifest', default=None)
     parser.add_argument(
-        '--render-pairwise-interactives',
+        '--render-heavy-pairwise-plots',
         action='store_true',
         default=False,
         help=(
-            'Also render heavy per-pair distribution plots (histograms, ECDFs, per-metric agreement). '
-            'Off by default; use render_pairwise_interactives.sh in the report directory instead.'
+            'Also render heavy per-pair PNG plots (histograms, ECDFs, per-metric agreement curves). '
+            'Off by default; run render_heavy_pairwise_plots.sh in the report directory instead.'
         ),
     )
     args = parser.parse_args(argv)
@@ -1515,7 +1515,7 @@ def main(argv: list[str] | None = None) -> None:
         fig.savefig(fig_fpath, dpi=180)
         plt.close(fig)
 
-    render_pairwise = args.render_pairwise_interactives
+    render_pairwise = args.render_heavy_pairwise_plots
     if render_pairwise:
         dist_fig_fpath = _plot_pair_metric_distributions(history_dpath, stamp, pairs, run_spec_name)
         run_specs = [(component['run_path'], component['display_name']) for component in components]
