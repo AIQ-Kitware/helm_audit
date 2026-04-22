@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
+import itertools
 import json
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any
 
 from helm_audit.indexing.schema import (
@@ -17,6 +19,7 @@ from helm_audit.reports.core_packet import slugify_identifier
 
 
 PLANNER_VERSION = "core_report_packet_planner.v1"
+OFFICIAL_SELECTION_POLICY = "latest_suite_version_per_public_track"
 
 
 def _clean_optional_text(value: Any) -> str | None:
@@ -67,6 +70,30 @@ def _read_run_spec(run_spec_fpath: str | Path | None) -> dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _suite_version_sort_key(value: str | None) -> tuple[Any, ...]:
+    text = _clean_optional_text(value) or ""
+    parts = re.split(r"(\d+)", text)
+    key: list[Any] = []
+    for part in parts:
+        if not part:
+            continue
+        if part.isdigit():
+            key.append((1, int(part)))
+        else:
+            key.append((0, part))
+    return tuple(key)
+
+
+def _official_fallback_component_id(row: dict[str, Any], logical_run_key: str | None) -> str:
+    seed_parts = [
+        _clean_optional_text(row.get("public_track")) or "unknown-track",
+        _clean_optional_text(row.get("suite_version")) or "unknown-suite-version",
+        logical_run_key or _clean_optional_text(row.get("run_name")) or "unknown-run",
+        _clean_optional_text(row.get("run_path") or row.get("public_run_dir")) or "unknown-path",
+    ]
+    return "official::" + "::".join(slugify_identifier(part) for part in seed_parts)
 
 
 @dataclass(frozen=True)
@@ -204,9 +231,10 @@ def normalize_official_index_rows(rows: list[dict[str, Any]], *, index_fpath: st
             run_spec_name=spec_fields.get("run_spec_name"),
             run_name=_clean_optional_text(row.get("run_name")),
         )
+        component_id = _clean_optional_text(row.get("component_id")) or _official_fallback_component_id(row, logical_run_key)
         components.append(
             NormalizedPlannerComponent(
-                component_id=_clean_optional_text(row.get("component_id")) or f"official::{row_index}",
+                component_id=component_id,
                 source_kind="official",
                 logical_run_key=logical_run_key,
                 run_entry=None,
@@ -225,7 +253,7 @@ def normalize_official_index_rows(rows: list[dict[str, Any]], *, index_fpath: st
                 experiment_name=None,
                 machine_host=None,
                 attempt_uuid=None,
-                attempt_identity=_clean_optional_text(row.get("component_id")) or f"official::{row_index}",
+                attempt_identity=component_id,
                 display_name=f"official: {Path(run_path).name if run_path else logical_run_key or row_index}",
                 tags=["official", "public_reference_candidate"],
                 manifest_timestamp=None,
@@ -335,30 +363,6 @@ def build_comparability_facts(components: list[NormalizedPlannerComponent]) -> d
     return facts
 
 
-def _warning_lines(
-    *,
-    local_components: list[NormalizedPlannerComponent],
-    official_components: list[NormalizedPlannerComponent],
-    comparability_facts: dict[str, Any],
-) -> list[str]:
-    warnings: list[str] = []
-    if not local_components:
-        warnings.append("no_local_components")
-    if not official_components:
-        warnings.append("no_official_components")
-    if len(local_components) > 1:
-        warnings.append("multiple_local_components")
-    if len(official_components) > 1:
-        warnings.append("multiple_official_components")
-    for name, fact in comparability_facts.items():
-        status = fact.get("status")
-        if status == "no":
-            warnings.append(f"comparability_drift:{name}")
-        elif status == "unknown":
-            warnings.append(f"comparability_unknown:{name}")
-    return warnings
-
-
 def _comparison_caveats(comparability_facts: dict[str, Any]) -> list[str]:
     caveats: list[str] = []
     for name, fact in comparability_facts.items():
@@ -368,6 +372,107 @@ def _comparison_caveats(comparability_facts: dict[str, Any]) -> list[str]:
         elif status == "unknown":
             caveats.append(f"{name}=unknown")
     return caveats
+
+
+def _component_warning_lines(component: NormalizedPlannerComponent) -> list[str]:
+    warnings: list[str] = []
+    if component.source_kind == "local" and component.attempt_uuid is None:
+        warnings.append(f"fallback_local_identity:{component.component_id}")
+    if component.run_spec_fpath is None:
+        warnings.append(f"missing_run_spec:{component.component_id}")
+    if component.model is None:
+        warnings.append(f"missing_model_metadata:{component.component_id}")
+    if component.scenario_class is None:
+        warnings.append(f"missing_scenario_class:{component.component_id}")
+    if component.source_kind == "official" and (component.public_track is None or component.suite_version is None):
+        warnings.append(f"missing_official_track_or_suite:{component.component_id}")
+    return warnings
+
+
+def _comparability_warning_lines(comparability_facts: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for name, fact in comparability_facts.items():
+        status = fact.get("status")
+        if status == "no":
+            warnings.append(f"comparability_drift:{name}")
+        elif status == "unknown":
+            warnings.append(f"comparability_unknown:{name}")
+    return warnings
+
+
+def _comparison_payload(
+    *,
+    comparison_id: str,
+    comparison_kind: str,
+    components: list[NormalizedPlannerComponent],
+    reference_component_id: str | None,
+    enabled: bool,
+    disabled_reason: str | None = None,
+    notes: str | None = None,
+    extra_fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    comparability_facts = build_comparability_facts(components)
+    warnings = [
+        *_comparability_warning_lines(comparability_facts),
+        *itertools.chain.from_iterable(_component_warning_lines(component) for component in components),
+    ]
+    payload = {
+        "comparison_id": comparison_id,
+        "comparison_kind": comparison_kind,
+        "component_ids": [component.component_id for component in components],
+        "reference_component_id": reference_component_id,
+        "enabled": enabled,
+        "disabled_reason": disabled_reason,
+        "notes": notes,
+        "comparability_facts": comparability_facts,
+        "warnings": list(dict.fromkeys(warnings)),
+        "caveats": _comparison_caveats(comparability_facts),
+    }
+    if extra_fields:
+        payload.update(extra_fields)
+    return payload
+
+
+def _latest_official_selection(official_components: list[NormalizedPlannerComponent]) -> dict[str, Any]:
+    grouped_by_track: dict[str, list[NormalizedPlannerComponent]] = {}
+    for component in official_components:
+        track = component.public_track or "unknown-track"
+        grouped_by_track.setdefault(track, []).append(component)
+    retained: list[NormalizedPlannerComponent] = []
+    discarded: list[str] = []
+    retained_by_track: dict[str, list[str]] = {}
+    considered_by_track: dict[str, list[str]] = {}
+    warnings: list[str] = []
+    for track, components in sorted(grouped_by_track.items()):
+        considered_by_track[track] = [component.component_id for component in components]
+        latest_suite_version = max(
+            (component.suite_version for component in components),
+            key=_suite_version_sort_key,
+        )
+        retained_components = [
+            component for component in components
+            if component.suite_version == latest_suite_version
+        ]
+        retained.extend(retained_components)
+        retained_by_track[track] = [component.component_id for component in retained_components]
+        discarded.extend(
+            component.component_id
+            for component in components
+            if component.suite_version != latest_suite_version
+        )
+        if len(retained_components) > 1:
+            warnings.append(f"multiple_official_candidates_after_latest_per_track:{track}")
+    if len(retained_by_track) > 1:
+        warnings.append("multiple_official_tracks_after_latest_per_track")
+    return {
+        "policy_name": OFFICIAL_SELECTION_POLICY,
+        "considered_component_ids": [component.component_id for component in official_components],
+        "retained_component_ids": [component.component_id for component in retained],
+        "discarded_component_ids": discarded,
+        "considered_by_track": considered_by_track,
+        "retained_by_track": retained_by_track,
+        "warnings": warnings,
+    }
 
 
 def build_packet_intents(
@@ -393,37 +498,84 @@ def build_packet_intents(
     for group_key, group_components in sorted(grouped.items()):
         sorted_components = sorted(group_components, key=_component_sort_key)
         local_components = [component for component in sorted_components if component.source_kind == "local"]
-        official_components = [component for component in sorted_components if component.source_kind == "official"]
+        official_components_all = [component for component in sorted_components if component.source_kind == "official"]
+        official_selection = _latest_official_selection(official_components_all) if official_components_all else {
+            "policy_name": OFFICIAL_SELECTION_POLICY,
+            "considered_component_ids": [],
+            "retained_component_ids": [],
+            "discarded_component_ids": [],
+            "considered_by_track": {},
+            "retained_by_track": {},
+            "warnings": [],
+        }
+        retained_official_ids = set(official_selection["retained_component_ids"])
+        official_components = [
+            component for component in official_components_all
+            if component.component_id in retained_official_ids
+        ]
+        packet_components = [*local_components, *official_components]
         local_reference = local_components[0] if local_components else None
-        official_reference = official_components[0] if official_components else None
-        comparability_facts = build_comparability_facts(sorted_components)
-        packet_caveats = _comparison_caveats(comparability_facts)
+        packet_comparability_facts = build_comparability_facts(packet_components)
+        packet_caveats = _comparison_caveats(packet_comparability_facts)
+        packet_warnings = [
+            *official_selection["warnings"],
+            *itertools.chain.from_iterable(_component_warning_lines(component) for component in packet_components),
+            *_comparability_warning_lines(packet_comparability_facts),
+        ]
         comparisons: list[dict[str, Any]] = []
-        if official_reference is not None:
-            for local_component in local_components:
-                comparisons.append(
-                    {
-                        "comparison_id": f"official_vs_local::{local_component.component_id}",
-                        "comparison_kind": "official_vs_local",
-                        "component_ids": [official_reference.component_id, local_component.component_id],
-                        "reference_component_id": official_reference.component_id,
-                        "enabled": True,
-                        "notes": "planner first-pass official-vs-local comparison",
-                        "caveats": list(packet_caveats),
-                    }
-                )
+        if local_components:
+            if not official_components:
+                for local_component in local_components:
+                    comparisons.append(
+                        _comparison_payload(
+                            comparison_id=f"official_vs_local::{local_component.component_id}",
+                            comparison_kind="official_vs_local",
+                            components=[local_component],
+                            reference_component_id=None,
+                            enabled=False,
+                            disabled_reason="missing_official_component",
+                            notes="planner could not find an official component after policy reduction",
+                        )
+                    )
+            elif len(official_components) == 1:
+                official_reference = official_components[0]
+                for local_component in local_components:
+                    comparisons.append(
+                        _comparison_payload(
+                            comparison_id=f"official_vs_local::{official_reference.component_id}::{local_component.component_id}",
+                            comparison_kind="official_vs_local",
+                            components=[official_reference, local_component],
+                            reference_component_id=official_reference.component_id,
+                            enabled=True,
+                            notes="planner first-pass official-vs-local comparison",
+                        )
+                    )
+            else:
+                candidate_official_ids = [component.component_id for component in official_components]
+                for local_component in local_components:
+                    comparisons.append(
+                        _comparison_payload(
+                            comparison_id=f"official_vs_local::{local_component.component_id}::disabled",
+                            comparison_kind="official_vs_local",
+                            components=[*official_components, local_component],
+                            reference_component_id=None,
+                            enabled=False,
+                            disabled_reason="ambiguous_official_candidates_after_latest_per_track",
+                            notes="planner retained more than one official candidate after latest-per-track reduction",
+                            extra_fields={"candidate_reference_component_ids": candidate_official_ids},
+                        )
+                    )
         if local_reference is not None:
             for repeat_component in local_components[1:]:
                 comparisons.append(
-                    {
-                        "comparison_id": f"local_repeat::{local_reference.component_id}::{repeat_component.component_id}",
-                        "comparison_kind": "local_repeat",
-                        "component_ids": [local_reference.component_id, repeat_component.component_id],
-                        "reference_component_id": local_reference.component_id,
-                        "enabled": True,
-                        "notes": "planner first-pass local repeat comparison",
-                        "caveats": list(packet_caveats),
-                    }
+                    _comparison_payload(
+                        comparison_id=f"local_repeat::{local_reference.component_id}::{repeat_component.component_id}",
+                        comparison_kind="local_repeat",
+                        components=[local_reference, repeat_component],
+                        reference_component_id=local_reference.component_id,
+                        enabled=True,
+                        notes="planner first-pass local repeat comparison",
+                    )
                 )
         packet_experiment_name = experiment_name
         if packet_experiment_name is None:
@@ -438,14 +590,16 @@ def build_packet_intents(
                 "run_entry": run_entry or next((component.run_entry for component in local_components if component.run_entry), None) or group_key,
                 "logical_run_key": group_key,
                 "experiment_name": packet_experiment_name,
-                "components": [component.to_manifest_component() for component in sorted_components],
+                "components": [component.to_manifest_component() for component in packet_components],
                 "comparisons": comparisons,
-                "comparability_facts": comparability_facts,
-                "warnings": _warning_lines(
-                    local_components=local_components,
-                    official_components=official_components,
-                    comparability_facts=comparability_facts,
-                ),
+                "comparability_facts": packet_comparability_facts,
+                "official_selection": official_selection,
+                "warnings": list(dict.fromkeys([
+                    *packet_warnings,
+                    *(["missing_local_component"] if not local_components else []),
+                    *(["multiple_local_components"] if len(local_components) > 1 else []),
+                    *(["missing_official_component"] if not official_components else []),
+                ])),
                 "caveats": packet_caveats,
                 "planner_version": PLANNER_VERSION,
             }
@@ -533,6 +687,77 @@ def packet_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def warning_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for packet in artifact.get("packets", []):
+        for warning in packet.get("warnings", []):
+            rows.append(
+                {
+                    "level": "packet",
+                    "packet_id": packet.get("packet_id"),
+                    "comparison_id": None,
+                    "warning": warning,
+                }
+            )
+        for comparison in packet.get("comparisons", []):
+            if comparison.get("disabled_reason"):
+                rows.append(
+                    {
+                        "level": "comparison",
+                        "packet_id": packet.get("packet_id"),
+                        "comparison_id": comparison.get("comparison_id"),
+                        "warning": f"disabled:{comparison.get('disabled_reason')}",
+                    }
+                )
+            for warning in comparison.get("warnings", []):
+                rows.append(
+                    {
+                        "level": "comparison",
+                        "packet_id": packet.get("packet_id"),
+                        "comparison_id": comparison.get("comparison_id"),
+                        "warning": warning,
+                    }
+                )
+    return rows
+
+
+def warning_summary_lines(artifact: dict[str, Any]) -> list[str]:
+    lines = [
+        "Core Report Packet Planning Warnings",
+        "",
+        f"generated_utc: {artifact.get('generated_utc')}",
+        f"planner_version: {artifact.get('planner_version')}",
+        "",
+    ]
+    for packet in artifact.get("packets", []):
+        lines.append(f"packet: {packet.get('packet_id')}")
+        packet_warnings = packet.get("warnings", [])
+        if packet_warnings:
+            lines.append("  packet_warnings:")
+            for warning in packet_warnings:
+                lines.append(f"    - {warning}")
+        official_selection = packet.get("official_selection") or {}
+        if official_selection:
+            lines.append("  official_selection:")
+            lines.append(f"    policy_name: {official_selection.get('policy_name')}")
+            lines.append(f"    retained_component_ids: {official_selection.get('retained_component_ids')}")
+            lines.append(f"    discarded_component_ids: {official_selection.get('discarded_component_ids')}")
+            if official_selection.get("warnings"):
+                lines.append(f"    warnings: {official_selection.get('warnings')}")
+        lines.append("  comparisons:")
+        for comparison in packet.get("comparisons", []):
+            lines.append(
+                f"    - {comparison.get('comparison_id')} enabled={comparison.get('enabled')} "
+                f"disabled_reason={comparison.get('disabled_reason')}"
+            )
+            if comparison.get("warnings"):
+                lines.append(f"      warnings: {comparison.get('warnings')}")
+            if comparison.get("caveats"):
+                lines.append(f"      caveats: {comparison.get('caveats')}")
+        lines.append("")
+    return lines
+
+
 def planning_summary_lines(artifact: dict[str, Any]) -> list[str]:
     lines = [
         "Core Report Packet Planning Summary",
@@ -553,6 +778,7 @@ def planning_summary_lines(artifact: dict[str, Any]) -> list[str]:
         lines.append(f"  experiment_name: {packet.get('experiment_name')}")
         lines.append(f"  warnings: {packet.get('warnings')}")
         lines.append(f"  caveats: {packet.get('caveats')}")
+        lines.append(f"  official_selection: {packet.get('official_selection')}")
         lines.append("  components:")
         for component in packet.get("components", []):
             lines.append(
@@ -563,8 +789,11 @@ def planning_summary_lines(artifact: dict[str, Any]) -> list[str]:
         for comparison in packet.get("comparisons", []):
             lines.append(
                 f"    - {comparison['comparison_id']} kind={comparison.get('comparison_kind')} "
-                f"component_ids={comparison.get('component_ids')} reference={comparison.get('reference_component_id')}"
+                f"component_ids={comparison.get('component_ids')} reference={comparison.get('reference_component_id')} "
+                f"enabled={comparison.get('enabled')} disabled_reason={comparison.get('disabled_reason')}"
             )
+            lines.append(f"      warnings={comparison.get('warnings')}")
+            lines.append(f"      caveats={comparison.get('caveats')}")
         lines.append("  comparability_facts:")
         for fact_name, fact in (packet.get("comparability_facts") or {}).items():
             lines.append(

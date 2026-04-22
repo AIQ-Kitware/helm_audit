@@ -16,6 +16,8 @@ from helm_audit.planning.core_report_planner import (
     component_rows,
     packet_rows,
     planning_summary_lines,
+    warning_rows,
+    warning_summary_lines,
 )
 
 
@@ -65,24 +67,32 @@ def main(argv: list[str] | None = None) -> None:
     packet_csv_fpath = history_dpath / f"comparison_intent_packets_{stamp}.csv"
     component_csv_fpath = history_dpath / f"comparison_intent_components_{stamp}.csv"
     comparison_csv_fpath = history_dpath / f"comparison_intent_comparisons_{stamp}.csv"
+    warnings_json_fpath = history_dpath / f"comparison_intent_warnings_{stamp}.json"
+    warnings_txt_fpath = history_dpath / f"comparison_intent_warnings_{stamp}.txt"
 
     _write_json(artifact, json_fpath)
     _write_text(planning_summary_lines(artifact), txt_fpath)
     _write_csv(packet_rows(artifact), packet_csv_fpath)
     _write_csv(component_rows(artifact), component_csv_fpath)
     _write_csv(comparison_rows(artifact), comparison_csv_fpath)
+    _write_json({"warnings": warning_rows(artifact)}, warnings_json_fpath)
+    _write_text(warning_summary_lines(artifact), warnings_txt_fpath)
 
     write_latest_alias(json_fpath, out_dpath, "comparison_intents.latest.json")
     write_latest_alias(txt_fpath, out_dpath, "comparison_intents.latest.txt")
     write_latest_alias(packet_csv_fpath, out_dpath, "comparison_intent_packets.latest.csv")
     write_latest_alias(component_csv_fpath, out_dpath, "comparison_intent_components.latest.csv")
     write_latest_alias(comparison_csv_fpath, out_dpath, "comparison_intent_comparisons.latest.csv")
+    write_latest_alias(warnings_json_fpath, out_dpath, "warnings.latest.json")
+    write_latest_alias(warnings_txt_fpath, out_dpath, "warnings.latest.txt")
 
     logger.info(f"Wrote comparison intents json: {rich_link(json_fpath)}")
     logger.info(f"Wrote comparison intents text: {rich_link(txt_fpath)}")
     logger.info(f"Wrote comparison intent packets csv: {rich_link(packet_csv_fpath)}")
     logger.info(f"Wrote comparison intent components csv: {rich_link(component_csv_fpath)}")
     logger.info(f"Wrote comparison intent comparisons csv: {rich_link(comparison_csv_fpath)}")
+    logger.info(f"Wrote planner warnings json: {rich_link(warnings_json_fpath)}")
+    logger.info(f"Wrote planner warnings text: {rich_link(warnings_txt_fpath)}")
 
 
 if __name__ == "__main__":

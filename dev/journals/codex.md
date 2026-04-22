@@ -312,6 +312,27 @@ Design takeaways:
 2. Reusing stable index identities is better than inventing report-local component naming, especially for retry-heavy local runs.
 3. First-pass comparison policy should be explicit and inspectable before it is made exhaustive or automatic.
 
+## 2026-04-22 00:34:30 +0000
+
+Summary of user intent: refine the new comparison-intent / packet-planning stage so it becomes trustworthy for the main workflow by making comparability facts comparison-specific, making latest-suite-per-track the default official selection policy, stabilizing fallback official identity, and surfacing suspicious conditions through first-class warning artifacts.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This refinement is mostly about tightening where ambiguity lives. The initial planner was directionally right, but it was still letting packet-level drift leak into individual comparisons and it was too willing to collapse official candidates into a single default path. Those are the kinds of mistakes that make a planner feel convenient at first and untrustworthy later. The key design correction was to keep packet-level summary facts as a broad overview while making each comparison carry its own `comparability_facts`, `warnings`, and `caveats` computed from exactly the components named in that comparison. That change makes `local_repeat` much more honest in mixed packets because it no longer inherits caveats that only arise when an official component is involved.
+
+The second major decision was to make official selection policy explicit and inspectable rather than implicit in sort order. The planner now reduces official candidates by track, retaining only the latest suite version within each public track as the default policy. Importantly, it records both the considered and retained sets. This is a good compromise for the main workflow: it defaults toward the newest public suite per track without silently flattening meaningful ambiguity. If multiple official candidates still remain after that policy, the planner now stops short of auto-enabling `official_vs_local` and instead emits disabled comparisons with a clear disabled reason plus candidate reference ids. That feels much safer than picking an arbitrary “first” official and pretending the ambiguity never existed.
+
+Stabilizing the official fallback identity was also worth doing now. Falling back to a row index would have undermined the planner’s usefulness as a durable declaration surface, especially if indexes are regenerated or reordered. The new fallback derives from stable official provenance fields such as public track, suite version, logical run key/run name, and run path, which keeps it stable across CSV reorderings and much closer to what a human would recognize as the same source component.
+
+The warning surfaces are intentionally noisy in a useful way. I treated warnings as first-class outputs rather than decoration on the main JSON: packet warnings, comparison warnings, disabled reasons, and official-selection ambiguity now all flow into dedicated `warnings.latest.json` and `warnings.latest.txt` artifacts. That is the right shape for an auditing tool. If a future maintainer wants to understand why the planner hesitated or why a comparison stayed disabled, they should not need to grep the big intent JSON manually.
+
+What I deliberately did not do is connect these warning artifacts to the renderer yet or try to harmonize every downstream consumer. This slice is about making the planner trustworthy in isolation. The next stage can decide how the renderer consumes disabled comparisons or packet warnings, but it should not have to rediscover the semantics or repair ambiguity that the planner already knew about.
+
+Design takeaways:
+1. Comparison-local facts are the only safe source of truth for comparison caveats in mixed packets.
+2. Selection policy is acceptable only when it is both explicit and inspectable; “sorted first” is not a policy.
+3. Warning artifacts deserve their own outputs because ambiguity is often the most important thing the planner knows.
+
 ## 2026-04-21 00:18:44 +0000
 
 Summary of user intent: make a narrow presentation-layer fix in `helm_audit/workflows/build_reports_summary.py` so aggregate-summary plots keep full data and full HTML labels, but static JPG/PNG exports become bounded, slide-usable, and more readable for categorical axes without truncating categories or redesigning the report set.
