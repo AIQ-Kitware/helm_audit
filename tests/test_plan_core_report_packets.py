@@ -300,26 +300,35 @@ def test_multi_track_official_ambiguity_does_not_silently_auto_pick_reference(tm
         run_entry="boolq:model=meta/llama-3-8b",
     )
 
-    packet = artifact["packets"][0]
-    disabled = [
-        comparison for comparison in packet["comparisons"]
-        if comparison["comparison_kind"] == "official_vs_local"
-    ]
-    assert disabled
-    assert all(comparison["enabled"] is False for comparison in disabled)
-    assert all(comparison["disabled_reason"] == "ambiguous_official_candidates_after_latest_per_track" for comparison in disabled)
-    assert "multiple_official_tracks_after_latest_per_track" in packet["warnings"]
-    assert all(comparison["candidate_reference_component_ids"] for comparison in disabled)
+    assert artifact["packet_count"] == 2
+    packet_tracks = {packet["selected_public_track"] for packet in artifact["packets"]}
+    assert packet_tracks == {"main", "alt"}
+    for packet in artifact["packets"]:
+        official_vs_local = [
+            comparison for comparison in packet["comparisons"]
+            if comparison["comparison_kind"] == "official_vs_local"
+        ]
+        assert official_vs_local
+        assert all(comparison["enabled"] is True for comparison in official_vs_local)
+        assert "multiple_official_tracks_after_latest_per_track" in packet["warnings"]
+        assert f"render_split_by_public_track:{packet['selected_public_track']}" in packet["official_selection"]["warnings"]
 
 
 def test_official_fallback_identity_is_stable_and_not_row_index_based(tmp_path):
-    local_index, official_index = _setup_index_inputs(tmp_path, official_component_id=None)
+    local_index, official_index = _setup_index_inputs(
+        tmp_path,
+        include_second_official_same_track=True,
+        official_component_id=None,
+    )
     rows = core_report_planner.load_index_rows(official_index)
+    rows[1]["component_id"] = ""
     normalized_a = core_report_planner.normalize_official_index_rows(rows, index_fpath=official_index)
     normalized_b = core_report_planner.normalize_official_index_rows(list(reversed(rows)), index_fpath=official_index)
 
-    assert normalized_a[0].component_id == normalized_b[0].component_id
-    assert "::0" not in normalized_a[0].component_id
+    ids_a = sorted(component.component_id for component in normalized_a)
+    ids_b = sorted(component.component_id for component in normalized_b)
+    assert ids_a == ids_b
+    assert all("::0" not in component_id for component_id in ids_a)
 
 
 def test_warnings_emitted_for_suspicious_conditions_and_written_as_artifacts(tmp_path):
@@ -345,10 +354,10 @@ def test_warnings_emitted_for_suspicious_conditions_and_written_as_artifacts(tmp
 
     warning_values = [row["warning"] for row in warnings_payload["warnings"]]
     assert any("multiple_official_tracks_after_latest_per_track" in item for item in warning_values)
-    assert any("disabled:ambiguous_official_candidates_after_latest_per_track" in item for item in warning_values)
+    assert any("render_split_by_public_track:" in item for item in warning_values)
     assert any("fallback_local_identity:" in item for item in warning_values)
     assert "packet_warnings:" in warnings_text
-    assert "disabled_reason=ambiguous_official_candidates_after_latest_per_track" in warnings_text
+    assert "render_split_by_public_track:" in warnings_text
 
 
 def test_planner_outputs_are_human_inspectable_and_declared(tmp_path):
@@ -376,3 +385,37 @@ def test_planner_outputs_are_human_inspectable_and_declared(tmp_path):
     assert "comparability_facts:" in summary_text
     assert "component_id" in components_csv
     assert "comparison_kind" in comparisons_csv
+
+
+def test_experiment_scoped_planning_does_not_emit_unrelated_official_only_packets(tmp_path):
+    local_index, official_index = _setup_index_inputs(tmp_path)
+    official_rows = core_report_planner.load_index_rows(official_index)
+    official_rows.append(
+        {
+            "component_id": "official::other::v1::other:model=z",
+            "source_kind": "official",
+            "logical_run_key": "other:model=z",
+            "run_path": str(tmp_path / "official" / "benchmark_output" / "runs" / "v1" / "other:model=z"),
+            "public_run_dir": str(tmp_path / "official" / "benchmark_output" / "runs" / "v1" / "other:model=z"),
+            "run_name": "other:model=z",
+            "run_spec_fpath": "",
+            "run_spec_name": "other:model=z",
+            "model": "other-model",
+            "model_deployment": "hf/other-model",
+            "scenario_class": "helm.OtherScenario",
+            "benchmark_group": "other",
+            "max_eval_instances": "100",
+            "public_track": "other",
+            "suite_version": "v1",
+        }
+    )
+    _write_csv(official_index, official_rows)
+
+    artifact = core_report_planner.build_planning_artifact(
+        local_index_fpath=local_index,
+        official_index_fpath=official_index,
+        experiment_name="exp-a",
+    )
+
+    assert artifact["packet_count"] == 1
+    assert artifact["packets"][0]["logical_run_key"] == "boolq:model=meta/llama-3-8b"

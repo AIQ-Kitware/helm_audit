@@ -36,8 +36,27 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
 
     components_manifest = {
         "report_dpath": str(report_dpath),
+        "packet_id": "toy-packet",
         "run_entry": "toy:model=x",
         "experiment_name": "toy-exp",
+        "planner_version": "planner.v1",
+        "selected_public_track": "main",
+        "warnings": ["comparability_drift:same_deployment"],
+        "caveats": ["same_deployment=no values=['toy-deploy', 'other-deploy']"],
+        "official_selection": {
+            "policy_name": "latest_suite_version_per_public_track",
+            "selected_public_track": "main",
+            "retained_component_ids": ["official-toy-run"],
+            "discarded_component_ids": [],
+            "warnings": [],
+        },
+        "comparability_facts": {
+            "same_base_model": {"status": "yes", "values": ["toy-model"]},
+            "same_scenario_class": {"status": "yes", "values": ["helm.benchmark.scenarios.toy.ToyScenario"]},
+            "same_deployment": {"status": "no", "values": ["toy-deploy", "other-deploy"]},
+            "same_adapter_instructions": {"status": "unknown", "values": []},
+            "same_max_eval_instances": {"status": "yes", "values": [100]},
+        },
         "components": [
             {
                 "component_id": "local-attempt-a",
@@ -79,7 +98,9 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
                 "enabled": True,
                 "reference_component_id": "official-toy-run",
                 "notes": None,
-                "caveats": None,
+                "comparability_facts": {"same_deployment": {"status": "no", "values": ["toy-deploy", "other-deploy"]}},
+                "warnings": ["comparability_drift:same_deployment"],
+                "caveats": ["same_deployment=no values=['toy-deploy', 'other-deploy']"],
             }
         ],
     }
@@ -160,6 +181,8 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
         "core_metric_ecdfs.latest.png",
         "core_metric_per_metric_agreement.latest.png",
         "core_runlevel_table.latest.csv",
+        "warnings.latest.json",
+        "warnings.latest.txt",
     ]:
         assert (report_dpath / name).exists(), name
     assert not (report_dpath / "core_metric_three_run_distributions.latest.png").exists()
@@ -168,9 +191,12 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
     assert f"report_dpath: {report_dpath}" in text
     assert f"components_manifest: {components_fpath}" in text
     assert f"comparisons_manifest: {comparisons_fpath}" in text
+    assert "warnings_and_caveats:" in text
     assert "selected_components:" in text
     assert "comparisons:" in text
     assert "comparability:" in text
+    warnings_payload = json.loads((report_dpath / "warnings.latest.json").read_text())
+    assert warnings_payload["packet_warnings"] == ["comparability_drift:same_deployment"]
 
 
 def test_diagnostic_flags_use_manifest_semantics_not_component_order():

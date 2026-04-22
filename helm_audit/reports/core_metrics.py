@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from helm_audit.infra.logging import setup_cli_logging
+from helm_audit.infra.logging import rich_link, setup_cli_logging
 import datetime as datetime_mod
 import json
 import os
@@ -1049,6 +1049,76 @@ def _comparability_summary(components: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _warnings_payload(report: dict[str, Any]) -> dict[str, Any]:
+    comparisons = report.get("comparisons") or []
+    return {
+        "report_dpath": report.get("report_dpath"),
+        "packet_id": report.get("packet_id"),
+        "run_entry": report.get("run_entry"),
+        "planner_version": report.get("planner_version"),
+        "packet_warnings": report.get("packet_warnings") or [],
+        "packet_caveats": report.get("packet_caveats") or [],
+        "official_selection": report.get("official_selection") or {},
+        "diagnostic_flags": report.get("diagnostic_flags") or [],
+        "comparisons": [
+            {
+                "comparison_id": comparison.get("comparison_id"),
+                "comparison_kind": comparison.get("comparison_kind"),
+                "enabled": comparison.get("enabled"),
+                "disabled_reason": comparison.get("disabled_reason"),
+                "warnings": comparison.get("warnings") or [],
+                "caveats": comparison.get("caveats") or [],
+                "comparability_facts": comparison.get("comparability_facts") or {},
+            }
+            for comparison in comparisons
+        ],
+    }
+
+
+def _warning_summary_lines(report: dict[str, Any]) -> list[str]:
+    warnings_payload = _warnings_payload(report)
+    lines = [
+        "Core Metric Report Warnings",
+        "",
+        f"report_dpath: {report.get('report_dpath')}",
+        f"packet_id: {report.get('packet_id')}",
+        f"run_entry: {report.get('run_entry')}",
+        f"planner_version: {report.get('planner_version')}",
+        f"diagnostic_flags: {report.get('diagnostic_flags') or []}",
+        "",
+    ]
+    packet_warnings = warnings_payload.get("packet_warnings") or []
+    packet_caveats = warnings_payload.get("packet_caveats") or []
+    if packet_warnings:
+        lines.append("packet_warnings:")
+        for item in packet_warnings:
+            lines.append(f"  - {item}")
+    if packet_caveats:
+        lines.append("packet_caveats:")
+        for item in packet_caveats:
+            lines.append(f"  - {item}")
+    official_selection = warnings_payload.get("official_selection") or {}
+    if official_selection:
+        lines.append("official_selection:")
+        lines.append(f"  policy_name: {official_selection.get('policy_name')}")
+        lines.append(f"  selected_public_track: {official_selection.get('selected_public_track')}")
+        lines.append(f"  retained_component_ids: {official_selection.get('retained_component_ids')}")
+        lines.append(f"  discarded_component_ids: {official_selection.get('discarded_component_ids')}")
+        if official_selection.get("warnings"):
+            lines.append(f"  warnings: {official_selection.get('warnings')}")
+    lines.append("comparisons:")
+    for comparison in warnings_payload.get("comparisons") or []:
+        lines.append(
+            f"  - {comparison.get('comparison_id')} enabled={comparison.get('enabled')} "
+            f"disabled_reason={comparison.get('disabled_reason')}"
+        )
+        if comparison.get("warnings"):
+            lines.append(f"    warnings: {comparison.get('warnings')}")
+        if comparison.get("caveats"):
+            lines.append(f"    caveats: {comparison.get('caveats')}")
+    return lines
+
+
 def _write_comparison_runlevel_table(
     out_dpath: Path,
     stamp: str,
@@ -1106,6 +1176,11 @@ def _write_text(report: dict[str, Any], out_fpath: Path) -> None:
     lines.append(f"single_run_mode: {str(report.get('single_run_mode', False)).lower()}")
     lines.append(f"diagnostic_flags: {report.get('diagnostic_flags', [])}")
     lines.append('')
+    lines.append('warnings_and_caveats:')
+    lines.append(f"  packet_warnings: {report.get('packet_warnings', [])}")
+    lines.append(f"  packet_caveats: {report.get('packet_caveats', [])}")
+    lines.append(f"  warnings_manifest: {report.get('warnings_manifest_path')}")
+    lines.append('')
     lines.append('selected_components:')
     for component in report.get('components', []):
         lines.append(
@@ -1119,6 +1194,9 @@ def _write_text(report: dict[str, Any], out_fpath: Path) -> None:
             f"  - {comparison['comparison_id']}: kind={comparison.get('comparison_kind')} "
             f"enabled={comparison.get('enabled')} component_ids={comparison.get('component_ids')}"
         )
+        lines.append(f"    disabled_reason: {comparison.get('disabled_reason')}")
+        lines.append(f"    warnings: {comparison.get('warnings', [])}")
+        lines.append(f"    caveats: {comparison.get('caveats', [])}")
     lines.append('')
     lines.append('comparability:')
     for fact_name, fact in (report.get('comparability') or {}).get('facts', {}).items():
@@ -1189,6 +1267,11 @@ def _write_management_summary(report: dict[str, Any], out_fpath: Path) -> None:
     lines.append(f"core_metrics: {', '.join(ref_pair.get('core_metrics', []))}")
     lines.append(f"diagnostic_flags: {report.get('diagnostic_flags', [])}")
     lines.append('')
+    lines.append('warnings_and_caveats:')
+    lines.append(f"  packet_warnings: {report.get('packet_warnings', [])}")
+    lines.append(f"  packet_caveats: {report.get('packet_caveats', [])}")
+    lines.append(f"  warnings_manifest: {report.get('warnings_manifest_path')}")
+    lines.append('')
     lines.append('selected_components:')
     for component in report.get('components', []):
         lines.append(
@@ -1202,6 +1285,9 @@ def _write_management_summary(report: dict[str, Any], out_fpath: Path) -> None:
             f"  - {comparison['comparison_id']}: kind={comparison.get('comparison_kind')} "
             f"enabled={comparison.get('enabled')} component_ids={comparison.get('component_ids')}"
         )
+        lines.append(f"    disabled_reason: {comparison.get('disabled_reason')}")
+        lines.append(f"    warnings: {comparison.get('warnings', [])}")
+        lines.append(f"    caveats: {comparison.get('caveats', [])}")
     lines.append('')
     lines.append('comparability:')
     for fact_name, fact in (report.get('comparability') or {}).get('facts', {}).items():
@@ -1302,7 +1388,8 @@ def main(argv: list[str] | None = None) -> None:
         comparisons_manifest=args.comparisons_manifest,
     )
     components = components_manifest.get('components') or []
-    comparisons = [comparison for comparison in (comparisons_manifest.get('comparisons') or []) if comparison.get('enabled', True)]
+    all_comparisons = comparisons_manifest.get('comparisons') or []
+    comparisons = [comparison for comparison in all_comparisons if comparison.get('enabled', True)]
     component_lookup = {component['component_id']: component for component in components}
     run_spec_name = _infer_run_spec_name(*(component['run_path'] for component in components))
 
@@ -1318,6 +1405,9 @@ def main(argv: list[str] | None = None) -> None:
         pair['comparison_kind'] = comparison.get('comparison_kind')
         pair['component_ids'] = component_ids
         pair['reference_component_id'] = comparison.get('reference_component_id')
+        pair['comparability_facts'] = comparison.get('comparability_facts') or {}
+        pair['warnings'] = comparison.get('warnings') or []
+        pair['caveats'] = comparison.get('caveats') or []
         pair['label'] = comparison['comparison_id']
         pairs.append(pair)
 
@@ -1329,27 +1419,40 @@ def main(argv: list[str] | None = None) -> None:
         comparison.get('comparison_kind') == 'local_repeat'
         for comparison in comparisons
     )
-    comparability = _comparability_summary(components)
+    component_comparability = _comparability_summary(components)
+    comparability = {
+        'facts': components_manifest.get('comparability_facts') or component_comparability.get('facts', {}),
+        'component_metadata': component_comparability.get('component_metadata', {}),
+    }
 
     report = {
         'generated_utc': stamp,
         'run_spec_name': run_spec_name,
         'report_dpath': str(report_dpath),
+        'packet_id': components_manifest.get('packet_id'),
+        'run_entry': components_manifest.get('run_entry'),
+        'planner_version': components_manifest.get('planner_version'),
         'components_manifest_path': str(components_manifest_fpath),
         'comparisons_manifest_path': str(comparisons_manifest_fpath),
+        'warnings_manifest_path': str(report_dpath / 'warnings.latest.json'),
         'thresholds': thresholds,
         'components': components,
-        'comparisons': comparisons,
+        'comparisons': all_comparisons,
         'pairs': pairs,
         'run_diagnostics': run_diagnostics,
         'diagnostic_flags': _diagnostic_flags(run_diagnostics, components, comparisons),
         'single_run_mode': single_run_mode,
         'comparability': comparability,
+        'packet_warnings': components_manifest.get('warnings') or [],
+        'packet_caveats': components_manifest.get('caveats') or [],
+        'official_selection': components_manifest.get('official_selection') or {},
     }
 
     json_fpath = history_dpath / f'core_metric_report_{stamp}.json'
     txt_fpath = history_dpath / f'core_metric_report_{stamp}.txt'
     mgmt_fpath = history_dpath / f'core_metric_management_summary_{stamp}.txt'
+    warnings_json_fpath = history_dpath / f'warnings_{stamp}.json'
+    warnings_txt_fpath = history_dpath / f'warnings_{stamp}.txt'
     official_vs_local = _find_pair(report, 'official_vs_local') or (pairs[-1] if pairs else None)
     local_repeat = _find_pair(report, 'local_repeat')
 
@@ -1437,11 +1540,15 @@ def main(argv: list[str] | None = None) -> None:
     json_fpath.write_text(json.dumps(report, indent=2))
     _write_text(report, txt_fpath)
     _write_management_summary(report, mgmt_fpath)
+    warnings_json_fpath.write_text(json.dumps(_warnings_payload(report), indent=2) + '\n')
+    warnings_txt_fpath.write_text('\n'.join(_warning_summary_lines(report)) + '\n')
 
     latest_map = {
         json_fpath: 'core_metric_report.latest.json',
         txt_fpath: 'core_metric_report.latest.txt',
         mgmt_fpath: 'core_metric_management_summary.latest.txt',
+        warnings_json_fpath: 'warnings.latest.json',
+        warnings_txt_fpath: 'warnings.latest.txt',
         fig_fpath: 'core_metric_report.latest.png',
         runlevel_csv_fpath: 'core_runlevel_table.latest.csv',
     }
@@ -1461,6 +1568,8 @@ def main(argv: list[str] | None = None) -> None:
         'core_metric_report.latest.json',
         'core_metric_report.latest.txt',
         'core_metric_management_summary.latest.txt',
+        'warnings.latest.json',
+        'warnings.latest.txt',
         'core_metric_report.latest.png',
         'core_metric_distributions.latest.png',
         'core_metric_three_run_distributions.latest.png',
@@ -1473,20 +1582,23 @@ def main(argv: list[str] | None = None) -> None:
     for latest_name in known_latest_names - set(latest_map.values()):
         safe_unlink(report_dpath / latest_name)
 
-    print(f'Wrote core metric report: {json_fpath}')
-    print(f'Wrote core metric text: {txt_fpath}')
-    print(f'Wrote core metric management summary: {mgmt_fpath}')
-    print(f'Wrote core metric plot: {fig_fpath}')
+    print(f'Wrote core metric report: {rich_link(json_fpath)}')
+    print(f'Wrote core metric text: {rich_link(txt_fpath)}')
+    print(f'Wrote core metric management summary: {rich_link(mgmt_fpath)}')
+    print(f'Wrote core metric warnings json: {rich_link(warnings_json_fpath)}')
+    print(f'Wrote core metric warnings text: {rich_link(warnings_txt_fpath)}')
+    print(f'Wrote core metric plot: {rich_link(fig_fpath)}')
     if dist_fig_fpath is not None:
-        print(f'Wrote core metric distributions: {dist_fig_fpath}')
+        print(f'Wrote core metric distributions: {rich_link(dist_fig_fpath)}')
     if overlay_dist_fpath is not None:
-        print(f'Wrote core metric overlay distributions: {overlay_dist_fpath}')
+        print(f'Wrote core metric overlay distributions: {rich_link(overlay_dist_fpath)}')
     if ecdf_fig_fpath is not None:
-        print(f'Wrote core metric ecdfs: {ecdf_fig_fpath}')
+        print(f'Wrote core metric ecdfs: {rich_link(ecdf_fig_fpath)}')
     if per_metric_agree_fpath is not None:
-        print(f'Wrote per-metric agreement curves: {per_metric_agree_fpath}')
-    print(f'Wrote core run-level table csv: {runlevel_csv_fpath}')
-    print(f'Wrote core run-level table md: {runlevel_md_fpath}')
+        print(f'Wrote per-metric agreement curves: {rich_link(per_metric_agree_fpath)}')
+    print(f'Wrote core run-level table csv: {rich_link(runlevel_csv_fpath)}')
+    if runlevel_md_fpath is not None:
+        print(f'Wrote core run-level table md: {rich_link(runlevel_md_fpath)}')
 
 
 if __name__ == '__main__':

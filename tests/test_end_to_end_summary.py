@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from helm_audit.reports.core_packet import comparison_sample_latest_name
 from helm_audit.workflows.build_reports_summary import (
     ATTEMPTED_LABEL,
     FILTER_SELECTION_EXCLUDED_LABEL,
@@ -688,8 +689,8 @@ def test_prioritized_example_symlink_tree_is_created_and_points_to_real_targets(
     for name in [
         "core_metric_report.latest.png",
         "core_metric_management_summary.latest.txt",
-        "instance_samples_official_vs_kwdagger.latest.txt",
-        "report_selection.latest.json",
+        "warnings.latest.txt",
+        comparison_sample_latest_name("official_vs_local"),
     ]:
         (report_dir / name).write_text(name)
 
@@ -773,7 +774,11 @@ def test_prioritized_example_repairs_missing_latest_artifacts(tmp_path, monkeypa
         for name in [
             "core_metric_report.latest.png",
             "core_metric_management_summary.latest.txt",
-            "instance_samples_official_vs_kwdagger.latest.txt",
+            "components_manifest.latest.json",
+            "comparisons_manifest.latest.json",
+            "warnings.latest.json",
+            "warnings.latest.txt",
+            comparison_sample_latest_name("official_vs_local"),
         ]:
             (report_dir / name).write_text("repaired")
 

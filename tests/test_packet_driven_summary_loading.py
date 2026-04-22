@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from helm_audit.infra.logging import rich_link
+from helm_audit.reports.core_packet import comparison_sample_latest_name
 from helm_audit.workflows import analyze_experiment, build_reports_summary
 
 
@@ -157,6 +158,24 @@ def _write_core_report_packet(
         ],
     }
     _write_json(report_dir / "core_metric_report.latest.json", report_payload)
+    _write_json(
+        report_dir / "warnings.latest.json",
+        {
+            "packet_warnings": ["suspicious_case"] if single_run else ["suspicious_case", "repeat_case"],
+            "packet_caveats": [],
+            "comparisons": [
+                {
+                    "comparison_id": item["comparison_id"],
+                    "enabled": item["enabled"],
+                    "disabled_reason": item.get("disabled_reason"),
+                    "warnings": item.get("warnings", []),
+                    "caveats": item.get("caveats", []),
+                }
+                for item in comparisons
+            ],
+        },
+    )
+    (report_dir / "warnings.latest.txt").write_text("packet_warnings:\n  - suspicious_case\n")
 
 
 def test_analyze_experiment_summary_uses_packet_manifests_for_single_and_multi_run(tmp_path):
@@ -178,6 +197,7 @@ def test_analyze_experiment_summary_uses_packet_manifests_for_single_and_multi_r
     assert single_summary["analysis_single_run"] is True
     assert single_summary["components_manifest"].endswith("components_manifest.latest.json")
     assert single_summary["comparisons_manifest"].endswith("comparisons_manifest.latest.json")
+    assert single_summary["warnings_manifest"].endswith("warnings.latest.json")
     assert multi_summary["run_entry"] == "bench:model=multi"
     assert multi_summary["analysis_single_run"] is False
     assert multi_summary["repeat_instance_agree_0"] == 1.0
@@ -213,8 +233,10 @@ def test_sample_artifact_lookup_is_derived_from_packet_comparison_ids(tmp_path):
 
     assert "components_manifest.latest.json" in artifact_names
     assert "comparisons_manifest.latest.json" in artifact_names
-    assert "instance_samples_official_vs_local.latest.txt" in artifact_names
-    assert "instance_samples_local_repeat.latest.txt" in artifact_names
+    assert "warnings.latest.json" in artifact_names
+    assert "warnings.latest.txt" in artifact_names
+    assert comparison_sample_latest_name("official_vs_local") in artifact_names
+    assert comparison_sample_latest_name("local_repeat") in artifact_names
     assert "instance_samples_official_vs_kwdagger.latest.txt" not in artifact_names
 
 

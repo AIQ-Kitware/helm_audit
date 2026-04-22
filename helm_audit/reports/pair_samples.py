@@ -2,25 +2,14 @@ from __future__ import annotations
 
 import argparse
 
-from helm_audit.infra.logging import setup_cli_logging
+from helm_audit.infra.logging import rich_link, setup_cli_logging
 import datetime as datetime_mod
 from pathlib import Path
 
 from helm_audit.compat.helm_outputs import HelmRun
 from helm_audit.helm.diff import HelmRunDiff
 from helm_audit.infra.fs_publish import write_latest_alias
-
-
-def _slugify(text: str) -> str:
-    return (
-        str(text)
-        .replace('/', '-')
-        .replace(':', '-')
-        .replace(',', '-')
-        .replace('=', '-')
-        .replace('@', '-')
-        .replace(' ', '-')
-    )
+from helm_audit.reports.core_packet import comparison_sample_history_name, comparison_sample_latest_name
 
 
 def _infer_run_spec_name(*run_paths: str) -> str:
@@ -70,9 +59,9 @@ def write_pair_samples(
         show_details=show_details,
         writer=lines.append,
     )
-    out_fpath = history_dpath / f'instance_samples_{_slugify(label)}_{stamp}.txt'
+    out_fpath = history_dpath / comparison_sample_history_name(label, stamp)
     out_fpath.write_text('\n'.join(lines) + '\n')
-    latest_name = f'instance_samples_{_slugify(label)}.latest.txt'
+    latest_name = comparison_sample_latest_name(label)
     write_latest_alias(out_fpath, report_dpath, latest_name)
     return out_fpath
 
@@ -98,9 +87,9 @@ def main(argv: list[str] | None = None) -> None:
         show_details=args.show_details,
         level=args.level,
     )
-    latest_fpath = Path(args.report_dpath).expanduser().resolve() / f'instance_samples_{_slugify(args.label)}.latest.txt'
-    print(f'Wrote instance sample report: {out_fpath}')
-    print(f'Updated latest link: {latest_fpath}')
+    latest_fpath = Path(args.report_dpath).expanduser().resolve() / comparison_sample_latest_name(args.label)
+    print(f'Wrote instance sample report: {rich_link(out_fpath)}')
+    print(f'Updated latest link: {rich_link(latest_fpath)}')
 
 
 if __name__ == '__main__':

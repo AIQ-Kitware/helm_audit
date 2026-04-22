@@ -912,11 +912,14 @@ def _load_all_repro_rows() -> list[dict[str, Any]]:
         row = {
             "experiment_name": experiment_name,
             "run_entry": run_entry,
+            "packet_id": packet["components_manifest"].get("packet_id"),
+            "selected_public_track": packet["components_manifest"].get("selected_public_track"),
             "run_spec_name": report.get("run_spec_name"),
             "report_dir": str(report_json.parent),
             "report_json": str(report_json),
             "components_manifest": str(packet["components_manifest_path"]),
             "comparisons_manifest": str(packet["comparisons_manifest_path"]),
+            "warnings_manifest": str(packet["warnings_manifest_path"]),
             "analysis_local_reference_run": _clean_optional_text(local_reference.get("run_path")),
             "analysis_official_run": _clean_optional_text(official_component.get("run_path")),
             "analysis_selected_run_dirs": selected_run_dirs,
@@ -944,8 +947,24 @@ def _load_all_repro_rows() -> list[dict[str, Any]]:
                 for pt in official_agree_curve
             ],
             "official_per_metric_agreement": nested_get(official, "instance_level", "per_metric_agreement") or {},
+            "packet_warnings": (packet.get("warnings_manifest") or {}).get("packet_warnings", []),
+            "packet_caveats": (packet.get("warnings_manifest") or {}).get("packet_caveats", []),
+            "comparison_warning_count": sum(
+                len(comparison.get("warnings") or [])
+                + (1 if comparison.get("disabled_reason") else 0)
+                for comparison in ((packet.get("warnings_manifest") or {}).get("comparisons") or [])
+            ),
+            "report_warning_count": len((packet.get("warnings_manifest") or {}).get("packet_warnings") or []),
+            "has_report_warnings": bool(
+                (packet.get("warnings_manifest") or {}).get("packet_warnings")
+                or report.get("diagnostic_flags")
+                or any(
+                    comparison.get("warnings") or comparison.get("disabled_reason")
+                    for comparison in ((packet.get("warnings_manifest") or {}).get("comparisons") or [])
+                )
+            ),
         }
-        deduped[(experiment_name, run_entry)] = row
+        deduped[(experiment_name, run_entry, row["packet_id"] or row["report_dir"])] = row
     return list(deduped.values())
 
 
@@ -1864,6 +1883,7 @@ def _build_prioritized_breakdown_summary(
                 "machine_spread": any(bool(row.get("has_machine_spread")) for row in analyzed_group_rows),
                 "ambiguous_analyzed_matching": any(bool(row.get("has_ambiguous_analyzed_matching")) for row in analyzed_group_rows),
                 "off_story_signal": any(bool(row.get("has_off_story_signal")) for row in analyzed_group_rows),
+                "report_warnings": any(bool(row.get("has_report_warnings")) for row in analyzed_group_rows),
             }
             dominant_bucket = max(bucket_counts.items(), key=lambda item: (item[1], item[0]))[0]
             dominant_bucket_class = _agreement_bucket_class(dominant_bucket) or "other"
@@ -1892,6 +1912,7 @@ def _build_prioritized_breakdown_summary(
                     "has_machine_spread": flags["machine_spread"],
                     "has_ambiguous_analyzed_matching": flags["ambiguous_analyzed_matching"],
                     "has_off_story_signal": flags["off_story_signal"],
+                    "has_report_warnings": flags["report_warnings"],
                     "breakdown_dir": str(breakdown_dir),
                     "breakdown_index_dir": str(breakdown_index_dir),
                     "rows": analyzed_group_rows,
@@ -1913,6 +1934,7 @@ def _build_prioritized_breakdown_summary(
                     ("multi_machine", row["has_machine_spread"]),
                     ("ambiguous_analysis", row["has_ambiguous_analyzed_matching"]),
                     ("off_story", row["has_off_story_signal"]),
+                    ("report_warnings", row["has_report_warnings"]),
                 ]
                 if enabled
             ]
@@ -1973,6 +1995,7 @@ def _build_prioritized_breakdown_summary(
                     ("multi_machine", row["has_machine_spread"]),
                     ("ambiguous_analysis", row["has_ambiguous_analyzed_matching"]),
                     ("off_story", row["has_off_story_signal"]),
+                    ("report_warnings", row["has_report_warnings"]),
                 ]
                 if enabled
             ]
@@ -2083,8 +2106,11 @@ def _build_prioritized_breakdown_summary(
         keep = [
             "experiment_name",
             "run_entry",
+            "packet_id",
             "report_dir",
             "report_json",
+            "warnings_manifest",
+            "has_report_warnings",
             "official_instance_agree_bucket",
             "official_instance_agree_005",
             "analysis_single_run",
@@ -2212,6 +2238,8 @@ def _prioritized_example_artifact_names(report_dir: Path) -> list[str]:
             "core_metric_management_summary.latest.txt",
             "components_manifest.latest.json",
             "comparisons_manifest.latest.json",
+            "warnings.latest.json",
+            "warnings.latest.txt",
         ]
     return prioritized_example_artifact_names(packet)
 

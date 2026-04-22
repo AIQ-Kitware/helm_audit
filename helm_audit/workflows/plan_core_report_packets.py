@@ -41,26 +41,10 @@ def _write_csv(rows: list[dict[str, Any]], fpath: Path) -> None:
             writer.writerow(row)
 
 
-def main(argv: list[str] | None = None) -> None:
-    setup_cli_logging()
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--local-index-fpath", required=True)
-    parser.add_argument("--official-index-fpath", required=True)
-    parser.add_argument("--experiment-name", default=None)
-    parser.add_argument("--run-entry", default=None)
-    parser.add_argument("--out-dpath", required=True)
-    args = parser.parse_args(argv)
-
-    out_dpath = Path(args.out_dpath).expanduser().resolve()
+def write_planning_outputs(*, artifact: dict[str, Any], out_dpath: Path) -> dict[str, Path]:
+    out_dpath = out_dpath.expanduser().resolve()
     out_dpath.mkdir(parents=True, exist_ok=True)
     stamp, history_dpath = stamped_history_dir(out_dpath)
-
-    artifact = build_planning_artifact(
-        local_index_fpath=args.local_index_fpath,
-        official_index_fpath=args.official_index_fpath,
-        experiment_name=args.experiment_name,
-        run_entry=args.run_entry,
-    )
 
     json_fpath = history_dpath / f"comparison_intents_{stamp}.json"
     txt_fpath = history_dpath / f"comparison_intents_{stamp}.txt"
@@ -85,14 +69,44 @@ def main(argv: list[str] | None = None) -> None:
     write_latest_alias(comparison_csv_fpath, out_dpath, "comparison_intent_comparisons.latest.csv")
     write_latest_alias(warnings_json_fpath, out_dpath, "warnings.latest.json")
     write_latest_alias(warnings_txt_fpath, out_dpath, "warnings.latest.txt")
+    return {
+        "comparison_intents_json": json_fpath,
+        "comparison_intents_txt": txt_fpath,
+        "comparison_intent_packets_csv": packet_csv_fpath,
+        "comparison_intent_components_csv": component_csv_fpath,
+        "comparison_intent_comparisons_csv": comparison_csv_fpath,
+        "warnings_json": warnings_json_fpath,
+        "warnings_txt": warnings_txt_fpath,
+    }
 
-    logger.info(f"Wrote comparison intents json: {rich_link(json_fpath)}")
-    logger.info(f"Wrote comparison intents text: {rich_link(txt_fpath)}")
-    logger.info(f"Wrote comparison intent packets csv: {rich_link(packet_csv_fpath)}")
-    logger.info(f"Wrote comparison intent components csv: {rich_link(component_csv_fpath)}")
-    logger.info(f"Wrote comparison intent comparisons csv: {rich_link(comparison_csv_fpath)}")
-    logger.info(f"Wrote planner warnings json: {rich_link(warnings_json_fpath)}")
-    logger.info(f"Wrote planner warnings text: {rich_link(warnings_txt_fpath)}")
+
+def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--local-index-fpath", required=True)
+    parser.add_argument("--official-index-fpath", required=True)
+    parser.add_argument("--experiment-name", default=None)
+    parser.add_argument("--run-entry", default=None)
+    parser.add_argument("--out-dpath", required=True)
+    args = parser.parse_args(argv)
+
+    artifact = build_planning_artifact(
+        local_index_fpath=args.local_index_fpath,
+        official_index_fpath=args.official_index_fpath,
+        experiment_name=args.experiment_name,
+        run_entry=args.run_entry,
+    )
+    paths = write_planning_outputs(
+        artifact=artifact,
+        out_dpath=Path(args.out_dpath),
+    )
+    logger.info(f"Wrote comparison intents json: {rich_link(paths['comparison_intents_json'])}")
+    logger.info(f"Wrote comparison intents text: {rich_link(paths['comparison_intents_txt'])}")
+    logger.info(f"Wrote comparison intent packets csv: {rich_link(paths['comparison_intent_packets_csv'])}")
+    logger.info(f"Wrote comparison intent components csv: {rich_link(paths['comparison_intent_components_csv'])}")
+    logger.info(f"Wrote comparison intent comparisons csv: {rich_link(paths['comparison_intent_comparisons_csv'])}")
+    logger.info(f"Wrote planner warnings json: {rich_link(paths['warnings_json'])}")
+    logger.info(f"Wrote planner warnings text: {rich_link(paths['warnings_txt'])}")
 
 
 if __name__ == "__main__":

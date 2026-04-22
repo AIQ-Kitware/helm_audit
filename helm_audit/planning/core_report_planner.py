@@ -475,6 +475,110 @@ def _latest_official_selection(official_components: list[NormalizedPlannerCompon
     }
 
 
+def _packet_payload(
+    *,
+    group_key: str,
+    experiment_name: str | None,
+    run_entry: str | None,
+    local_components: list[NormalizedPlannerComponent],
+    official_components: list[NormalizedPlannerComponent],
+    official_selection: dict[str, Any],
+    packet_track: str | None = None,
+) -> dict[str, Any]:
+    packet_components = [*local_components, *official_components]
+    local_reference = local_components[0] if local_components else None
+    packet_comparability_facts = build_comparability_facts(packet_components)
+    packet_caveats = _comparison_caveats(packet_comparability_facts)
+    packet_warnings = [
+        *official_selection["warnings"],
+        *itertools.chain.from_iterable(_component_warning_lines(component) for component in packet_components),
+        *_comparability_warning_lines(packet_comparability_facts),
+    ]
+    comparisons: list[dict[str, Any]] = []
+    if local_components:
+        if not official_components:
+            for local_component in local_components:
+                comparisons.append(
+                    _comparison_payload(
+                        comparison_id=f"official_vs_local::{local_component.component_id}",
+                        comparison_kind="official_vs_local",
+                        components=[local_component],
+                        reference_component_id=None,
+                        enabled=False,
+                        disabled_reason="missing_official_component",
+                        notes="planner could not find an official component after policy reduction",
+                    )
+                )
+        elif len(official_components) == 1:
+            official_reference = official_components[0]
+            for local_component in local_components:
+                comparisons.append(
+                    _comparison_payload(
+                        comparison_id=f"official_vs_local::{official_reference.component_id}::{local_component.component_id}",
+                        comparison_kind="official_vs_local",
+                        components=[official_reference, local_component],
+                        reference_component_id=official_reference.component_id,
+                        enabled=True,
+                        notes="planner first-pass official-vs-local comparison",
+                    )
+                )
+        else:
+            candidate_official_ids = [component.component_id for component in official_components]
+            for local_component in local_components:
+                comparisons.append(
+                    _comparison_payload(
+                        comparison_id=f"official_vs_local::{local_component.component_id}::disabled",
+                        comparison_kind="official_vs_local",
+                        components=[*official_components, local_component],
+                        reference_component_id=None,
+                        enabled=False,
+                        disabled_reason="ambiguous_official_candidates_after_latest_per_track",
+                        notes="planner retained more than one official candidate after latest-per-track reduction",
+                        extra_fields={"candidate_reference_component_ids": candidate_official_ids},
+                    )
+                )
+    if local_reference is not None:
+        for repeat_component in local_components[1:]:
+            comparisons.append(
+                _comparison_payload(
+                    comparison_id=f"local_repeat::{local_reference.component_id}::{repeat_component.component_id}",
+                    comparison_kind="local_repeat",
+                    components=[local_reference, repeat_component],
+                    reference_component_id=local_reference.component_id,
+                    enabled=True,
+                    notes="planner first-pass local repeat comparison",
+                )
+            )
+    packet_experiment_name = experiment_name
+    if packet_experiment_name is None:
+        experiment_names = _unique_nonempty([component.experiment_name for component in local_components])
+        packet_experiment_name = experiment_names[0] if len(experiment_names) == 1 else None
+    packet_id_parts = [packet_experiment_name or "all-experiments", group_key]
+    if packet_track is not None:
+        packet_id_parts.append(f"track={packet_track}")
+    packet_id = slugify_identifier("::".join(packet_id_parts))
+    return {
+        "packet_id": packet_id,
+        "run_entry": run_entry or next((component.run_entry for component in local_components if component.run_entry), None) or group_key,
+        "logical_run_key": group_key,
+        "experiment_name": packet_experiment_name,
+        "components": [component.to_manifest_component() for component in packet_components],
+        "comparisons": comparisons,
+        "comparability_facts": packet_comparability_facts,
+        "official_selection": official_selection,
+        "warnings": list(dict.fromkeys([
+            *packet_warnings,
+            *(["missing_local_component"] if not local_components else []),
+            *(["multiple_local_components"] if len(local_components) > 1 else []),
+            *(["missing_official_component"] if not official_components else []),
+            *(["split_by_public_track"] if packet_track is not None else []),
+        ])),
+        "caveats": packet_caveats,
+        "planner_version": PLANNER_VERSION,
+        "selected_public_track": packet_track,
+    }
+
+
 def build_packet_intents(
     components: list[NormalizedPlannerComponent],
     *,
@@ -488,6 +592,18 @@ def build_packet_intents(
         if run_entry is not None and component.logical_run_key != run_entry and component.run_entry != run_entry:
             continue
         filtered.append(component)
+    if experiment_name is not None and run_entry is None:
+        scoped_local_group_keys = {
+            component.logical_run_key or component.run_entry or component.component_id
+            for component in filtered
+            if component.source_kind == "local"
+        }
+        filtered = [
+            component
+            for component in filtered
+            if component.source_kind == "local"
+            or (component.logical_run_key or component.run_entry or component.component_id) in scoped_local_group_keys
+        ]
 
     grouped: dict[str, list[NormalizedPlannerComponent]] = {}
     for component in filtered:
@@ -513,97 +629,50 @@ def build_packet_intents(
             component for component in official_components_all
             if component.component_id in retained_official_ids
         ]
-        packet_components = [*local_components, *official_components]
-        local_reference = local_components[0] if local_components else None
-        packet_comparability_facts = build_comparability_facts(packet_components)
-        packet_caveats = _comparison_caveats(packet_comparability_facts)
-        packet_warnings = [
-            *official_selection["warnings"],
-            *itertools.chain.from_iterable(_component_warning_lines(component) for component in packet_components),
-            *_comparability_warning_lines(packet_comparability_facts),
-        ]
-        comparisons: list[dict[str, Any]] = []
-        if local_components:
-            if not official_components:
-                for local_component in local_components:
-                    comparisons.append(
-                        _comparison_payload(
-                            comparison_id=f"official_vs_local::{local_component.component_id}",
-                            comparison_kind="official_vs_local",
-                            components=[local_component],
-                            reference_component_id=None,
-                            enabled=False,
-                            disabled_reason="missing_official_component",
-                            notes="planner could not find an official component after policy reduction",
-                        )
-                    )
-            elif len(official_components) == 1:
-                official_reference = official_components[0]
-                for local_component in local_components:
-                    comparisons.append(
-                        _comparison_payload(
-                            comparison_id=f"official_vs_local::{official_reference.component_id}::{local_component.component_id}",
-                            comparison_kind="official_vs_local",
-                            components=[official_reference, local_component],
-                            reference_component_id=official_reference.component_id,
-                            enabled=True,
-                            notes="planner first-pass official-vs-local comparison",
-                        )
-                    )
-            else:
-                candidate_official_ids = [component.component_id for component in official_components]
-                for local_component in local_components:
-                    comparisons.append(
-                        _comparison_payload(
-                            comparison_id=f"official_vs_local::{local_component.component_id}::disabled",
-                            comparison_kind="official_vs_local",
-                            components=[*official_components, local_component],
-                            reference_component_id=None,
-                            enabled=False,
-                            disabled_reason="ambiguous_official_candidates_after_latest_per_track",
-                            notes="planner retained more than one official candidate after latest-per-track reduction",
-                            extra_fields={"candidate_reference_component_ids": candidate_official_ids},
-                        )
-                    )
-        if local_reference is not None:
-            for repeat_component in local_components[1:]:
-                comparisons.append(
-                    _comparison_payload(
-                        comparison_id=f"local_repeat::{local_reference.component_id}::{repeat_component.component_id}",
-                        comparison_kind="local_repeat",
-                        components=[local_reference, repeat_component],
-                        reference_component_id=local_reference.component_id,
-                        enabled=True,
-                        notes="planner first-pass local repeat comparison",
+        retained_by_track = official_selection.get("retained_by_track") or {}
+        if len(retained_by_track) > 1:
+            official_by_id = {
+                component.component_id: component
+                for component in official_components
+            }
+            for track, track_component_ids in sorted(retained_by_track.items()):
+                track_official_components = [
+                    official_by_id[component_id]
+                    for component_id in track_component_ids
+                    if component_id in official_by_id
+                ]
+                track_selection = {
+                    **official_selection,
+                    "selected_public_track": track,
+                    "retained_component_ids": track_component_ids,
+                    "retained_by_track": {track: track_component_ids},
+                    "warnings": list(dict.fromkeys([
+                        *official_selection.get("warnings", []),
+                        f"render_split_by_public_track:{track}",
+                    ])),
+                }
+                packets.append(
+                    _packet_payload(
+                        group_key=group_key,
+                        experiment_name=experiment_name,
+                        run_entry=run_entry,
+                        local_components=local_components,
+                        official_components=track_official_components,
+                        official_selection=track_selection,
+                        packet_track=track,
                     )
                 )
-        packet_experiment_name = experiment_name
-        if packet_experiment_name is None:
-            experiment_names = _unique_nonempty([component.experiment_name for component in local_components])
-            packet_experiment_name = experiment_names[0] if len(experiment_names) == 1 else None
-        packet_id = slugify_identifier(
-            f"{packet_experiment_name or 'all-experiments'}::{group_key}"
-        )
-        packets.append(
-            {
-                "packet_id": packet_id,
-                "run_entry": run_entry or next((component.run_entry for component in local_components if component.run_entry), None) or group_key,
-                "logical_run_key": group_key,
-                "experiment_name": packet_experiment_name,
-                "components": [component.to_manifest_component() for component in packet_components],
-                "comparisons": comparisons,
-                "comparability_facts": packet_comparability_facts,
-                "official_selection": official_selection,
-                "warnings": list(dict.fromkeys([
-                    *packet_warnings,
-                    *(["missing_local_component"] if not local_components else []),
-                    *(["multiple_local_components"] if len(local_components) > 1 else []),
-                    *(["missing_official_component"] if not official_components else []),
-                ])),
-                "caveats": packet_caveats,
-                "planner_version": PLANNER_VERSION,
-            }
-        )
+        else:
+            packets.append(
+                _packet_payload(
+                    group_key=group_key,
+                    experiment_name=experiment_name,
+                    run_entry=run_entry,
+                    local_components=local_components,
+                    official_components=official_components,
+                    official_selection=official_selection,
+                )
+            )
     return packets
 
 
@@ -637,6 +706,41 @@ def build_planning_artifact(
         "packet_count": len(packets),
         "packets": packets,
     }
+
+
+def load_planning_artifact(path: str | Path) -> dict[str, Any]:
+    data = json.loads(Path(path).read_text())
+    if not isinstance(data, dict):
+        raise ValueError(f"Planner artifact must decode to a dict: {path}")
+    return data
+
+
+def select_packet_from_artifact(
+    artifact: dict[str, Any],
+    *,
+    packet_id: str | None = None,
+    run_entry: str | None = None,
+    experiment_name: str | None = None,
+) -> dict[str, Any]:
+    packets = list(artifact.get("packets") or [])
+    if packet_id is not None:
+        matches = [packet for packet in packets if packet.get("packet_id") == packet_id]
+        if not matches:
+            raise KeyError(f"No planner packet matched packet_id={packet_id!r}")
+        return matches[0]
+    if run_entry is not None:
+        packets = [packet for packet in packets if packet.get("run_entry") == run_entry]
+    if experiment_name is not None:
+        packets = [packet for packet in packets if packet.get("experiment_name") == experiment_name]
+    if not packets:
+        raise KeyError("No planner packets matched the requested selection")
+    if len(packets) != 1:
+        packet_ids = [packet.get("packet_id") for packet in packets]
+        raise ValueError(
+            "Planner selection was ambiguous; "
+            f"matched packet_ids={packet_ids}. Pass packet_id explicitly."
+        )
+    return packets[0]
 
 
 def comparison_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:

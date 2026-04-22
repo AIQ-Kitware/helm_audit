@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from helm_audit.helm.hashers import stable_hash36
 from helm_audit.infra.fs_publish import safe_unlink, stamped_history_dir, write_latest_alias
 
 
@@ -17,6 +18,21 @@ def slugify_identifier(text: str) -> str:
         .replace("@", "-")
         .replace(" ", "-")
     )
+
+
+def comparison_artifact_stem(comparison_id: str, *, max_slug_len: int = 48, hash_len: int = 10) -> str:
+    slug = slugify_identifier(comparison_id).strip("-") or "comparison"
+    short_slug = slug[:max_slug_len].rstrip("-") or "comparison"
+    suffix = stable_hash36({"comparison_id": str(comparison_id)})[:hash_len]
+    return f"{short_slug}--{suffix}"
+
+
+def comparison_sample_latest_name(comparison_id: str) -> str:
+    return f"instance_samples_{comparison_artifact_stem(comparison_id)}.latest.txt"
+
+
+def comparison_sample_history_name(comparison_id: str, stamp: str) -> str:
+    return f"instance_samples_{comparison_artifact_stem(comparison_id)}_{stamp}.txt"
 
 
 def write_manifest(

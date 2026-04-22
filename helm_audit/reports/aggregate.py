@@ -105,8 +105,10 @@ def main(argv: list[str] | None = None) -> None:
             'generated_utc': report.get('generated_utc'),
             'components_manifest': str(packet['components_manifest_path']),
             'comparisons_manifest': str(packet['comparisons_manifest_path']),
+            'warnings_manifest': str(packet['warnings_manifest_path']),
             'n_core_metrics': len((official.get('core_metrics') or [])),
             'diagnostic_flags': report.get('diagnostic_flags', []),
+            'packet_warnings': (packet.get('warnings_manifest') or {}).get('packet_warnings', []),
             'local_reference_empty_completion_rate': nested_get(report, 'run_diagnostics', local_component.get('component_id'), 'empty_completion_rate'),
             'local_reference_mean_output_tokens': nested_get(report, 'run_diagnostics', local_component.get('component_id'), 'output_token_count', 'mean'),
             'official_empty_completion_rate': nested_get(report, 'run_diagnostics', official_component.get('component_id'), 'empty_completion_rate'),
@@ -154,6 +156,9 @@ def main(argv: list[str] | None = None) -> None:
     lines.append('per_run_spec:')
     for row in rows:
         lines.append(f"  - run_spec_name: {row['run_spec_name']}")
+        lines.append(f"    report_dir: {rich_link(row['report_dir'])}")
+        lines.append(f"    warnings_manifest: {rich_link(row['warnings_manifest'])}")
+        lines.append(f"    packet_warnings: {row['packet_warnings']}")
         lines.append(f"    assessment_label: {row['assessment_label']}")
         lines.append(f"    diagnostic_flags: {row['diagnostic_flags']}")
         lines.append(f"    local_reference_empty_completion_rate: {row['local_reference_empty_completion_rate']}")

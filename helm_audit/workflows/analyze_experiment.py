@@ -16,10 +16,12 @@ from loguru import logger
 from helm_audit.reports.aggregate import _find_curve_value
 from helm_audit.infra.api import audit_root, default_index_root
 from helm_audit.infra.logging import rich_link, setup_cli_logging
+from helm_audit.infra.paths import official_public_index_dpath
 from helm_audit.utils.numeric import nested_get
 from helm_audit.infra.fs_publish import symlink_to, write_latest_alias
 from helm_audit.infra.paths import experiment_analysis_dpath
 from helm_audit.infra.report_layout import compat_core_run_reports_root, portable_repo_root_lines, write_reproduce_script
+from helm_audit.planning.core_report_planner import build_planning_artifact
 from helm_audit.reports.core_packet_summary import (
     find_report_pair,
     load_core_report_packet,
@@ -29,8 +31,10 @@ from helm_audit.reports.core_packet_summary import (
 )
 from helm_audit.reports import pair_report
 from helm_audit.reports.paper_labels import load_paper_label_manager
+from helm_audit.workflows.plan_core_report_packets import write_planning_outputs
 from helm_audit.workflows.rebuild_core_report import (
     latest_index_csv,
+    latest_official_index_csv,
     load_rows,
     main as rebuild_core_report_main,
     slugify_identifier,
@@ -160,15 +164,29 @@ def _summarize_core_report(report_json: Path, *, experiment_name: str) -> dict[s
     run_diagnostics = report.get("run_diagnostics", {}) or {}
     official_diag = run_diagnostics.get(official_component.get("component_id"), {})
     local_diag = run_diagnostics.get(local_component.get("component_id"), {})
+    warnings_manifest = packet.get("warnings_manifest") or {}
     return {
         "experiment_name": experiment_name,
         "run_spec_name": report.get("run_spec_name"),
         "run_entry": packet["components_manifest"].get("run_entry"),
+        "packet_id": packet["components_manifest"].get("packet_id"),
+        "selected_public_track": packet["components_manifest"].get("selected_public_track"),
         "report_dir": str(report_json.parent),
         "generated_utc": report.get("generated_utc"),
         "diagnostic_flags": report.get("diagnostic_flags", []),
         "components_manifest": str(packet["components_manifest_path"]),
         "comparisons_manifest": str(packet["comparisons_manifest_path"]),
+        "warnings_manifest": str(packet["warnings_manifest_path"]),
+        "packet_warnings": warnings_manifest.get("packet_warnings", []),
+        "packet_caveats": warnings_manifest.get("packet_caveats", []),
+        "has_warnings": bool(
+            warnings_manifest.get("packet_warnings")
+            or report.get("diagnostic_flags")
+            or any(
+                comparison.get("warnings") or comparison.get("disabled_reason")
+                for comparison in warnings_manifest.get("comparisons", [])
+            )
+        ),
         "local_reference_empty_completion_rate": local_diag.get("empty_completion_rate"),
         "local_reference_mean_output_tokens": nested_get(local_diag, "output_token_count", "mean"),
         "official_empty_completion_rate": official_diag.get("empty_completion_rate"),
@@ -190,6 +208,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument('--experiment-name', required=True)
     parser.add_argument('--index-fpath', default=None)
     parser.add_argument('--index-dpath', default=str(default_index_root()))
+    parser.add_argument('--official-index-fpath', default=None)
+    parser.add_argument('--official-index-dpath', default=str(official_public_index_dpath()))
     parser.add_argument('--allow-single-repeat', action='store_true')
     args = parser.parse_args(argv)
 
@@ -197,6 +217,11 @@ def main(argv: list[str] | None = None) -> None:
         Path(args.index_fpath).expanduser().resolve()
         if args.index_fpath else
         latest_index_csv(Path(args.index_dpath).expanduser().resolve())
+    )
+    official_index_fpath = (
+        Path(args.official_index_fpath).expanduser().resolve()
+        if args.official_index_fpath else
+        latest_official_index_csv(Path(args.official_index_dpath).expanduser().resolve())
     )
     rows = load_rows(index_fpath)
     experiment_rows = [r for r in rows if r.get('experiment_name') == args.experiment_name]
@@ -219,15 +244,31 @@ def main(argv: list[str] | None = None) -> None:
     out_dpath.mkdir(parents=True, exist_ok=True)
     reports_dpath = out_dpath / 'core-reports'
     reports_dpath.mkdir(parents=True, exist_ok=True)
+    planning_dpath = out_dpath / 'planning'
+    planning_artifact = build_planning_artifact(
+        local_index_fpath=index_fpath,
+        official_index_fpath=official_index_fpath,
+        experiment_name=args.experiment_name,
+    )
+    planning_paths = write_planning_outputs(
+        artifact=planning_artifact,
+        out_dpath=planning_dpath,
+    )
 
     built_report_paths = []
     skipped_run_entries: list[dict[str, Any]] = []
-    for run_entry in run_entries:
-        report_dpath = reports_dpath / f'core-metrics-{slugify_identifier(run_entry)}'
+    packets = planning_artifact.get("packets") or []
+    for packet in packets:
+        run_entry = packet.get("run_entry")
+        packet_id = packet.get("packet_id")
+        report_dpath = reports_dpath / f'core-metrics-{slugify_identifier(str(packet_id or run_entry))}'
         try:
             argv = [
+                '--packet-id', str(packet_id),
                 '--run-entry', str(run_entry),
                 '--index-fpath', str(index_fpath),
+                '--official-index-fpath', str(official_index_fpath),
+                '--planner-artifact-fpath', str(planning_paths['comparison_intents_json']),
                 '--experiment-name', str(args.experiment_name),
                 '--report-dpath', str(report_dpath),
             ]
@@ -236,6 +277,7 @@ def main(argv: list[str] | None = None) -> None:
             rebuild_core_report_main(argv)
         except (Exception, SystemExit) as ex:
             skipped_run_entries.append({
+                'packet_id': packet_id,
                 'run_entry': run_entry,
                 'reason': 'rebuild_failed',
                 'returncode': getattr(ex, 'returncode', None),
@@ -338,7 +380,12 @@ def main(argv: list[str] | None = None) -> None:
         'generated_utc': stamp,
         'experiment_name': args.experiment_name,
         'index_fpath': str(index_fpath),
+        'official_index_fpath': str(official_index_fpath),
+        'planning_dir': str(planning_dpath),
+        'comparison_intents': str(planning_paths['comparison_intents_json']),
+        'planner_warnings': str(planning_paths['warnings_txt']),
         'n_run_entries': len(run_entries),
+        'n_planned_packets': len(packets),
         'n_built_reports': len(summary_rows),
         'n_skipped_run_entries': len(skipped_run_entries),
         'benchmark_completion': benchmark_completion,
@@ -358,7 +405,12 @@ def main(argv: list[str] | None = None) -> None:
     lines.append(f'generated_utc: {stamp}')
     lines.append(f'experiment_name: {args.experiment_name}')
     lines.append(f'index_fpath: {render_path_link(index_fpath)}')
+    lines.append(f'official_index_fpath: {render_path_link(official_index_fpath)}')
+    lines.append(f'planning_dir: {render_path_link(planning_dpath)}')
+    lines.append(f'comparison_intents: {render_path_link(planning_paths["comparison_intents_json"])}')
+    lines.append(f'planner_warnings: {render_path_link(planning_paths["warnings_txt"])}')
     lines.append(f'n_run_entries: {len(run_entries)}')
+    lines.append(f'n_planned_packets: {len(packets)}')
     lines.append(f'n_built_reports: {len(summary_rows)}')
     lines.append(f'n_skipped_run_entries: {len(skipped_run_entries)}')
     if not summary_rows:
@@ -380,6 +432,7 @@ def main(argv: list[str] | None = None) -> None:
         lines.append('skipped_run_entries:')
         for item in skipped_run_entries:
             lines.append(f"  - run_entry: {item['run_entry']}")
+            lines.append(f"    packet_id: {item.get('packet_id')}")
             lines.append(f"    reason: {item['reason']}")
             lines.append(f"    returncode: {item['returncode']}")
             lines.append(f"    error: {item.get('error')}")
@@ -409,6 +462,11 @@ def main(argv: list[str] | None = None) -> None:
         lines.append(f"    report_dir: {render_path_link(row['report_dir'])}")
         lines.append(f"    components_manifest: {render_path_link(row['components_manifest'])}")
         lines.append(f"    comparisons_manifest: {render_path_link(row['comparisons_manifest'])}")
+        lines.append(f"    warnings_manifest: {render_path_link(row['warnings_manifest'])}")
+        lines.append(f"    packet_id: {row.get('packet_id')}")
+        lines.append(f"    selected_public_track: {row.get('selected_public_track')}")
+        lines.append(f"    has_warnings: {row.get('has_warnings')}")
+        lines.append(f"    packet_warnings: {row.get('packet_warnings')}")
         lines.append(f"    diagnostic_flags: {row['diagnostic_flags']}")
         lines.append(f"    local_reference_empty_completion_rate: {row['local_reference_empty_completion_rate']}")
         lines.append(f"    local_reference_mean_output_tokens: {row['local_reference_mean_output_tokens']}")
@@ -434,6 +492,8 @@ def main(argv: list[str] | None = None) -> None:
         args.experiment_name,
         '--index-fpath',
         str(index_fpath),
+        '--official-index-fpath',
+        str(official_index_fpath),
         *( ['--allow-single-repeat'] if args.allow_single_repeat else [] ),
     ]
     reproduce_fpath = write_reproduce_script(out_dpath / 'reproduce.latest.sh', [
@@ -452,8 +512,10 @@ def main(argv: list[str] | None = None) -> None:
         'generated_utc': stamp,
         'experiment_name': args.experiment_name,
         'index_fpath': str(index_fpath),
+        'official_index_fpath': str(official_index_fpath),
         'analysis_root': str(out_dpath),
         'n_run_entries': len(run_entries),
+        'n_planned_packets': len(packets),
         'n_built_reports': len(summary_rows),
     }
     try:
