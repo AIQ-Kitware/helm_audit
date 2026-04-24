@@ -454,3 +454,54 @@ Model and configuration: claude-sonnet-4-6, Claude Code CLI.
 `test_trigger_prefixes_match_real_planner_warning_names` calls `_comparability_warning_lines` directly (the real planner function) to get actual warning strings, then verifies the selection function responds correctly. This test will fail if the planner renames a fact and the prefix list isn't updated.
 
 Design insight: import and test against the real emitter function, not hand-written string literals. The test becomes self-validating: it checks that the emitter produces the exact strings the consumer expects, closing the gap between two modules that must stay in sync.
+
+## 2026-04-24 18:56:11 +0000
+
+User asked to stress-test the EEE (Every Eval Ever) HELM converter against all official public HELM results available locally, surface converter bugs, and harden the converter.
+
+Model and configuration: claude-sonnet-4-6, Claude Code CLI.
+
+**Scope and setup**: 36,046 valid HELM run directories across 13 benchmark suites under `/data/crfm-helm-public`. Output root: `/data/crfm-helm-audit-store/crfm-helm-public-eee-test`. Driver script: `dev/poc/eee-audit/sweep.py`.
+
+**Sweep script design**: Enumerates runs from `{suite}/benchmark_output/runs/{version}/{run_name}`, calls `every_eval_ever convert helm` per run as a subprocess, writes per-run `status.json` (traceable to source path), and a JSONL results log. Skip-existing by checking `status == "ok"` in status.json; resumes cleanly across partial runs. Configurable `--workers`, `--limit`, `--suite`, `--timeout`, `--max-scenario-state-mb`.
+
+**Bugs discovered and fixed** (all in `submodules/every_eval_ever/`):
+
+1. **Bug 1 — IndexError: `correct_refs[0]` on empty list** (`converters/helm/instance_level_adapter.py` line 166).
+   - Triggered by: `capabilities/ifeval`, `capabilities/wildbench` runs where instances have no reference answers.
+   - Fix: `state.request.prompt + (correct_refs[0] if correct_refs else '')`.
+   - Fixed in commit `368ad4c6f`.
+
+2. **Bug 2 — ValidationError: `reasoning_trace` list contains None** (`converters/helm/utils.py`).
+   - Triggered by: `capabilities/gpqa` with chain-of-thought runs where `thinking` object exists but `thinking.text` is `None`.
+   - Fix: filter `None` values from `extract_all_reasonings` result list; return `None` if empty.
+   - Fixed in commit `368ad4c6f`.
+
+3. **Bug 3 — WrongTypeError: `instance.id` is int, expects `Optional[str]`** (`converters/helm/adapter.py`).
+   - Triggered by: `long-context` suite (HELM v1.0.0) where instance IDs are stored as JSON integers.
+   - Fix: pass `config=DaciteConfig(cast=[str])` to the `from_dict(ScenarioState, ...)` call.
+   - Fixed in commit `bad6f1a6f` (by joncrall, pre-existing on branch `helm-stress-test-fixes`).
+
+**Expected non-bug failures**:
+- `FileNotFoundError: Run requires local media assets`: speech (139/139 runs), image2struct (~30% of 1599 runs).
+  - Root cause: `MediaObject.__post_init__` in HELM asserts local file existence; audio/image files not downloaded.
+  - The converter already handles this correctly with `except AssertionError → raise FileNotFoundError`.
+  - These are infrastructure failures, not converter bugs.
+
+**Sweep results so far** (sweep still in progress for classic/heim/image2struct):
+- Completed suites with 0 converter failures: capabilities, ewok, finance, lite, long-context, mmlu, safety.
+- Text-only failures across all completed text-only suites: 0.
+- All failures are `FileNotFoundError` from missing media assets (speech/image2struct).
+
+**Sweep script improvements made during session**:
+- Increased stderr storage from 4000 to 12000 chars (chained exceptions were truncated, causing misclassification of `AssertionError` vs. `FileNotFoundError`).
+- Improved `_extract_exception_class` to skip indented traceback lines and find the outermost exception.
+- User added size-gating (`--max-scenario-state-mb`, default 512 MB) and configurable `--timeout` to handle `msmarco:track=trec` runs with ~10 GB scenario files.
+
+**Uncertainties / next steps**:
+- Classic suite (29,050 runs) still in progress — needs multiple 10-minute passes due to Bash timeout limits. Skip-existing handles resume.
+- heim suite (3,727 runs) in progress; expect some `FileNotFoundError` for image-based scenarios.
+- Final summary at `/data/crfm-helm-audit-store/crfm-helm-public-eee-test/summary.json`.
+- The fixed bugs (1 and 2) were verified: 13/13 previously failing pilot runs now pass after fix.
+
+Design insight: when testing against a large real-world corpus, always separate "converter can't handle this data" from "this data requires local assets that aren't present." Both show up as failures, but only the former needs fixing. Sweeping all suites rather than just a few exposes both categories and lets you quantify the boundary precisely.
