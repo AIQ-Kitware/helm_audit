@@ -250,46 +250,196 @@ def get_run_status(
 
 
 def print_db_summary(con: sqlite3.Connection) -> None:
-    """Print a per-suite status table from the DB."""
-    rows = con.execute("""
+    """Thin wrapper kept for --index-only; delegates to print_report."""
+    print_report(con)
+
+
+def print_report(con: sqlite3.Connection) -> None:
+    """Print a full human-readable conversion report from the DB."""
+    W = 72  # report width
+
+    def rule(char="─"):
+        print(char * W)
+
+    def section(title):
+        print()
+        print(f"  {title}")
+        rule()
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    rule("═")
+    print(f"  EEE HELM CONVERSION REPORT   ({now})")
+    rule("═")
+
+    # ── Overall totals ────────────────────────────────────────────────────────
+    totals = con.execute("""
+        SELECT
+            COUNT(*)                        AS discovered,
+            SUM(status = 'ok')              AS ok,
+            SUM(status = 'fail')            AS fail,
+            SUM(status = 'timeout')         AS timeout,
+            SUM(status = 'error')           AS error,
+            SUM(status = 'skipped_large')   AS skip_large,
+            SUM(status IS NULL)             AS pending,
+            SUM(attempt_count > 0)          AS attempted
+        FROM runs
+    """).fetchone()
+
+    n_total     = totals["discovered"] or 0
+    n_ok        = totals["ok"] or 0
+    n_fail      = totals["fail"] or 0
+    n_timeout   = totals["timeout"] or 0
+    n_error     = totals["error"] or 0
+    n_skip_lg   = totals["skip_large"] or 0
+    n_pending   = totals["pending"] or 0
+    n_attempted = totals["attempted"] or 0
+    n_bad       = n_fail + n_timeout + n_error
+
+    def pct(n, d):
+        return f"{100*n/d:5.1f}%" if d else "  n/a "
+
+    section("OVERALL")
+    print(f"  {'Total runs discovered':<36s}: {n_total:>7,}")
+    print(f"  {'Attempted (at least once)':<36s}: {n_attempted:>7,}  {pct(n_attempted, n_total)} of total")
+    print(f"  {'Pending (never attempted)':<36s}: {n_pending:>7,}  {pct(n_pending, n_total)} of total")
+    print()
+    print(f"  {'Succeeded (ok)':<36s}: {n_ok:>7,}  {pct(n_ok, n_total)} of total  |  {pct(n_ok, n_attempted)} of attempted")
+    print(f"  {'Failed (any error)':<36s}: {n_bad:>7,}  {pct(n_bad, n_total)} of total  |  {pct(n_bad, n_attempted)} of attempted")
+    print(f"    {'└─ non-zero exit':<34s}: {n_fail:>7,}")
+    print(f"    {'└─ timeout':<34s}: {n_timeout:>7,}")
+    print(f"    {'└─ runner error':<34s}: {n_error:>7,}")
+    print(f"  {'Skipped (too large)':<36s}: {n_skip_lg:>7,}")
+
+    # ── Per-suite breakdown ───────────────────────────────────────────────────
+    section("PER-SUITE BREAKDOWN")
+    suite_rows = con.execute("""
         SELECT suite,
-               COUNT(*)                                      AS total,
-               SUM(status = 'ok')                           AS ok,
-               SUM(status = 'fail')                         AS fail,
-               SUM(status = 'timeout')                      AS timeout,
-               SUM(status = 'error')                        AS error,
-               SUM(status = 'skipped_large')                AS skipped_large,
-               SUM(status IS NULL)                          AS pending,
-               ROUND(MAX(COALESCE(scenario_state_mb,0)),1)  AS max_mb
+               COUNT(*)                                        AS total,
+               SUM(status = 'ok')                             AS ok,
+               SUM(status IN ('fail','timeout','error'))       AS bad,
+               SUM(status = 'skipped_large')                  AS skip_lg,
+               SUM(status IS NULL)                            AS pending,
+               ROUND(AVG(COALESCE(scenario_state_mb,0)),1)    AS avg_mb,
+               ROUND(MAX(COALESCE(scenario_state_mb,0)),1)    AS max_mb
         FROM runs
         GROUP BY suite
         ORDER BY suite
     """).fetchall()
 
-    hdr = f"{'suite':30s} {'total':>6} {'ok':>6} {'fail':>6} {'timeout':>7} {'error':>6} {'skip_lg':>7} {'pending':>7} {'max_mb':>8}"
+    hdr = (f"  {'suite':<26s} {'total':>6} {'ok':>6} {'ok%':>6} "
+           f"{'fail':>5} {'skip_lg':>7} {'pending':>7} {'avg_mb':>7} {'max_mb':>7}")
     print(hdr)
-    print("-" * len(hdr))
-    for r in rows:
+    print("  " + "─" * (W - 2))
+    for r in suite_rows:
+        t  = r["total"] or 0
+        ok = r["ok"] or 0
         print(
-            f"{r['suite']:30s} {r['total']:6d} {r['ok'] or 0:6d} {r['fail'] or 0:6d}"
-            f" {r['timeout'] or 0:7d} {r['error'] or 0:6d} {r['skipped_large'] or 0:7d}"
-            f" {r['pending'] or 0:7d} {r['max_mb'] or 0:8.1f}"
+            f"  {r['suite']:<26s} {t:6d} {ok:6d} {pct(ok,t):>6} "
+            f"{r['bad'] or 0:5d} {r['skip_lg'] or 0:7d} {r['pending'] or 0:7d} "
+            f"{r['avg_mb'] or 0:7.1f} {r['max_mb'] or 0:7.1f}"
         )
 
-    # Failure breakdown
+    # ── Failure modes ─────────────────────────────────────────────────────────
     fail_rows = con.execute("""
-        SELECT exception_class, COUNT(*) n
+        SELECT
+            exception_class,
+            COUNT(*)                            AS n,
+            GROUP_CONCAT(DISTINCT suite)        AS suites
         FROM runs
         WHERE status IN ('fail','timeout','error')
         GROUP BY exception_class
         ORDER BY n DESC
-        LIMIT 20
     """).fetchall()
+
     if fail_rows:
-        print()
-        print("Failure breakdown:")
+        section("FAILURE MODES")
+        hdr2 = f"  {'exception_class':<45s} {'count':>6}  suites"
+        print(hdr2)
+        print("  " + "─" * (W - 2))
         for r in fail_rows:
-            print(f"  {(r['exception_class'] or 'unknown'):50s} {r['n']:6d}")
+            ec     = (r["exception_class"] or "unknown")[:44]
+            suites = (r["suites"] or "")
+            # wrap suite list if long
+            suite_str = suites if len(suites) <= 20 else suites[:17] + "..."
+            print(f"  {ec:<45s} {r['n']:6d}  {suite_str}")
+
+        # One representative snippet per failure class
+        print()
+        print("  Representative failure snippets:")
+        for r in fail_rows:
+            ec = r["exception_class"] or "unknown"
+            example = con.execute("""
+                SELECT suite, version, run_name, failure_snippet
+                FROM runs
+                WHERE status IN ('fail','timeout','error')
+                  AND (exception_class = ? OR (exception_class IS NULL AND ? = 'unknown'))
+                LIMIT 1
+            """, (ec, ec)).fetchone()
+            if not example or not example["failure_snippet"]:
+                continue
+            print()
+            print(f"  [{ec}]  {example['suite']}/{example['version']}/{example['run_name'][:40]}")
+            for line in (example["failure_snippet"] or "").splitlines()[-5:]:
+                print(f"    {line}")
+
+    # ── File-size distribution ────────────────────────────────────────────────
+    section("SCENARIO_STATE.JSON SIZE DISTRIBUTION")
+    thresholds = [1, 8, 32, 64, 128, 256, 512]
+    prev = 0
+    size_rows = []
+
+    def _bucket_counts(lo, hi=None):
+        if hi is not None:
+            r = con.execute(
+                "SELECT COUNT(*), SUM(status='ok') FROM runs"
+                " WHERE scenario_state_mb >= ? AND scenario_state_mb < ?",
+                (lo, hi),
+            ).fetchone()
+        else:
+            r = con.execute(
+                "SELECT COUNT(*), SUM(status='ok') FROM runs WHERE scenario_state_mb >= ?",
+                (lo,),
+            ).fetchone()
+        return r[0] or 0, r[1] or 0
+
+    for t in thresholds:
+        cnt, ok = _bucket_counts(prev, t)
+        size_rows.append((f"{prev}–{t} MB", cnt, ok))
+        prev = t
+    cnt_over, ok_over = _bucket_counts(thresholds[-1])
+    r_null = con.execute(
+        "SELECT COUNT(*), SUM(status='ok') FROM runs WHERE scenario_state_mb IS NULL"
+    ).fetchone()
+    size_rows.append((f"≥ {thresholds[-1]} MB", cnt_over, ok_over))
+    size_rows.append(("size unknown", r_null[0] or 0, r_null[1] or 0))
+
+    bar_scale = max(r[1] for r in size_rows) or 1
+    for label, cnt, ok in size_rows:
+        bar_w = int(30 * cnt / bar_scale)
+        ok_pct = f"{100*ok/cnt:5.1f}%" if cnt else "   n/a"
+        bar = "█" * bar_w
+        print(f"  {label:>12s}  {cnt:6,}  {ok:6,} ok  {ok_pct}  {bar}")
+
+    # ── Retry candidates ──────────────────────────────────────────────────────
+    retry_rows = con.execute("""
+        SELECT suite, exception_class, COUNT(*) n
+        FROM runs
+        WHERE status IN ('fail','timeout','error')
+          AND exception_class != 'FileNotFoundError'
+        GROUP BY suite, exception_class
+        ORDER BY n DESC
+        LIMIT 15
+    """).fetchall()
+
+    if retry_rows:
+        section("RETRY CANDIDATES  (failures excluding expected media-asset errors)")
+        hdr3 = f"  {'suite':<26s} {'exception_class':<40s} {'count':>6}"
+        print(hdr3)
+        print("  " + "─" * (W - 2))
+        for r in retry_rows:
+            print(f"  {r['suite']:<26s} {(r['exception_class'] or 'unknown'):<40s} {r['n']:6d}")
+
+    print()
 
 
 # ---------------------------------------------------------------------------
@@ -493,6 +643,38 @@ def write_summary(con: sqlite3.Connection, summary_path: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Skip logic
+# ---------------------------------------------------------------------------
+def _effective_skip(
+    status: str | None,
+    scenario_state_mb: float | None,
+    skip_statuses: set[str],
+    max_mb: float | None,
+) -> bool:
+    """
+    Return True if this run should be skipped given the current configuration.
+
+    For most statuses a simple set-membership check is sufficient.  For
+    'skipped_large' we also verify that the stored file size still exceeds the
+    *current* threshold — if the user raised or removed the threshold the run
+    should be retried, not silently skipped.
+
+    If the stored size is unknown (None) and the status is 'skipped_large' we
+    conservatively keep skipping; a future --index-only pass will populate the
+    size and unblock it on the next real run.
+    """
+    if status not in skip_statuses:
+        return False
+    if status == "skipped_large":
+        if max_mb is None:
+            return False  # threshold removed entirely — retry everything
+        if scenario_state_mb is None:
+            return True   # size unknown; trust the recorded status for now
+        return scenario_state_mb > max_mb
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
@@ -509,10 +691,16 @@ def main():
     parser.add_argument(
         "--skip-statuses",
         default=",".join(sorted(DEFAULT_SKIP_STATUSES)),
-        help="Comma-separated list of DB statuses to treat as done and skip. "
+        help="Comma-separated list of statuses to treat as done and skip. "
              f"Default: '{','.join(sorted(DEFAULT_SKIP_STATUSES))}'. "
-             "Add 'fail' to stop retrying failures, e.g. "
-             "--skip-statuses ok,skipped_large,fail,FileNotFoundError",
+             "Checked against both the per-run status.json (filesystem) and the "
+             "DB cache. Add 'fail' to stop retrying failures, e.g. "
+             "--skip-statuses ok,skipped_large,fail",
+    )
+    parser.add_argument(
+        "--no-db", action="store_true",
+        help="Do not use the SQLite DB at all — filesystem status.json only. "
+             "The DB is a stats cache; this flag makes that explicit.",
     )
     parser.add_argument("--timeout", type=int, default=300,
                         help="Per-run subprocess timeout in seconds (default: 300)")
@@ -529,6 +717,11 @@ def main():
     parser.add_argument(
         "--index-only", action="store_true",
         help="Populate the DB manifest and print status table, then exit without running.",
+    )
+    parser.add_argument(
+        "--report", action="store_true",
+        help="Print a conversion report from the existing DB and exit. "
+             "Does not scan for new runs or run any conversions.",
     )
     parser.add_argument(
         "--db", default=None,
@@ -548,45 +741,65 @@ def main():
     results_jsonl = OUTPUT_ROOT / "results.jsonl"
     summary_path = OUTPUT_ROOT / "summary.json"
 
+    # --report: read-only, no scanning, no conversions
+    if args.report:
+        con = open_db(db_path)
+        print_report(con)
+        con.close()
+        return
+
     print(f"Public HELM root : {PUBLIC_ROOT}")
     print(f"Output root      : {OUTPUT_ROOT}")
-    print(f"DB index         : {db_path}")
+    print(f"DB index         : {'(disabled --no-db)' if args.no_db else db_path}")
     print(f"Workers          : {args.workers}")
     print(f"Timeout          : {args.timeout}s")
     print(f"Max scenario MB  : {args.max_mb if args.max_mb else 'unlimited'}")
     print(f"Skip statuses    : {sorted(skip_statuses)}")
 
-    con = open_db(db_path)
-
-    # Always re-scan the source tree so new runs appear in the DB.
-    print("Scanning public HELM root for run directories...")
-    n_discovered = populate_manifest(con, PUBLIC_ROOT, suite_filter=args.suite)
-    print(f"Manifest: {n_discovered} runs discovered (suite filter: {args.suite or 'all'})")
-
-    # Import any pre-existing per-run status.json files into the DB.
-    n_imported = import_status_json_files(con, OUTPUT_ROOT)
-    if n_imported:
-        print(f"Imported {n_imported} existing status.json results into DB")
+    con: sqlite3.Connection | None = None
+    if not args.no_db:
+        con = open_db(db_path)
+        # Always re-scan the source tree so new runs appear in the DB.
+        print("Scanning public HELM root for run directories...")
+        n_discovered = populate_manifest(con, PUBLIC_ROOT, suite_filter=args.suite)
+        print(f"Manifest: {n_discovered} runs discovered (suite filter: {args.suite or 'all'})")
+        # Import any pre-existing per-run status.json files into the DB.
+        n_imported = import_status_json_files(con, OUTPUT_ROOT)
+        if n_imported:
+            print(f"Imported {n_imported} existing status.json results into DB")
 
     if args.index_only:
+        if con is None:
+            print("--index-only requires the DB (remove --no-db)")
+            return
         print()
         print_db_summary(con)
         con.close()
         return
 
-    # Build the candidate list from the DB.
-    query = "SELECT suite, version, run_name, run_path, status FROM runs"
-    params: list = []
-    if args.suite:
-        query += " WHERE suite = ?"
-        params.append(args.suite)
-    query += " ORDER BY suite, version, run_name"
-    all_db_runs = con.execute(query, params).fetchall()
+    # Build the candidate list from the DB (or by re-enumerating the filesystem
+    # if --no-db was passed, in which case con is None and we skip DB entirely).
+    if con is not None:
+        query = "SELECT suite, version, run_name, run_path, status, scenario_state_mb FROM runs"
+        params: list = []
+        if args.suite:
+            query += " WHERE suite = ?"
+            params.append(args.suite)
+        query += " ORDER BY suite, version, run_name"
+        all_runs = [
+            (r["suite"], r["version"], r["run_name"], r["run_path"],
+             r["status"], r["scenario_state_mb"])
+            for r in con.execute(query, params).fetchall()
+        ]
+    else:
+        all_runs = [
+            (suite, version, run_name, str(run_path), None, None)
+            for suite, version, run_name, run_path in enumerate_runs(PUBLIC_ROOT, args.suite)
+        ]
 
     to_run = []
     n_skipped = 0
-    for row in all_db_runs:
-        suite, version, run_name, run_path = row["suite"], row["version"], row["run_name"], row["run_path"]
+    for suite, version, run_name, run_path, db_status, db_mb in all_runs:
         run_key = f"{suite}/{version}/{run_name}"
 
         # Glob exclusions
@@ -594,10 +807,28 @@ def main():
             n_skipped += 1
             continue
 
-        # DB-status skip (status already fetched in the SELECT above)
-        if skip_statuses and row["status"] in skip_statuses:
-            n_skipped += 1
-            continue
+        if skip_statuses:
+            # Primary: filesystem status.json (the original skip mechanism).
+            sf = status_file(suite, version, run_name)
+            if sf.exists():
+                try:
+                    d = json.loads(sf.read_text())
+                    fs_status = d.get("status")
+                    fs_mb = d.get("scenario_state_mb")
+                except Exception:
+                    fs_status = fs_mb = None
+            else:
+                fs_status = fs_mb = None
+
+            if _effective_skip(fs_status, fs_mb, skip_statuses, args.max_mb):
+                n_skipped += 1
+                continue
+
+            # Secondary: DB cache (allows skipping runs marked via SQL without
+            # needing a status.json on disk, e.g. manually inserted rows).
+            if _effective_skip(db_status, db_mb, skip_statuses, args.max_mb):
+                n_skipped += 1
+                continue
 
         to_run.append((suite, version, run_name, Path(run_path)))
 
@@ -633,7 +864,8 @@ def main():
                             "failure_snippet": traceback.format_exc()[-1000:],
                         }
 
-                    update_run_status(con, result)
+                    if con is not None:
+                        update_run_status(con, result)
                     log_f.write(json.dumps(result) + "\n")
                     log_f.flush()
 
@@ -644,26 +876,28 @@ def main():
                         f" {result['suite']}/{result['version']}/{result['run_name'][:60]}"
                     )
 
-    summary = write_summary(con, summary_path)
-    print()
-    print("=" * 70)
-    print("SWEEP COMPLETE")
-    print(f"  Discovered : {summary['totals']['discovered']}")
-    print(f"  Succeeded  : {summary['totals']['succeeded']}")
-    print(f"  Failed     : {summary['totals']['failed']}")
-    print(f"  Pending    : {summary['totals']['pending']}")
-    print(f"  Skip large : {summary['totals']['skipped_too_large']}")
-    if summary["failure_breakdown"]:
+    if con is not None:
+        summary = write_summary(con, summary_path)
         print()
-        print("Failure breakdown:")
-        for exc, cnt in summary["failure_breakdown"].items():
-            print(f"  {exc:50s} {cnt:6d}")
-    print()
-    print(f"DB index : {db_path}")
-    print(f"Summary  : {summary_path}")
+        print("=" * 70)
+        print("SWEEP COMPLETE")
+        print(f"  Discovered : {summary['totals']['discovered']}")
+        print(f"  Succeeded  : {summary['totals']['succeeded']}")
+        print(f"  Failed     : {summary['totals']['failed']}")
+        print(f"  Pending    : {summary['totals']['pending']}")
+        print(f"  Skip large : {summary['totals']['skipped_too_large']}")
+        if summary["failure_breakdown"]:
+            print()
+            print("Failure breakdown:")
+            for exc, cnt in summary["failure_breakdown"].items():
+                print(f"  {exc:50s} {cnt:6d}")
+        print()
+        print(f"DB index : {db_path}")
+        print(f"Summary  : {summary_path}")
     print(f"JSONL log: {results_jsonl}")
 
-    con.close()
+    if con is not None:
+        con.close()
 
 
 if __name__ == "__main__":
