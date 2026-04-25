@@ -152,7 +152,7 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
     monkeypatch.setattr(
         core_metrics,
         "_single_run_instance_core_rows",
-        lambda run_path, label: pd.DataFrame(
+        lambda run_path, label, **_: pd.DataFrame(
             [
                 {"run": label, "metric": "exact_match", "value": 1.0 if "local" in label else 0.5},
                 {"run": label, "metric": "exact_match", "value": 0.0},
@@ -162,7 +162,10 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
     monkeypatch.setattr(
         core_metrics,
         "_single_run_core_stat_index",
-        lambda run_path: {"exact_match": SimpleNamespace(metric="exact_match", mean=1.0 if "local" in run_path else 0.5)},
+        # Stage-5 added a ``component=`` kwarg so the loader can pick the
+        # EEE artifact when planner manifests carry one. Accept it here
+        # so the monkeypatched stand-in matches the real signature.
+        lambda run_path, **_: {"exact_match": SimpleNamespace(metric="exact_match", mean=1.0 if "local" in run_path else 0.5)},
     )
 
     base_argv = [
