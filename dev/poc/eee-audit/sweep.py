@@ -225,13 +225,40 @@ def _upsert_batch(con: sqlite3.Connection, batch: list):
     con.commit()
 
 
+#: Status precedence used by ``import_status_json_files`` to decide whether
+#: an on-disk status.json should overwrite the DB cache. Higher number =
+#: stronger / more terminal. A successful conversion, once observed on disk,
+#: should never be downgraded back to a stale DB failure: this matters when
+#: a sibling sweep retried a failure after the DB row was last touched.
+_STATUS_RANK = {
+    None: 0,
+    "fail": 1,
+    "timeout": 1,
+    "error": 1,
+    "skipped_large": 2,
+    "ok": 3,
+}
+
+
 def import_status_json_files(con: sqlite3.Connection, output_root: Path) -> int:
     """
-    One-time backward-compat import: read existing per-run status.json files
-    into the DB for runs that have no DB status yet.  Safe to call every time
-    (the INSERT ... WHERE status IS NULL clause is a no-op once imported).
+    Reconcile per-run ``status.json`` files into the DB cache.
+
+    Two cases get reconciled:
+
+    1. **Pending DB row, status.json on disk** — the original use case;
+       imports the result so the DB has a complete picture.
+    2. **DB row says fail/timeout/error, disk says ok or skipped_large** —
+       a sibling sweep (or a manual rerun) succeeded after the DB row was
+       last updated. The "ok" answer wins; the stale failure is overwritten
+       so the next ``--report`` reflects reality and ``--retry-failed``
+       does not waste work re-attempting an already-converted run.
+
+    Disk failures never overwrite DB success: if disk says fail and DB
+    says ok, the ok stays. The merge is always toward the better outcome.
     """
     imported = 0
+    upgraded = 0
     for sf in output_root.rglob("status.json"):
         try:
             d = json.loads(sf.read_text())
@@ -240,34 +267,44 @@ def import_status_json_files(con: sqlite3.Connection, output_root: Path) -> int:
         suite = d.get("suite")
         version = d.get("version")
         run_name = d.get("run_name")
-        status = d.get("status")
-        if not (suite and version and run_name and status):
+        fs_status = d.get("status")
+        if not (suite and version and run_name and fs_status):
             continue
         cur = con.execute(
             "SELECT status FROM runs WHERE suite=? AND version=? AND run_name=?",
             (suite, version, run_name),
         ).fetchone()
-        if cur is None or cur["status"] is None:
-            con.execute("""
-                UPDATE runs SET
-                    status          = ?,
-                    exception_class = ?,
-                    failure_snippet = ?,
-                    returncode      = ?,
-                    attempt_count   = MAX(attempt_count, 1),
-                    updated_at      = ?
-                WHERE suite=? AND version=? AND run_name=?
-            """, (
-                status,
-                d.get("exception_class"),
-                d.get("failure_snippet"),
-                d.get("returncode"),
-                d.get("timestamp") or datetime.now(timezone.utc).isoformat(),
-                suite, version, run_name,
-            ))
+        db_status = cur["status"] if cur else None
+        if db_status == fs_status:
+            continue
+        # Only apply the FS row if it is at least as strong as the DB row.
+        if _STATUS_RANK.get(fs_status, 0) <= _STATUS_RANK.get(db_status, 0):
+            continue
+        con.execute("""
+            UPDATE runs SET
+                status          = ?,
+                exception_class = ?,
+                failure_snippet = ?,
+                returncode      = ?,
+                attempt_count   = MAX(attempt_count, 1),
+                updated_at      = ?
+            WHERE suite=? AND version=? AND run_name=?
+        """, (
+            fs_status,
+            d.get("exception_class"),
+            d.get("failure_snippet"),
+            d.get("returncode"),
+            d.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+            suite, version, run_name,
+        ))
+        if db_status is None:
             imported += 1
+        else:
+            upgraded += 1
     con.commit()
-    return imported
+    if upgraded:
+        print(f"Reconciled {upgraded} stale DB failures using newer status.json on disk")
+    return imported + upgraded
 
 
 def update_run_status(con: sqlite3.Connection, result: dict) -> None:
