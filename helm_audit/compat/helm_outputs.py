@@ -1,3 +1,15 @@
+"""Raw HELM filesystem readers.
+
+Discovery-only: these classes walk a HELM ``benchmark_output/`` tree and
+yield run directories. They are intentionally limited to raw filesystem
+ingestion for the official/local index builders; comparison and report
+code paths consume :mod:`helm_audit.normalized` instead.
+
+Do not add comparison logic here. If you need to read HELM JSONs in a
+comparison context, route through :func:`helm_audit.normalized.load_run`
+so source_kind / artifact_format / Origin are populated.
+"""
+
 from __future__ import annotations
 
 import fnmatch

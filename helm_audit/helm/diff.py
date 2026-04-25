@@ -2,6 +2,17 @@
 
 Run-to-run comparison built on :class:`~helm_audit.helm.analysis.HelmRunAnalysis`.
 
+NOTE
+----
+After the EEE refactor, the per-metric measurement core lives in
+:mod:`helm_audit.normalized.compare`. ``HelmRunDiff`` is retained for the
+run-spec-semantic diagnosis (same scenario class, same model, same
+adapter instructions, etc.) which reads ``run_spec.json`` from the raw
+HELM evidence cached on each :class:`~helm_audit.normalized.NormalizedRun`.
+Do not add new agreement/quantile measurements here — extend
+``helm_audit.normalized.compare`` instead so they work uniformly across
+``helm`` and ``eee`` artifact formats.
+
 Design goals
 ------------
 * Keep the public API tight.

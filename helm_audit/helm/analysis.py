@@ -2,6 +2,16 @@
 
 Single-run analysis utilities wrapped in an object.
 
+NOTE
+----
+This module is the legacy HELM-shape analysis surface. After the EEE
+refactor, the comparison/report code paths consume
+:mod:`helm_audit.normalized` instead. ``HelmRunAnalysis`` and
+``HelmRunDiff`` are still used for the run-spec semantic diagnosis that
+reads ``run_spec.json`` directly. Do not extend this module for new
+comparison features — add them under :mod:`helm_audit.normalized.compare`
+so they are loader-format-agnostic.
+
 Why this exists
 --------------
 ``HelmRun`` (in :mod:`magnet.backends.helm.helm_outputs`) is intentionally a *reader*.

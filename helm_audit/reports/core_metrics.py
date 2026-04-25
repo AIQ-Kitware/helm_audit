@@ -18,7 +18,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from helm_audit.helm.analysis import HelmRunAnalysis
 from helm_audit.helm.diff import HelmRunDiff
 from helm_audit.helm import metrics as helm_metrics
 from helm_audit.indexing.schema import extract_run_spec_fields
@@ -30,47 +29,10 @@ from helm_audit.normalized import (
     load_run,
 )
 from helm_audit.normalized import compare as ncompare
-from helm_audit.normalized.helm_compat import helm_view, helm_view_from_path
+from helm_audit.normalized.helm_compat import helm_view
 from helm_audit.reports.paper_labels import load_paper_label_manager
 from helm_audit.reports.core_packet import load_packet_manifests
-from helm_audit.utils.numeric import safe_float as _safe_float, quantile as _quantile
-
-
-def _normalized_helm_view(run_path: str | Path, *, source_kind: SourceKind | str = SourceKind.OFFICIAL):
-    """Stage-3 seam: HELM run dir → HELM-shape view via the normalized layer.
-
-    All Stage-5 comparison inputs flow through :mod:`helm_audit.normalized`
-    so Origin/SourceKind/ArtifactFormat are populated identically for both
-    the old comparison core and the new EEE-centered one. Stage 4 replaces
-    the comparison core itself, at which point this helper goes away.
-    """
-    return helm_view_from_path(run_path, source_kind=source_kind)
-
-
-def _run_level_core_rows(diff: HelmRunDiff) -> list[dict[str, Any]]:
-    idx_a = diff.a.stat_index(drop_zero_count=True, require_mean=True, short_hash=diff.short_hash)
-    idx_b = diff.b.stat_index(drop_zero_count=True, require_mean=True, short_hash=diff.short_hash)
-    rows = []
-    for k in set(idx_a) & set(idx_b):
-        a = idx_a[k]
-        b = idx_b[k]
-        if a.mean is None or b.mean is None:
-            continue
-        if a.metric_class != 'core':
-            continue
-        abs_delta = abs(a.mean - b.mean)
-        denom = max(abs(a.mean), abs(b.mean), 1e-12)
-        rel_delta = abs_delta / denom
-        rows.append({
-            'key': k,
-            'metric': a.metric,
-            'metric_class': a.metric_class,
-            'a': float(a.mean),
-            'b': float(b.mean),
-            'abs_delta': abs_delta,
-            'rel_delta': rel_delta,
-        })
-    return rows
+from helm_audit.utils.numeric import quantile as _quantile
 
 
 def _load_json(fpath: Path) -> Any:
@@ -240,67 +202,6 @@ def _diagnostic_flags(
                 f"{official_vs_local['comparison_id']}:empty_completion_pathology"
             )
     return flags
-
-
-def _iter_joined_rows(joined, row_by_key):
-    if row_by_key is not None:
-        return row_by_key.values()
-    if isinstance(joined, dict):
-        return joined.values()
-    if hasattr(joined, '__iter__'):
-        return joined
-    return []
-
-
-def _row_key(row: Any) -> Any:
-    return (
-        getattr(row, 'key', None)
-        or getattr(row, 'stat_key', None)
-        or getattr(row, 'row_key', None)
-        or row
-    )
-
-
-def _instance_level_core_rows(diff: HelmRunDiff) -> list[dict[str, Any]]:
-    joined_a = diff.a.joined_instance_stat_table(assert_assumptions=False, short_hash=diff.short_hash)
-    joined_b = diff.b.joined_instance_stat_table(assert_assumptions=False, short_hash=diff.short_hash)
-    map_a = getattr(joined_a, 'row_by_key', None)
-    map_b = getattr(joined_b, 'row_by_key', None)
-    if map_a is None:
-        map_a = {_row_key(r): r for r in _iter_joined_rows(joined_a, map_a)}
-    if map_b is None:
-        map_b = {_row_key(r): r for r in _iter_joined_rows(joined_b, map_b)}
-
-    rows = []
-    for k in set(map_a) & set(map_b):
-        ra = map_a[k]
-        rb = map_b[k]
-        sa = getattr(ra, 'stat', None) if hasattr(ra, 'stat') else (ra.get('stat') if isinstance(ra, dict) else None)
-        sb = getattr(rb, 'stat', None) if hasattr(rb, 'stat') else (rb.get('stat') if isinstance(rb, dict) else None)
-        ma = _safe_float((sa or {}).get('mean') if isinstance(sa, dict) else getattr(sa, 'mean', None))
-        mb = _safe_float((sb or {}).get('mean') if isinstance(sb, dict) else getattr(sb, 'mean', None))
-        ca = int((sa or {}).get('count', 0) or 0) if isinstance(sa, dict) else int(getattr(sa, 'count', 0) or 0)
-        cb = int((sb or {}).get('count', 0) or 0) if isinstance(sb, dict) else int(getattr(sb, 'count', 0) or 0)
-        if ma is None or mb is None or ca == 0 or cb == 0:
-            continue
-        name_obj = (sa or {}).get('name') if isinstance(sa, dict) else getattr(sa, 'name_obj', None)
-        metric = name_obj.get('name') if isinstance(name_obj, dict) else getattr(sa, 'metric', None)
-        metric_class, _ = helm_metrics.classify_metric(metric)
-        if metric_class != 'core':
-            continue
-        abs_delta = abs(ma - mb)
-        denom = max(abs(ma), abs(mb), 1e-12)
-        rel_delta = abs_delta / denom
-        rows.append({
-            'key': k,
-            'metric': metric,
-            'metric_class': metric_class,
-            'a': ma,
-            'b': mb,
-            'abs_delta': abs_delta,
-            'rel_delta': rel_delta,
-        })
-    return rows
 
 
 def _group_quantiles(rows: list[dict[str, Any]]) -> dict[str, Any]:
