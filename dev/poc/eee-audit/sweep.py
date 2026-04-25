@@ -308,6 +308,78 @@ def print_db_summary(con: sqlite3.Connection) -> None:
     print_report(con)
 
 
+def print_failures(
+    con: sqlite3.Connection,
+    *,
+    cls_filter: str | None = None,
+    limit_per_class: int = 20,
+) -> None:
+    """Dump per-failure details. Read-only.
+
+    With ``cls_filter=None``, walks every failure exception_class and prints
+    up to ``limit_per_class`` rows from each. With a class name, only that
+    class is shown. Useful for triaging stale failures before deciding how
+    to retry them (``--retry-class``).
+    """
+    if cls_filter is None:
+        rows = con.execute(
+            """
+            SELECT exception_class, COUNT(*) AS n
+            FROM runs
+            WHERE status IN ('fail','timeout','error')
+            GROUP BY exception_class
+            ORDER BY n DESC
+            """
+        ).fetchall()
+        classes = [(r["exception_class"] or "UnknownError", r["n"]) for r in rows]
+    else:
+        n = con.execute(
+            "SELECT COUNT(*) FROM runs WHERE status IN ('fail','timeout','error') "
+            "AND COALESCE(exception_class,'UnknownError') = ?",
+            (cls_filter,),
+        ).fetchone()[0]
+        classes = [(cls_filter, n)]
+
+    if not classes:
+        print("No failures recorded in the DB.")
+        return
+
+    for cls, total in classes:
+        print()
+        print("=" * 72)
+        print(f"  exception_class = {cls}   (total: {total})")
+        print("=" * 72)
+        rows = con.execute(
+            """
+            SELECT suite, version, run_name, run_path,
+                   scenario_state_mb, returncode, attempt_count, updated_at,
+                   failure_snippet
+            FROM runs
+            WHERE status IN ('fail','timeout','error')
+              AND COALESCE(exception_class,'UnknownError') = ?
+            ORDER BY suite, version, run_name
+            LIMIT ?
+            """,
+            (cls, limit_per_class),
+        ).fetchall()
+        for r in rows:
+            mb = f"{r['scenario_state_mb']:.1f}MB" if r["scenario_state_mb"] is not None else "size?"
+            print(
+                f"\n[{r['suite']}/{r['version']}] {r['run_name']}\n"
+                f"  path: {r['run_path']}\n"
+                f"  size: {mb}  rc: {r['returncode']}  "
+                f"attempts: {r['attempt_count']}  updated: {r['updated_at']}"
+            )
+            snippet = (r["failure_snippet"] or "").rstrip()
+            if snippet:
+                for line in snippet.splitlines()[-8:]:
+                    print(f"    {line}")
+            else:
+                print("    (no snippet recorded)")
+        if total > len(rows):
+            print(f"\n  ...and {total - len(rows)} more (raise --show-failures-limit to see)")
+
+
 def print_report(con: sqlite3.Connection) -> None:
     """Print a full human-readable conversion report from the DB."""
     W = 72  # report width
@@ -781,6 +853,29 @@ def main():
         "--db", default=None,
         help="Path to SQLite DB (default: OUTPUT_ROOT/sweep_index.db)",
     )
+    parser.add_argument(
+        "--retry-failed", action="store_true",
+        help="Restrict the candidate set to runs whose recorded status is in "
+             "{fail,timeout,error}. Implies the candidate set excludes 'ok', "
+             "'skipped_large', and pending rows. Combine with --suite, "
+             "--exclude, and --retry-class to narrow further.",
+    )
+    parser.add_argument(
+        "--retry-class", default=None, metavar="CLASS",
+        help="When set, restrict to rows with the given exception_class "
+             "(e.g. SIGKILL_OOM, UnknownError, TypeError, FileNotFoundError). "
+             "Implies --retry-failed.",
+    )
+    parser.add_argument(
+        "--show-failures", default=None, metavar="CLASS", const="ALL", nargs="?",
+        help="Print details (run path, snippet, version, size) of failed rows "
+             "and exit. With no argument, shows all classes; pass a class "
+             "name to filter. Read-only.",
+    )
+    parser.add_argument(
+        "--show-failures-limit", type=int, default=20,
+        help="Max number of failures to print per class for --show-failures.",
+    )
     args = parser.parse_args()
 
     if args.max_mb == 0:
@@ -801,6 +896,21 @@ def main():
         print_report(con)
         con.close()
         return
+
+    # --show-failures: read-only failure dump
+    if args.show_failures is not None:
+        con = open_db(db_path)
+        print_failures(
+            con,
+            cls_filter=None if args.show_failures == "ALL" else args.show_failures,
+            limit_per_class=args.show_failures_limit,
+        )
+        con.close()
+        return
+
+    # --retry-class implies --retry-failed.
+    if args.retry_class:
+        args.retry_failed = True
 
     print(f"Public HELM root : {PUBLIC_ROOT}")
     print(f"Output root      : {OUTPUT_ROOT}")
@@ -835,17 +945,43 @@ def main():
     # if --no-db was passed, in which case con is None and we skip DB entirely).
     if con is not None:
         query = "SELECT suite, version, run_name, run_path, status, scenario_state_mb FROM runs"
+        where_parts: list[str] = []
         params: list = []
         if args.suite:
-            query += " WHERE suite = ?"
+            where_parts.append("suite = ?")
             params.append(args.suite)
+        if args.retry_failed:
+            # Restrict to recorded failures. Pending and successful rows are
+            # skipped at the SQL layer so the candidate set is exactly the
+            # failures we want to re-attempt.
+            where_parts.append("status IN ('fail','timeout','error')")
+        if args.retry_class:
+            # Match against the stored exception_class, treating NULL as the
+            # 'UnknownError' bucket (consistent with print_failures + report).
+            where_parts.append("COALESCE(exception_class,'UnknownError') = ?")
+            params.append(args.retry_class)
+        if where_parts:
+            query += " WHERE " + " AND ".join(where_parts)
         query += " ORDER BY suite, version, run_name"
         all_runs = [
             (r["suite"], r["version"], r["run_name"], r["run_path"],
              r["status"], r["scenario_state_mb"])
             for r in con.execute(query, params).fetchall()
         ]
+        if args.retry_failed or args.retry_class:
+            print(
+                "Retry filter: status in (fail,timeout,error)"
+                + (f", exception_class={args.retry_class}" if args.retry_class else "")
+                + f"  → {len(all_runs)} candidate rows from DB"
+            )
+            # When retrying recorded failures we explicitly want to re-attempt
+            # them, so an existing on-disk status.json marked as 'fail' must
+            # not skip the row. Drop those statuses from skip_statuses too.
+            skip_statuses = skip_statuses - {"fail", "timeout", "error"}
     else:
+        if args.retry_failed or args.retry_class:
+            print("--retry-failed/--retry-class require the DB (do not pass --no-db)")
+            return
         all_runs = [
             (suite, version, run_name, str(run_path), None, None)
             for suite, version, run_name, run_path in enumerate_runs(PUBLIC_ROOT, args.suite)
