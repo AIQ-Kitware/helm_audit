@@ -2434,7 +2434,7 @@ def _abbreviate_label(text: str, *, max_chars: int = 24) -> str:
 def _bar_count_label(axis_key: str, n_bars: int, *, axis_title: str | None = None) -> str:
     label = axis_title if axis_title is not None else axis_key.replace("_", " ").title()
     count_tag = _AXIS_COUNT_TAGS.get(axis_key, "n_categories")
-    return f"{label} ({count_tag}={n_bars}, n_bars={n_bars})"
+    return f"{label} ({count_tag}={n_bars})"
 
 
 def _bar_tickangle(n_bars: int) -> int:
