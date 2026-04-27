@@ -104,9 +104,17 @@ def main(argv: list[str] | None = None) -> None:
         help="Discover and analyze every experiment name present in --index-fpath.",
     )
     parser.add_argument("--index-fpath", required=True)
+    parser.add_argument("--official-index-fpath", default=None)
     parser.add_argument("--allow-single-repeat", action="store_true")
     parser.add_argument("--build-summary", action="store_true")
     parser.add_argument("--filter-inventory-json", default=None)
+    parser.add_argument("--official-eee-root", default=None)
+    parser.add_argument("--local-eee-root", default=None)
+    parser.add_argument(
+        "--ensure-local-eee",
+        action="store_true",
+        help="Convert local HELM runs to EEE on demand when canonical local artifacts are missing.",
+    )
     args = parser.parse_args(argv)
     setup_cli_logging()
 
@@ -141,6 +149,14 @@ def main(argv: list[str] | None = None) -> None:
         ]
         if args.allow_single_repeat:
             cmd.append("--allow-single-repeat")
+        if args.official_index_fpath:
+            cmd.extend(["--official-index-fpath", str(args.official_index_fpath)])
+        if args.official_eee_root:
+            cmd.extend(["--official-eee-root", str(args.official_eee_root)])
+        if args.local_eee_root:
+            cmd.extend(["--local-eee-root", str(args.local_eee_root)])
+        if args.ensure_local_eee:
+            cmd.append("--ensure-local-eee")
 
         t0 = time.monotonic()
         ok = True
