@@ -24,16 +24,16 @@ five subjects).
 
 Sankey at `reports/aggregate-summary/.../sankey_a_universe_to_scope.latest.html`.
 
-| stage | survivors | dropped here |
-|---|---:|---:|
-| Universe (all discovered HELM runs) | 13,579 | — |
-| Structural Gate (kept structurally complete) | 13,504 | 75 |
-| Metadata Gate (kept metadata resolved) | 11,167 | 2,337 |
-| Open-Weight Gate (kept open-weight) | 4,630 | 6,537 |
-| Tag Gate (kept text/non-modality) | 2,225 | 2,405 |
-| Deployment Gate (runnable local deployment) | 566 | 1,659 |
-| Size Gate (within size budget) | 270 | 296 |
-| **Manifest scope (model=pythia*, benchmark=mmlu)** | **5** | 265 |
+| stage                                              | survivors | dropped here |
+|----------------------------------------------------|----------:|-------------:|
+| Universe (all discovered HELM runs)                |    13,579 |            — |
+| Structural Gate (kept structurally complete)       |    13,504 |           75 |
+| Metadata Gate (kept metadata resolved)             |    11,167 |        2,337 |
+| Open-Weight Gate (kept open-weight)                |     4,630 |        6,537 |
+| Tag Gate (kept text/non-modality)                  |     2,225 |        2,405 |
+| Deployment Gate (runnable local deployment)        |       566 |        1,659 |
+| Size Gate (within size budget)                     |       270 |          296 |
+| **Manifest scope (model=pythia*, benchmark=mmlu)** |     **5** |          265 |
 
 The manifest scope removes 265 of the 270 Stage-1 selected runs as
 "out of scope". 5 logical run-specs remain (5 mmlu subjects on
@@ -45,12 +45,12 @@ econometrics, us_foreign_policy).
 Sankey at `reports/aggregate-summary/.../sankey_b_scope_to_analyzed.latest.html`,
 plus a complementary scope-aware funnel at `reports/scoped_funnel/`:
 
-| stage | count | % of target |
-|---|---:|---:|
-| target (in-scope official rows; 5 subjects × 2 models × 2 versions) | 20 | 100% |
-| reproduced (logical-key match against local audit) | 10 | 50% |
-| completed (reproduced + run_path on disk) | 10 | 50% |
-| analyzed (completed + has core_metric report) | 10 | 50% |
+| stage                                                               | count | % of target |
+|---------------------------------------------------------------------|------:|------------:|
+| target (in-scope official rows; 5 subjects × 2 models × 2 versions) |    20 |        100% |
+| reproduced (logical-key match against local audit)                  |    10 |         50% |
+| completed (reproduced + run_path on disk)                           |    10 |         50% |
+| analyzed (completed + has core_metric report)                       |    10 |         50% |
 
 The 10/20 split is a model-coverage gap, not a reproduction-quality
 issue:
@@ -64,13 +64,16 @@ want full pythia-family coverage.
 
 ## Per-subject reproducibility (Pythia 6.9b on the 5 covered MMLU subjects)
 
-| subject | instances | agree @ tol=0 | agree @ tol=.001 | agree @ tol=.05 | p95 |Δ| | max |Δ| | diagnosis |
-|---|---:|---:|---:|---:|---:|---:|---|
-| abstract_algebra | 888 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | deployment_drift |
-| computer_security | 888 | 0.9640 | 0.9640 | 0.9640 | 0.0000 | 1.0000 | deployment_drift |
-| college_chemistry | 864 | 0.9630 | 0.9630 | 0.9630 | 0.0000 | 1.0000 | deployment_drift |
-| econometrics | 1,008 | 0.9603 | 0.9603 | 0.9603 | 0.0000 | 1.0000 | deployment_drift |
-| us_foreign_policy | 888 | 0.9369 | 0.9369 | 0.9369 | 1.0000 | 1.0000 | deployment_drift |
+(`abs Δ` columns are absolute per-instance score deltas; pipe chars
+in `|Δ|` would break the table syntax so the heading is spelled out.)
+
+| subject           | instances | agree @ tol=0 | agree @ tol=.001 | agree @ tol=.05 | p95 abs Δ | max abs Δ | diagnosis        |
+|-------------------|----------:|--------------:|-----------------:|----------------:|----------:|----------:|------------------|
+| abstract_algebra  |       888 |        1.0000 |           1.0000 |          1.0000 |    0.0000 |    0.0000 | deployment_drift |
+| computer_security |       888 |        0.9640 |           0.9640 |          0.9640 |    0.0000 |    1.0000 | deployment_drift |
+| college_chemistry |       864 |        0.9630 |           0.9630 |          0.9630 |    0.0000 |    1.0000 | deployment_drift |
+| econometrics      |     1,008 |        0.9603 |           0.9603 |          0.9603 |    0.0000 |    1.0000 | deployment_drift |
+| us_foreign_policy |       888 |        0.9369 |           0.9369 |          0.9369 |    1.0000 |    1.0000 | deployment_drift |
 
 Observations:
 
@@ -99,12 +102,18 @@ Reproducibility-vs-repeatability sankey at
 
 ## Drilldowns
 
-| question | artifact |
-|---|---|
-| Which packet should I look at first? | `reports/aggregate-summary/.../prioritized_examples.latest/` (sections: `score_ge_95`, `best`, `mid`, `worst`, `score_lt_80`, `flagged`) |
-| What does the per-instance score distribution look like for one packet? | `analysis/core-reports/<packet>/core_metric_ecdfs.latest.png` (legend uses short aliases; full labels in the sidecar `*_label_legend.latest.{png,txt}`) |
-| Which run-specs aren't reproduced yet? | `reports/scoped_funnel/missing_targets.latest.csv` |
-| What was the manifest scope and how was it composed? | `manifest.yaml`, `provenance.json`, `scoped_filter_inventory.json` |
+- **Which packet should I look at first?**
+  `reports/aggregate-summary/.../prioritized_examples.latest/`
+  (sections: `score_ge_95`, `best`, `mid`, `worst`, `score_lt_80`,
+  `flagged`)
+- **What does the per-instance score distribution look like for one packet?**
+  `analysis/core-reports/<packet>/core_metric_ecdfs.latest.png`
+  (legend uses short aliases; full labels in the sidecar
+  `*_label_legend.latest.{png,txt}`)
+- **Which run-specs aren't reproduced yet?**
+  `reports/scoped_funnel/missing_targets.latest.csv`
+- **What was the manifest scope and how was it composed?**
+  `manifest.yaml`, `provenance.json`, `scoped_filter_inventory.json`
 
 ## Reproducing this report
 

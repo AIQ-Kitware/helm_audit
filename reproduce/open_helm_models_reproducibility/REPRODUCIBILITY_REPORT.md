@@ -35,11 +35,21 @@ these two regimes and is the wrong number to publish.
 
 The publication-quality coverage funnel reports three nested matches:
 
-| match | n_target | n_reproduced | what it means |
-|---|---:|---:|---|
-| logical (loose) | 295 | 166 | same scenario + model + augmentation |
-| **recipe-canonical** (the publishable line) | 295 | **128** | + same scenario_spec, prompt, decoding, max_train_instances after collapsing HELM-version schema drift |
-| recipe-identical (raw `run_spec_hash`) | 295 | 0 | byte-for-byte run_spec.json match — always 0 because HELM's run_spec schema evolved across releases (see `docs/helm-gotchas.md` §G1) |
+| match                          | n_target | n_reproduced |
+|--------------------------------|---------:|-------------:|
+| logical (loose)                |      295 |          166 |
+| recipe-canonical (publishable) |      295 |      **128** |
+| recipe-identical (raw hash)    |      295 |            0 |
+
+What each match means:
+
+- **logical**: same scenario + model + augmentation
+- **recipe-canonical** (the publishable line): + same scenario_spec,
+  prompt, decoding, max_train_instances, after collapsing
+  HELM-version schema drift
+- **recipe-identical**: byte-for-byte `run_spec.json` match — always
+  0 because HELM's run_spec schema evolved across releases (see
+  `docs/helm-gotchas.md` §G1)
 
 The 0/295 raw-hash number is *not* a reproducibility failure. It's a
 HELM-version artifact: newer HELM populates `adapter_spec` fields
@@ -50,13 +60,13 @@ recipe-clean count.
 
 ## Per-model
 
-| model | recipe-clean / total | mean agree@0 | min | max | dominant diagnosis |
-|---|---|---:|---:|---:|---|
-| `eleutherai/pythia-2.8b-v0` | 3 / 3 | 0.993 | 0.981 | 1.000 | deployment_drift |
-| `lmsys/vicuna-7b-v1.3` | 39 / 39 | 0.938 | 0.554 | 1.000 | deployment_drift |
-| `eleutherai/pythia-6.9b` | 39 / 39 | 0.896 | 0.679 | 1.000 | deployment_drift |
-| `qwen/qwen2.5-7b-instruct-turbo` | 0 / 38 | 0.716 | 0.283 | 1.000 | **execution_spec_drift** (recipe-drifted) |
-| `openai/gpt-oss-20b` | 0 / 2 | 0.436 | 0.434 | 0.438 | multiple_primary_reasons |
+| model                            | recipe-clean / total | mean agree@0 |   min |   max | dominant diagnosis                        |
+|----------------------------------|----------------------|-------------:|------:|------:|-------------------------------------------|
+| `eleutherai/pythia-2.8b-v0`      | 3 / 3                |        0.993 | 0.981 | 1.000 | deployment_drift                          |
+| `lmsys/vicuna-7b-v1.3`           | 39 / 39              |        0.938 | 0.554 | 1.000 | deployment_drift                          |
+| `eleutherai/pythia-6.9b`         | 39 / 39              |        0.896 | 0.679 | 1.000 | deployment_drift                          |
+| `qwen/qwen2.5-7b-instruct-turbo` | 0 / 38               |        0.716 | 0.283 | 1.000 | **execution_spec_drift** (recipe-drifted) |
+| `openai/gpt-oss-20b`             | 0 / 2                |        0.436 | 0.434 | 0.438 | multiple_primary_reasons                  |
 
 The Qwen number was previously attributed in this report to "different
 KubeAI deployment path". That was wrong. KubeAI vs direct-vLLM are both
@@ -74,21 +84,21 @@ of the gap.
 
 ## Per-benchmark (recipe-clean only, sorted by mean@0 descending)
 
-| benchmark | clean packets | instances | mean agree@0 | min | max |
-|---|---:|---:|---:|---:|---:|
-| `entity_data_imputation` | 4 | 3,392 | 0.998 | 0.992 | 1.000 |
-| `synthetic_reasoning` | 6 | 24,000 | 0.991 | 0.976 | 1.000 |
-| `truthful_qa` | 2 | 10,464 | 0.988 | 0.977 | 0.999 |
-| `imdb` | 2 | 8,000 | 0.996 | 0.991 | 1.000 |
-| `lsat_qa` | 2 | 7,376 | 0.979 | 0.960 | 0.998 |
-| `boolq` | 3 | 12,000 | 0.978 | 0.952 | 1.000 |
-| `quac` | 2 | 6,000 | 0.963 | 0.939 | 0.987 |
-| `civil_comments` | 20 | 80,000 | 0.941 | 0.819 | 1.000 |
-| `mmlu` | 20 | 18,144 | 0.907 | 0.649 | 1.000 |
-| `gsm` | 4 | 4,000 | 0.904 | 0.822 | 0.990 |
-| `wikifact` | 20 | 126,832 | 0.836 | 0.554 | 0.953 |
-| `entity_matching` | 6 | 11,200 | 0.758 | 0.679 | 0.832 |
-| `narrative_qa` | 2 | 5,640 | 0.616 | 0.283 | 0.986 |
+| benchmark                | clean packets | instances | mean agree@0 |   min |   max |
+|--------------------------|--------------:|----------:|-------------:|------:|------:|
+| `entity_data_imputation` |             4 |     3,392 |        0.998 | 0.992 | 1.000 |
+| `synthetic_reasoning`    |             6 |    24,000 |        0.991 | 0.976 | 1.000 |
+| `truthful_qa`            |             2 |    10,464 |        0.988 | 0.977 | 0.999 |
+| `imdb`                   |             2 |     8,000 |        0.996 | 0.991 | 1.000 |
+| `lsat_qa`                |             2 |     7,376 |        0.979 | 0.960 | 0.998 |
+| `boolq`                  |             3 |    12,000 |        0.978 | 0.952 | 1.000 |
+| `quac`                   |             2 |     6,000 |        0.963 | 0.939 | 0.987 |
+| `civil_comments`         |            20 |    80,000 |        0.941 | 0.819 | 1.000 |
+| `mmlu`                   |            20 |    18,144 |        0.907 | 0.649 | 1.000 |
+| `gsm`                    |             4 |     4,000 |        0.904 | 0.822 | 0.990 |
+| `wikifact`               |            20 |   126,832 |        0.836 | 0.554 | 0.953 |
+| `entity_matching`        |             6 |    11,200 |        0.758 | 0.679 | 0.832 |
+| `narrative_qa`           |             2 |     5,640 |        0.616 | 0.283 | 0.986 |
 
 Short-output classification reproduces tightly (>0.94 mean for 9 of
 the top 10). Long-form generation (narrative_qa) and free-form text
@@ -188,13 +198,13 @@ their own useful finding but a different paper.
 `reports/scoped_funnel/coverage_funnel_summary.latest.txt` shows the
 full three-level breakdown. Key counts:
 
-| stage | count |
-|---|---:|
-| target (in-scope official rows) | 295 |
-| reproduced (logical-key match) | 166 |
-| **reproduced (recipe-canonical)** | **128** |
-| reproduced (recipe-identical, raw hash) | 0 |
-| analyzed | 166 |
+| stage                                   |   count |
+|-----------------------------------------|--------:|
+| target (in-scope official rows)         |     295 |
+| reproduced (logical-key match)          |     166 |
+| **reproduced (recipe-canonical)**       | **128** |
+| reproduced (recipe-identical, raw hash) |       0 |
+| analyzed                                |     166 |
 
 The 38-row gap between logical and recipe-canonical is exactly the
 set of comparisons with adapter drift. They're the rows the paper
