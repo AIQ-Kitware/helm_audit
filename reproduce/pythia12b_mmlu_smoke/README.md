@@ -1,31 +1,48 @@
-# pythia-12b-v0 × MMLU smoke
+# pythia-12b-v0 × MMLU
 
-A single-run smoke test that exercises the **execution path** end-to-end on
-`aiq-gpu`. Goal: produce a local audit run for `eleutherai/pythia-12b-v0` on
-one MMLU subject so it can be folded into the `pythia-mmlu-stress` virtual
-experiment alongside the existing `pythia-6.9b` results.
+Local audit run for `eleutherai/pythia-12b-v0` on the 5 MMLU subjects with
+public HELM reference data, scheduled through the `eval-audit-run` →
+`kwdagger` → `magnet` → `helm-run` execution chain on `aiq-gpu`. Results
+fold into the `pythia-mmlu-stress` virtual experiment alongside the
+existing `pythia-6.9b` runs.
 
-This also doubles as a real-world test of the dormant `eval-audit-run` →
-`kwdagger` → `magnet` → `helm-run` execution stack, which has not been
-exercised in months. **Treat the result as a verification that those code
-paths still work**, not as production output.
+The runbook directory still says "smoke" because it started life as a
+1-subject smoke (`abstract_algebra`) on 2026-04-28 to verify the dormant
+execution chain still worked. That run reproduced the public HELM result
+exactly (`agree@0=1.000`, `max |Δ|=0.0`); the experiment is no longer a
+smoke. The directory name is preserved so the git history of the runbook
+stays continuous.
 
-## Scope (one run)
+## Scope
 
 - Model: `eleutherai/pythia-12b-v0`
-- Benchmark: `mmlu:subject=abstract_algebra,method=multiple_choice_joint,data_augmentation=canonical`
-  (override via `HELM_MMLU_SUBJECT`)
-- Suite version target: matches public HELM v0.2.4 / v0.3.0 rows that already
-  live at `/data/crfm-helm-public/classic/benchmark_output/runs/v0.2.4/...`
+- 5 MMLU subjects (the same set that has public reference data for both
+  pythia-6.9b and pythia-12b-v0):
+  - `abstract_algebra`
+  - `college_chemistry`
+  - `computer_security`
+  - `econometrics`
+  - `us_foreign_policy`
+- Override via `HELM_MMLU_SUBJECTS=...` (space-separated). One subject
+  is fine if you want to redo a single packet.
+- Suite version target: matches public HELM v0.2.4 / v0.3.0 rows under
+  `/data/crfm-helm-public/classic/benchmark_output/runs/v{0.2.4,0.3.0}/...`
 - `max_eval_instances`: 1000 (matches the public reference; override via
   `MAX_EVAL_INSTANCES`)
+- Re-running is idempotent: `mode: compute_if_missing` skips run-specs
+  that already produced a `DONE` marker, so re-invoking after the
+  abstract_algebra smoke completes the remaining 4 subjects rather than
+  redoing the first one.
 
 ## Hardware assumptions (aiq-gpu)
 
-- A single GPU with **≥ 28 GB free VRAM** (pythia-12b at fp16 is ~24 GB plus
-  KV cache; pythia-12b at bf16 is the same). 80 GB H100/A100 is comfortable;
-  24 GB cards (3090, A10) are **not** enough — the model won't load.
-- Disk: ~30 GB free under `$HOME/.cache/huggingface/` for the first download.
+- 4 GPUs with **≥ 28 GB free VRAM each** in parallel by default
+  (`DEVICES=0,1,2,3`, `TMUX_WORKERS=4`). pythia-12b at fp16 is ~24 GB plus
+  KV cache; 80 GB-class cards are comfortable. Override `DEVICES` and
+  `TMUX_WORKERS` for fewer/different GPUs (24 GB cards are **not** enough
+  — the model won't load).
+- Disk: ~30 GB free under `$HOME/.cache/huggingface/` for the first download
+  (shared across subjects after the first download).
 - Network: outbound HTTPS to `huggingface.co` for the initial weight pull.
 - Python: same `eval_audit` environment used here, with `crfm-helm` and
   `magnet` installed (`uv pip install -e .` in the repo root).
@@ -64,20 +81,22 @@ Path layout produced on aiq-gpu (and mirrored to this machine after rsync):
 /data/crfm-helm-audit/audit-pythia-12b-mmlu-smoke/
 └── helm/helm_id_<hash>/
     └── benchmark_output/runs/audit-pythia-12b-mmlu-smoke/
-        └── mmlu:subject=abstract_algebra,...,model=eleutherai_pythia-12b-v0,data_augmentation=canonical/
-            ├── run_spec.json
-            ├── per_instance_stats.json
-            ├── stats.json
-            └── ...
+        ├── mmlu:subject=abstract_algebra,...,model=eleutherai_pythia-12b-v0,data_augmentation=canonical/
+        ├── mmlu:subject=college_chemistry,...,model=eleutherai_pythia-12b-v0,data_augmentation=canonical/
+        ├── mmlu:subject=computer_security,...,model=eleutherai_pythia-12b-v0,data_augmentation=canonical/
+        ├── mmlu:subject=econometrics,...,model=eleutherai_pythia-12b-v0,data_augmentation=canonical/
+        └── mmlu:subject=us_foreign_policy,...,model=eleutherai_pythia-12b-v0,data_augmentation=canonical/
+            (each contains run_spec.json, per_instance_stats.json, stats.json, scenario_state.json, ...)
 ```
 
 ## Post-rsync steps (on the analysis machine)
 
-After the rsync lands, the new run still needs to be folded into the
-analysis surface:
+After the rsync lands, the new runs still need to be folded into the
+analysis surface. The `audit-pythia-12b-mmlu-smoke` experiment is already
+listed in the pythia-mmlu-stress manifest's `include_experiments` (added
+2026-04-28 for the first smoke), so only a reindex + recompose is needed:
 
-1. Refresh the local audit-results index so the new `audit-pythia-12b-mmlu-smoke`
-   experiment is picked up:
+1. Refresh the local audit-results index so the new packets are picked up:
 
    ```bash
    eval-audit-index \
@@ -85,21 +104,17 @@ analysis surface:
      --report-dpath /data/crfm-helm-audit-store/indexes
    ```
 
-2. Add the experiment to the pythia-mmlu-stress virtual-experiment scope.
-   Edit [`configs/virtual-experiments/pythia-mmlu-stress.yaml`](../../configs/virtual-experiments/pythia-mmlu-stress.yaml)
-   and add `audit-pythia-12b-mmlu-smoke` to the `include_experiments:` list
-   under the `audit_index` source.
-
-3. Recompose and rebuild the report:
+2. Recompose and rebuild the report:
 
    ```bash
    ./reproduce/pythia_mmlu_stress/compose.sh
    ./reproduce/pythia_mmlu_stress/build_summary.sh
    ```
 
-   The 12b row should now appear in the per-subject + per-model tables and
-   one of the missing-targets entries should disappear from
-   [`reports/scoped_funnel/missing_targets.latest.csv`](../../../data/crfm-helm-audit-store/virtual-experiments/pythia-mmlu-stress/reports/scoped_funnel/missing_targets.latest.csv).
+   The pythia-12b-v0 per-model row should now show 10/10 reproduced
+   (was 2/10 after the smoke), and the missing-targets CSV at
+   [`reports/scoped_funnel/missing_targets.latest.csv`](../../../data/crfm-helm-audit-store/virtual-experiments/pythia-mmlu-stress/reports/scoped_funnel/missing_targets.latest.csv)
+   should be empty.
 
 ## Fallback: direct `helm-run` (skip the eval-audit/kwdagger layer)
 
@@ -110,12 +125,16 @@ HELM-shaped path so the indexer + analysis side still pick it up:
 
 ```bash
 EXP=audit-pythia-12b-mmlu-smoke
-SUBJECT="${HELM_MMLU_SUBJECT:-abstract_algebra}"
+SUBJECTS="${HELM_MMLU_SUBJECTS:-abstract_algebra college_chemistry computer_security econometrics us_foreign_policy}"
 RUN_DIR=/data/crfm-helm-audit/$EXP/helm/helm_id_manual
 mkdir -p "$RUN_DIR"
 cd "$RUN_DIR"
+RUN_ENTRIES=()
+for s in $SUBJECTS; do
+  RUN_ENTRIES+=("mmlu:subject=$s,method=multiple_choice_joint,model=eleutherai/pythia-12b-v0,data_augmentation=canonical")
+done
 helm-run \
-  --run-entries "mmlu:subject=$SUBJECT,method=multiple_choice_joint,model=eleutherai/pythia-12b-v0,data_augmentation=canonical" \
+  --run-entries "${RUN_ENTRIES[@]}" \
   --suite "$EXP" \
   --max-eval-instances "${MAX_EVAL_INSTANCES:-1000}" \
   --num-threads 1 \
