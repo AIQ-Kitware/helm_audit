@@ -597,26 +597,38 @@ def test_prioritized_breakdown_summary_ranks_and_points_to_actionable_paths(tmp_
         level_002=level_002,
     )
 
-    good_rows = [row for row in summary["rows"] if row["bucket_class"] == "good"]
+    high_agree_rows = [row for row in summary["rows"] if row["bucket_class"] == "score_ge_95"]
+    best_rows = [row for row in summary["rows"] if row["bucket_class"] == "best"]
     mid_rows = [row for row in summary["rows"] if row["bucket_class"] == "mid"]
-    bad_rows = [row for row in summary["rows"] if row["bucket_class"] == "bad"]
+    worst_rows = [row for row in summary["rows"] if row["bucket_class"] == "worst"]
+    low_agree_rows = [row for row in summary["rows"] if row["bucket_class"] == "score_lt_80"]
     flagged_rows = [row for row in summary["rows"] if row["bucket_class"] == "flagged"]
 
-    assert good_rows[0]["dimension"] == "benchmark"
-    assert good_rows[0]["dimension_value"] == "bench_good"
-    assert good_rows[0]["example_report_dirs"] == ["/reports/good"]
-    assert good_rows[0]["breakdown_dir"].endswith("/level_002/breakdowns/by_benchmark/bench_good")
+    # score_ge_95 and score_lt_80 remain absolute-threshold breakdown selections (per-dimension).
+    assert high_agree_rows[0]["dimension"] == "benchmark"
+    assert high_agree_rows[0]["dimension_value"] == "bench_good"
+    assert high_agree_rows[0]["example_report_dirs"] == ["/reports/good"]
+    assert high_agree_rows[0]["breakdown_dir"].endswith("/level_002/breakdowns/by_benchmark/bench_good")
     assert "bench_good" in summary["include_values_by_dim"]["benchmark"]
 
-    assert mid_rows[0]["dimension"] == "benchmark"
-    assert mid_rows[0]["dimension_value"] == "bench_mid"
-    assert mid_rows[0]["has_multiplicity_signal"] is True
+    assert low_agree_rows[0]["dimension"] == "benchmark"
+    assert low_agree_rows[0]["dimension_value"] == "bench_bad"
+    assert low_agree_rows[0]["has_machine_spread"] is True
+    assert low_agree_rows[0]["has_ambiguous_analyzed_matching"] is True
+    assert low_agree_rows[0]["has_off_story_signal"] is True
 
-    assert bad_rows[0]["dimension"] == "benchmark"
-    assert bad_rows[0]["dimension_value"] == "bench_bad"
-    assert bad_rows[0]["has_machine_spread"] is True
-    assert bad_rows[0]["has_ambiguous_analyzed_matching"] is True
-    assert bad_rows[0]["has_off_story_signal"] is True
+    # best/mid/worst are population-quantile sections; each is a single
+    # synthetic-dimension entry whose example_rows are picked at the section's
+    # target quantile across the analyzed-row population.
+    assert len(best_rows) == 1
+    assert best_rows[0]["dimension"] == "agreement_quantile"
+    assert best_rows[0]["dimension_value"] == "best"
+    assert len(mid_rows) == 1
+    assert mid_rows[0]["dimension"] == "agreement_quantile"
+    assert mid_rows[0]["dimension_value"] == "mid"
+    assert len(worst_rows) == 1
+    assert worst_rows[0]["dimension"] == "agreement_quantile"
+    assert worst_rows[0]["dimension_value"] == "worst"
 
     assert flagged_rows
     assert any("ambiguous_analysis" in row["interesting_flags"] for row in flagged_rows)
@@ -704,7 +716,7 @@ def test_prioritized_breakdown_summary_uses_selected_attempt_machine_host_for_an
 
     machine_good_rows = [
         row for row in summary["rows"]
-        if row["bucket_class"] == "good" and row["dimension"] == "machine_host"
+        if row["bucket_class"] == "score_ge_95" and row["dimension"] == "machine_host"
     ]
     assert machine_good_rows
     assert any(row["dimension_value"] == "host-a" for row in machine_good_rows)
@@ -732,7 +744,7 @@ def test_prioritized_example_symlink_tree_is_created_and_points_to_real_targets(
 
     summary = {
         "selected_by_section": {
-            "good": [
+            "score_ge_95": [
                 {
                     "priority_rank": 1,
                     "dimension": "benchmark",
@@ -750,8 +762,10 @@ def test_prioritized_example_symlink_tree_is_created_and_points_to_real_targets(
                     ],
                 }
             ],
+            "best": [],
             "mid": [],
-            "bad": [],
+            "worst": [],
+            "score_lt_80": [],
             "flagged": [],
         }
     }
@@ -764,7 +778,7 @@ def test_prioritized_example_symlink_tree_is_created_and_points_to_real_targets(
     )
 
     assert (level_002 / "prioritized_examples.latest").is_symlink()
-    rec_dir = tree_root / "good" / "01-benchmark-bench-good"
+    rec_dir = tree_root / "score_ge_95" / "01-benchmark-bench-good"
     example_dir = rec_dir / "example_01-bench-good-model-a"
     assert rec_dir.exists()
     assert example_dir.exists()
@@ -779,7 +793,7 @@ def test_prioritized_example_repairs_missing_latest_artifacts(tmp_path, monkeypa
     report_dir.mkdir(parents=True)
     summary = {
         "selected_by_section": {
-            "good": [
+            "score_ge_95": [
                 {
                     "priority_rank": 1,
                     "dimension": "benchmark",
@@ -797,8 +811,10 @@ def test_prioritized_example_repairs_missing_latest_artifacts(tmp_path, monkeypa
                     ],
                 }
             ],
+            "best": [],
             "mid": [],
-            "bad": [],
+            "worst": [],
+            "score_lt_80": [],
             "flagged": [],
         }
     }

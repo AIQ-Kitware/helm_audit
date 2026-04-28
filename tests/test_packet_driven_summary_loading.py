@@ -253,7 +253,7 @@ def test_prioritized_breakdown_text_uses_plain_paths():
                 "priority_rank": 1,
                 "dimension": "benchmark",
                 "dimension_value": "boolq",
-                "bucket_class": "good",
+                "bucket_class": "score_ge_95",
                 "n_analyzed": 3,
                 "target_bucket_count": 2,
                 "target_bucket_share": 2 / 3,

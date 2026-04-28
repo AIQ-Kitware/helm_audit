@@ -1603,30 +1603,63 @@ _TRIAGE_DIMENSION_PRIORITY = {
     "suite": 4,
 }
 
+# Section taxonomy.
+#
+# - score_ge_95 / score_lt_80 : *absolute* threshold sections keyed off the
+#                   agreement bucket label. They preserve the publication-
+#                   quality narrative ("did we hit / fall below the bar?").
+#                   The numeric thresholds are baked into the section name
+#                   so a reader doesn't have to look up what "good" or "bad"
+#                   meant in the schema.
+# - best / mid / worst : *population-quantile* sections that pick rows at
+#                   the top / median / bottom of whatever analyzed rows are
+#                   in scope. Always populated when there is at least one
+#                   analyzed row, so tightly-clustered virtual experiments
+#                   still surface their actual range.
+# - flagged       : signal-based section (multiplicity, machine spread,
+#                   ambiguous matching, off-story, report warnings).
 _TRIAGE_BUCKET_CLASS_ORDER = {
-    "good": 0,
-    "mid": 1,
-    "bad": 2,
-    "flagged": 3,
+    "score_ge_95": 0,
+    "best": 1,
+    "mid": 2,
+    "worst": 3,
+    "score_lt_80": 4,
+    "flagged": 5,
 }
 
-_TRIAGE_BUCKET_LABELS = {
-    "good": ("exact_or_near_exact", "high_agreement_0.95+"),
-    "mid": ("moderate_agreement_0.80+",),
-    "bad": ("low_agreement_0.00+", "zero_agreement"),
+_TRIAGE_ABSOLUTE_BUCKETS = {
+    "score_ge_95": ("exact_or_near_exact", "high_agreement_0.95+"),
+    "score_lt_80": ("low_agreement_0.00+", "zero_agreement"),
+}
+
+# Backwards-compatible export for any external readers that previously
+# inspected ``_TRIAGE_BUCKET_LABELS[<class>]``. The moderate-agreement key is
+# intentionally gone — moderate rows now flow through the quantile-based
+# ``mid`` section, which is not threshold-based.
+_TRIAGE_BUCKET_LABELS = dict(_TRIAGE_ABSOLUTE_BUCKETS)
+
+
+_QUANTILE_BUCKET_TARGETS: dict[str, float] = {
+    "best": 1.0,
+    "mid": 0.5,
+    "worst": 0.0,
 }
 
 
 def _agreement_bucket_class(bucket: str | None) -> str | None:
+    """Map an agreement bucket label to its absolute section, or None.
+
+    Only ``score_ge_95`` and ``score_lt_80`` are absolute classifications.
+    Moderate / zero-but-nonzero agreement labels return ``None``; quantile
+    sections do their own population-relative selection downstream.
+    """
     text = _clean_optional_text(bucket)
     if text is None:
         return None
-    if text in _TRIAGE_BUCKET_LABELS["good"]:
-        return "good"
-    if text in _TRIAGE_BUCKET_LABELS["mid"]:
-        return "mid"
-    if text in _TRIAGE_BUCKET_LABELS["bad"]:
-        return "bad"
+    if text in _TRIAGE_ABSOLUTE_BUCKETS["score_ge_95"]:
+        return "score_ge_95"
+    if text in _TRIAGE_ABSOLUTE_BUCKETS["score_lt_80"]:
+        return "score_lt_80"
     return None
 
 
@@ -1658,11 +1691,9 @@ def _triage_bucket_score(
     target_bonus = min(target_count, 8) * 8.0 + (target_share * 80.0)
     score_bonus = 0.0
     if mean_score is not None:
-        if bucket_class == "good":
+        if bucket_class == "score_ge_95":
             score_bonus = mean_score * 12.0
-        elif bucket_class == "mid":
-            score_bonus = max(0.0, 1.0 - abs(mean_score - 0.85)) * 12.0
-        elif bucket_class == "bad":
+        elif bucket_class == "score_lt_80":
             score_bonus = (1.0 - mean_score) * 18.0
     return dim_bonus + coverage_bonus + target_bonus + score_bonus
 
@@ -1692,13 +1723,13 @@ def _example_case_sort_key(row: dict[str, Any], bucket_class: str) -> tuple[floa
     score = _safe_float(row.get("official_instance_agree_005"))
     if score is None:
         score = -1.0
-    if bucket_class == "good":
+    if bucket_class == "score_ge_95":
         primary = score
-    elif bucket_class == "mid":
-        primary = 1.0 - abs(score - 0.85)
-    elif bucket_class == "bad":
+    elif bucket_class == "score_lt_80":
         primary = -score
     else:
+        # Default for ad-hoc bucket_class strings (e.g. flagged-row fallback);
+        # rank by closeness to the moderate band so the example list is stable.
         primary = -abs(score - 0.85)
     return (primary, str(row.get("run_entry") or ""))
 
@@ -1735,9 +1766,11 @@ def _triage_selection_reason(
     flags: list[str],
 ) -> str:
     bucket_label = {
-        "good": "good-agreement",
-        "mid": "mid-agreement",
-        "bad": "bad-agreement",
+        "score_ge_95": "high-agreement (>=0.95)",
+        "score_lt_80": "low-agreement (<0.80)",
+        "best": "best-of-population",
+        "mid": "median-of-population",
+        "worst": "worst-of-population",
         "flagged": "flagged",
     }.get(bucket_class, bucket_class)
     reason = (
@@ -2042,7 +2075,7 @@ def _build_prioritized_breakdown_summary(
             ]
             if not flags:
                 continue
-            bad_count = int(row["bucket_class_counts"].get("bad", 0))
+            bad_count = int(row["bucket_class_counts"].get("score_lt_80", 0))
             out = dict(row)
             out.update(
                 {
@@ -2061,7 +2094,7 @@ def _build_prioritized_breakdown_summary(
                     ),
                     "example_rows": _pick_example_cases(
                         rows=row["rows"],
-                        bucket_class="bad" if bad_count else (str(row.get("dominant_bucket_class") or "mid")),
+                        bucket_class="score_lt_80" if bad_count else str(row.get("dominant_bucket_class") or "flagged"),
                     ),
                     "selection_reason": "interesting investigative flags in an analyzed breakdown group: " + ", ".join(flags),
                     "interesting_flags": flags,
@@ -2088,15 +2121,112 @@ def _build_prioritized_breakdown_summary(
                 break
         return selected
 
+    def _select_quantile_section(
+        section_name: str,
+        *,
+        max_examples: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Build a single synthetic-breakdown entry for a population-quantile section.
+
+        Picks examples at the section's target quantile of the analyzed-row
+        population (best=1.0, mid=0.5, worst=0.0), regardless of how those
+        rows fall into absolute good/bad buckets. Returns a list to match the
+        shape of the absolute-bucket selectors (length 1 or 0).
+        """
+        target_quantile = _QUANTILE_BUCKET_TARGETS[section_name]
+        scored: list[tuple[dict[str, Any], float]] = []
+        for case in analyzed_case_rows:
+            score = _safe_float(case.get("official_instance_agree_005"))
+            if score is None:
+                continue
+            scored.append((case, score))
+        if not scored:
+            return []
+        scored.sort(key=lambda pair: pair[1])  # ascending: index 0 is worst
+        n = len(scored)
+        target_idx = round(target_quantile * (n - 1))
+        # Sort candidates by distance from target_idx, breaking ties by score
+        # in the direction that matches the section semantics so the leading
+        # example reads naturally (highest score for "best", lowest for
+        # "worst", closest-to-median for "mid").
+        if section_name == "best":
+            ranked = sorted(range(n), key=lambda i: (-scored[i][1], abs(i - target_idx)))
+        elif section_name == "worst":
+            ranked = sorted(range(n), key=lambda i: (scored[i][1], abs(i - target_idx)))
+        else:  # mid
+            ranked = sorted(range(n), key=lambda i: (abs(i - target_idx), scored[i][1]))
+        seen_keys: set[tuple[str, str]] = set()
+        example_rows: list[dict[str, Any]] = []
+        for idx in ranked:
+            row = scored[idx][0]
+            key = (str(row.get("experiment_name") or ""), str(row.get("run_entry") or ""))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            example_rows.append(row)
+            if len(example_rows) >= max_examples:
+                break
+        scores = [scored[i][1] for i in range(n)]
+        section_label = {
+            "best": "highest agreement (top of population)",
+            "mid": "median agreement (population p50)",
+            "worst": "lowest agreement (bottom of population)",
+        }[section_name]
+        synthetic_row = {
+            "dimension": "agreement_quantile",
+            "dimension_priority": _TRIAGE_BUCKET_CLASS_ORDER[section_name],
+            "dimension_value": section_name,
+            "rank_population": (
+                "rows ranked across the analyzed-row population by official_instance_agree_005; "
+                "examples picked at the section's target quantile (best=1.0, mid=0.5, worst=0.0)"
+            ),
+            "n_attempted": n,
+            "n_completed": n,
+            "n_analyzed": n,
+            "target_bucket_count": len(example_rows),
+            "target_bucket_share": _safe_ratio(len(example_rows), n) or 0.0,
+            "dominant_bucket": None,
+            "dominant_bucket_class": None,
+            "bucket_counts": {},
+            "bucket_class_counts": {},
+            "machine_host_membership_source": None,
+            "mean_official_instance_agree_005": (sum(scores) / n) if scores else None,
+            "has_multiplicity_signal": False,
+            "has_machine_spread": False,
+            "has_ambiguous_analyzed_matching": False,
+            "has_off_story_signal": False,
+            "has_report_warnings": False,
+            "breakdown_dir": None,
+            "breakdown_index_dir": None,
+            "rows": [pair[0] for pair in scored],
+        }
+        synthetic_row.update(
+            {
+                "bucket_class": section_name,
+                "primary_bucket_class": section_name,
+                "selection_score": 0.0,
+                "example_rows": example_rows,
+                "selection_reason": (
+                    f"{section_label}: showing {len(example_rows)} example(s) "
+                    f"out of {n} analyzed row(s); "
+                    f"min={min(scores):.4f} median={scores[n // 2]:.4f} max={max(scores):.4f}"
+                ),
+                "interesting_flags": [],
+            }
+        )
+        return [synthetic_row]
+
     selected_by_section = {
-        "good": _select_bucket_rows("good", limit=4),
-        "mid": _select_bucket_rows("mid", limit=4),
-        "bad": _select_bucket_rows("bad", limit=4),
+        "score_ge_95": _select_bucket_rows("score_ge_95", limit=4),
+        "best": _select_quantile_section("best"),
+        "mid": _select_quantile_section("mid"),
+        "worst": _select_quantile_section("worst"),
+        "score_lt_80": _select_bucket_rows("score_lt_80", limit=4),
         "flagged": _select_flagged_rows(limit=6),
     }
 
     flattened_rows: list[dict[str, Any]] = []
-    for section_name in ["good", "mid", "bad", "flagged"]:
+    for section_name in ["score_ge_95", "best", "mid", "worst", "score_lt_80", "flagged"]:
         for idx, row in enumerate(selected_by_section[section_name], start=1):
             example_rows = row.get("example_rows") or []
             flattened_rows.append(
@@ -2161,11 +2291,36 @@ def _build_prioritized_breakdown_summary(
     return {
         "definitions": {
             "rank_population": "breakdown groups ranked from analyzed reproducibility rows; attempted/completed counts are added from all indexed rows in the same group; machine_host membership uses selected attempt provenance when available",
-            "bucket_classes": {
-                "good": list(_TRIAGE_BUCKET_LABELS["good"]),
-                "mid": list(_TRIAGE_BUCKET_LABELS["mid"]),
-                "bad": list(_TRIAGE_BUCKET_LABELS["bad"]),
-                "flagged": ["interesting investigative flags regardless of primary bucket"],
+            "section_classes": {
+                "score_ge_95": {
+                    "kind": "absolute",
+                    "agreement_buckets": list(_TRIAGE_ABSOLUTE_BUCKETS["score_ge_95"]),
+                    "purpose": "publication-quality threshold (>=0.95 instance-level agreement)",
+                },
+                "best": {
+                    "kind": "quantile",
+                    "target_quantile": _QUANTILE_BUCKET_TARGETS["best"],
+                    "purpose": "top of the analyzed-row population by official_instance_agree_005, regardless of absolute bucket",
+                },
+                "mid": {
+                    "kind": "quantile",
+                    "target_quantile": _QUANTILE_BUCKET_TARGETS["mid"],
+                    "purpose": "median of the analyzed-row population by official_instance_agree_005, regardless of absolute bucket",
+                },
+                "worst": {
+                    "kind": "quantile",
+                    "target_quantile": _QUANTILE_BUCKET_TARGETS["worst"],
+                    "purpose": "bottom of the analyzed-row population by official_instance_agree_005, regardless of absolute bucket",
+                },
+                "score_lt_80": {
+                    "kind": "absolute",
+                    "agreement_buckets": list(_TRIAGE_ABSOLUTE_BUCKETS["score_lt_80"]),
+                    "purpose": "publication-quality floor (<0.80 instance-level agreement)",
+                },
+                "flagged": {
+                    "kind": "signal",
+                    "purpose": "interesting investigative flags regardless of primary bucket",
+                },
             },
             "dimension_priority": _TRIAGE_DIMENSION_PRIORITY,
         },
@@ -2211,10 +2366,12 @@ def _format_prioritized_breakdown_summary_text(
         lines.append(f"  {rank + 1}. {dim}")
 
     section_titles = [
-        ("good", "Recommended good-agreement breakdowns to inspect"),
-        ("mid", "Recommended mid-agreement breakdowns to inspect"),
-        ("bad", "Recommended bad-agreement breakdowns to inspect"),
-        ("flagged", "Flagged special cases worth inspecting"),
+        ("score_ge_95", "score_ge_95 — high-agreement breakdowns (absolute threshold, instance agreement >= 0.95)"),
+        ("best", "best — best-of-population examples (quantile=1.0, regardless of absolute bucket)"),
+        ("mid", "mid — median-of-population examples (quantile=0.5, regardless of absolute bucket)"),
+        ("worst", "worst — worst-of-population examples (quantile=0.0, regardless of absolute bucket)"),
+        ("score_lt_80", "score_lt_80 — low-agreement breakdowns (absolute threshold, instance agreement < 0.80)"),
+        ("flagged", "flagged — special cases worth inspecting (signal-based, regardless of bucket)"),
     ]
     for section_key, section_title in section_titles:
         rows = [row for row in (summary.get("rows") or []) if row.get("bucket_class") == section_key]
@@ -2366,7 +2523,7 @@ def _publish_prioritized_examples_tree(
         for item in (repair_results or [])
         if item.get("report_dir")
     }
-    for section_name in ["good", "mid", "bad", "flagged"]:
+    for section_name in ["score_ge_95", "best", "mid", "worst", "score_lt_80", "flagged"]:
         section_dpath = tree_root / section_name
         section_dpath.mkdir(parents=True, exist_ok=True)
         for row in (summary.get("selected_by_section") or {}).get(section_name, []):
