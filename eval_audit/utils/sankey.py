@@ -126,22 +126,28 @@ def emit_sankey_artifacts(
             plotly_error = f"unable to write sankey HTML/images: {ex!r}"
             logger.warning(plotly_error)
 
-    write_latest_alias(json_fpath, _machine, f"sankey_{kind}.latest.json")
-    write_latest_alias(txt_fpath, _static, f"sankey_{kind}.latest.txt")
-    write_latest_alias(key_fpath, _static, f"sankey_{kind}.latest.key.txt")
+    # write_latest_alias renames the stamped intermediates onto the visible
+    # *.latest.* paths (history layer retired 2026-04-28). Capture the
+    # post-rename paths so the returned dict points at the actual files.
+    json_latest = write_latest_alias(json_fpath, _machine, f"sankey_{kind}.latest.json")
+    txt_latest = write_latest_alias(txt_fpath, _static, f"sankey_{kind}.latest.txt")
+    key_latest = write_latest_alias(key_fpath, _static, f"sankey_{kind}.latest.key.txt")
+    html_latest = None
+    jpg_latest = None
+    png_latest = None
     if html_out is not None:
-        write_latest_alias(html_fpath, _interactive, f"sankey_{kind}.latest.html")
+        html_latest = write_latest_alias(html_fpath, _interactive, f"sankey_{kind}.latest.html")
     if jpg_out is not None:
-        write_latest_alias(jpg_fpath, _static, f"sankey_{kind}.latest.jpg")
+        jpg_latest = write_latest_alias(jpg_fpath, _static, f"sankey_{kind}.latest.jpg")
     if png_out is not None:
-        write_latest_alias(png_fpath, _static, f"sankey_{kind}.latest.png")
+        png_latest = write_latest_alias(png_fpath, _static, f"sankey_{kind}.latest.png")
 
     return {
-        "json": str(json_fpath),
-        "txt": str(txt_fpath),
-        "key_txt": str(key_fpath),
-        "html": html_out,
-        "jpg": jpg_out,
-        "png": png_out,
+        "json": str(json_latest),
+        "txt": str(txt_latest),
+        "key_txt": str(key_latest),
+        "html": str(html_latest) if html_latest is not None else None,
+        "jpg": str(jpg_latest) if jpg_latest is not None else None,
+        "png": str(png_latest) if png_latest is not None else None,
         "plotly_error": plotly_error,
     }

@@ -59,7 +59,7 @@ The ideal system lets a person move from:
 * **Experiment**: A coordinated batch of local reproduction attempts that belong together operationally.
 * **Comparison**: A concrete analysis of one case, usually comparing a local result to a public HELM reference result.
 * **Report surface**: The human-facing browsing and publication layer.
-* **Latest alias**: A stable filename or symlink that points at the newest version of a generated artifact.
+* **Latest alias**: A stable filename `<artifact>.latest.<ext>` that holds the newest version of a generated artifact. Since the history retirement on 2026-04-28 this is the actual file (re-runs overwrite it in place), not a symlink into `.history/...`.
 * **Reproduce script**: A generated script placed near an output that can rebuild that output from saved inputs and metadata.
 * **Packet**: The planner’s canonical comparison unit: a named bundle of normalized run components, the specific comparisons to render between them, and the comparability metadata that explains how trustworthy or caveated those comparisons are. In practice, one packet is the declarative input to one core report
 
@@ -107,11 +107,16 @@ The filesystem should serve two roles at once:
 For human guidance, it should support:
 
 * stable directory families,
-* symlink-based navigation,
-* latest aliases,
-* timestamped history,
+* symlink-based navigation (between trees, e.g.
+  `summary_root/level_001.latest -> summary_root/level_001/`),
+* latest aliases (the actual file at `<name>.latest.<ext>`; see note below),
 * clickable path rendering,
 * and reproduce scripts.
+
+(Timestamped history under `.history/` was retired on 2026-04-28: each
+re-run overwrites the visible `*.latest.*` artifact in place. Old
+`.history/` trees still on disk are orphaned and will eventually be
+cleaned up out of band. The runtime no longer creates them.)
 
 For data organization, it should provide a predictable place for:
 
@@ -454,11 +459,22 @@ Use the filesystem both as:
 
 The system should intentionally support:
 
-* symlink-based navigation,
-* latest aliases,
-* timestamped history,
+* symlink-based navigation between trees,
+* latest aliases (the canonical name `<artifact>.latest.<ext>` is the
+  actual file; some same-tree shortcuts like
+  `reproduce.sh -> reproduce.latest.sh` remain symlinks),
 * clickable path rendering,
 * and stable directory responsibilities.
+
+History note: between roughly 2024 and 2026-04-28 every artifact had a
+sibling stamped copy under `.history/<YYYYMMDD>/<full-stamp>/...`. That
+layer was retired because re-runs accumulated faster than they were
+useful and the directory growth outweighed the rare benefit of digging
+out a previous version. Re-runs now overwrite the `*.latest.*` artifact
+in place. The git history of derived artifacts is no longer captured by
+the filesystem — only by the source code and the seed data the report
+was built from. Old `.history/` trees on disk are orphans; new code
+neither writes nor reads them.
 
 ## ADR 5 — Every meaningful generated output gets a reproduce script
 

@@ -4057,7 +4057,9 @@ def _render_scope_summary(
         return
 
     generated_utc, history_dpath = stamped_history_dir(summary_root)
-    version_dpath = history_dpath / generated_utc
+    # History layer retired 2026-04-28: write level_001/ and level_002/
+    # directly under summary_root rather than into a stamped <version>/ subdir.
+    version_dpath = history_dpath
     level_001 = version_dpath / "level_001"
     level_002 = version_dpath / "level_002"
     level_001.mkdir(parents=True, exist_ok=True)

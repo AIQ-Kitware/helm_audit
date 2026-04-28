@@ -168,10 +168,11 @@ def test_coverage_artifacts_written_with_latest_aliases(tmp_path):
     )
     out = tmp_path / "out"
     paths = write_coverage_artifacts(coverage, out_dpath=out)
-    assert paths["summary_txt"].is_symlink()
-    assert paths["json"].is_symlink()
-    assert paths["missing_csv"].is_symlink()
-    assert paths["missing_csv"].resolve().exists()
-    summary = paths["summary_txt"].resolve().read_text()
+    # *.latest.* is the actual file now (history layer retired 2026-04-28),
+    # not a symlink into .history/.
+    assert paths["summary_txt"].is_file()
+    assert paths["json"].is_file()
+    assert paths["missing_csv"].is_file()
+    summary = paths["summary_txt"].read_text()
     assert "Stage B" in summary
     assert "missing" in summary.lower()

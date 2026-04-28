@@ -637,8 +637,10 @@ def _write_stamped_text(report_root: Path, root: Path, stem: str, stamp: str, su
     fpath = history_root / f'{stem}_{stamp}{suffix}'
     logger.debug(f'Write to: {rich_link(fpath)}')
     fpath.write_text(text)
-    write_latest_alias(fpath, root, f'{stem}.latest{suffix}')
-    return fpath
+    # write_latest_alias renames fpath in place onto the visible *.latest.*
+    # name (post-history-retirement). Return the actual on-disk path so
+    # downstream consumers point at the real file.
+    return write_latest_alias(fpath, root, f'{stem}.latest{suffix}')
 
 
 def _write_stamped_json(report_root: Path, root: Path, stem: str, stamp: str, payload: Any) -> Path:

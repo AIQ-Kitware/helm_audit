@@ -59,3 +59,40 @@ eval-audit-build-virtual-experiment = "eval_audit.cli.build_virtual_experiment:m
 
 [tool.setuptools.packages.find]
 include = ["eval_audit*"]
+
+[tool.pytest.ini_options]
+# Collect tests from these roots only. Without this, pytest walks the entire
+# repo, including old-backup-reports/, reports/, dev/, submodules/, etc.,
+# which adds minutes to collection.
+testpaths = ["tests"]
+# Belt-and-suspenders: explicitly skip directories pytest should never enter
+# even when invoked with a custom path or when conftest discovery walks up.
+norecursedirs = [
+  ".git",
+  ".cache",
+  ".claude",
+  ".venv",
+  ".venv13",
+  ".venv313",
+  ".mypy_cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  "__pycache__",
+  "*.egg-info",
+  "build",
+  "dist",
+  "configs",
+  "dev",
+  "docs",
+  "examples",
+  "in-progress-notes",
+  "node_modules",
+  "old-backup-reports",
+  "reports",
+  "reports-filter-bak",
+  "reports-old",
+  "reports-summary-bak",
+  "reproduce",
+  "submodules",
+  "tmp",
+]

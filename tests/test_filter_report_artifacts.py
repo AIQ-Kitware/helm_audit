@@ -257,10 +257,9 @@ def test_emit_filter_report_artifacts_writes_tables(tmp_path: Path):
     assert Path(outputs["summary_txt"]).exists()
     assert Path(outputs["inventory_tsv"]).exists()
     assert Path(outputs["reason_by_model_tsv"]).exists()
+    # *.latest.* is the actual file now (history layer retired 2026-04-28).
     latest_inventory = tmp_path / "reports-filter" / "static" / "tables" / "model_filter_inventory.latest.tsv"
-    assert latest_inventory.is_symlink()
-    history_inventory = tmp_path / "reports-filter" / ".history" / "20260406" / "20260406T171445Z" / "static" / "tables" / "model_filter_inventory_20260406T171445Z.tsv"
-    assert history_inventory.exists()
+    assert latest_inventory.is_file()
 
 
 def test_emit_filter_analysis_artifacts_writes_explanatory_outputs(tmp_path: Path):
@@ -346,8 +345,9 @@ def test_emit_filter_analysis_artifacts_writes_explanatory_outputs(tmp_path: Pat
     assert Path(outputs["candidate_pool_tsv"]).exists()
     assert Path(outputs["reason_combo_tsv"]).exists()
     assert outputs["hierarchical_filter_sankey"]["json"] is not None
+    # *.latest.* is the actual file now (history layer retired 2026-04-28).
     latest_summary = tmp_path / "reports-filter" / "analysis" / "static" / "filter_candidate_analysis.latest.txt"
-    assert latest_summary.is_symlink()
+    assert latest_summary.is_file()
     text = Path(outputs["summary_txt"]).read_text()
     assert "selected_of_all" in text
     assert "Candidate pool funnel:" in text

@@ -35,5 +35,7 @@ run_infos.yaml
 rundiff.jsonl
 
 in-progress-notes/
-reports/
+# Repo-root reports/ only — the unanchored pattern was over-broad and
+# matched eval_audit/reports/ (the package subdir). The anchored ./reports/
+# at line 21 already covers the repo-level output dir.
 old-backup-reports/

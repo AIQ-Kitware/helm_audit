@@ -219,6 +219,6 @@ def test_emit_sankey_artifacts_writes_png_and_latest_alias(tmp_path: Path, monke
 
     assert out["html"] is not None
     assert out["jpg"] is not None
-    png_root = history_publish_root(tmp_path / "reports", tmp_path / "reports" / "static", "20260410T000000Z")
-    png_fpath = png_root / "sankey_20260410T000000Z_demo.png"
-    assert png_fpath.exists()
+    # *.latest.* is the actual file now (history layer retired 2026-04-28).
+    latest_png = tmp_path / "reports" / "static" / "sankey_demo.latest.png"
+    assert latest_png.is_file()
