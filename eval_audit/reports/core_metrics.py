@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 
 from loguru import logger
 
@@ -34,6 +35,61 @@ from eval_audit.normalized.helm_compat import helm_view
 from eval_audit.reports.paper_labels import load_paper_label_manager
 from eval_audit.reports.core_packet import load_packet_manifests
 from eval_audit.utils.numeric import quantile as _quantile
+
+
+@dataclass(frozen=True)
+class PlotLayout:
+    """Matplotlib layout knobs for crowded report figures."""
+
+    suptitle_y: float | None = 0.995
+    constrained_h_pad: float | None = 0.20
+    constrained_hspace: float | None = 0.12
+
+
+def _coalesce(value: float | None, default: float | None) -> float | None:
+    return default if value is None else value
+
+
+def _plot_layout_from_cli(args: argparse.Namespace) -> PlotLayout:
+    default = PlotLayout()
+    return PlotLayout(
+        suptitle_y=_coalesce(args.plot_suptitle_y, default.suptitle_y),
+        constrained_h_pad=_coalesce(args.plot_constrained_h_pad, default.constrained_h_pad),
+        constrained_hspace=_coalesce(args.plot_constrained_hspace, default.constrained_hspace),
+    )
+
+
+def _apply_plot_layout(fig: plt.Figure, plot_layout: PlotLayout | None) -> PlotLayout:
+    layout = plot_layout or PlotLayout()
+    pad_kwargs = {
+        key: value
+        for key, value in {
+            'h_pad': layout.constrained_h_pad,
+            'hspace': layout.constrained_hspace,
+        }.items()
+        if value is not None
+    }
+    if pad_kwargs:
+        layout_engine = fig.get_layout_engine() if hasattr(fig, 'get_layout_engine') else None
+        if layout_engine is not None and hasattr(layout_engine, 'set'):
+            layout_engine.set(**pad_kwargs)
+        else:
+            fig.set_constrained_layout_pads(**pad_kwargs)
+    return layout
+
+
+def _set_suptitle(
+    fig: plt.Figure,
+    text: str,
+    *,
+    fontsize: float,
+    plot_layout: PlotLayout | None = None,
+) -> None:
+    layout = _apply_plot_layout(fig, plot_layout)
+    kwargs: dict[str, Any] = {'fontsize': fontsize}
+    if layout.suptitle_y is not None:
+        kwargs['y'] = layout.suptitle_y
+    fig.suptitle(text, **kwargs)
 
 
 def _load_json(fpath: Path) -> Any:
@@ -490,7 +546,14 @@ def _per_metric_agreement_curves(*pairs: dict[str, Any], level_key: str, thresho
     return curves
 
 
-def _plot_per_metric_agreement(fig_dpath: Path, stamp: str, *pairs: dict[str, Any], level_key: str = 'instance_level', thresholds: list[float] | None = None) -> Path | None:
+def _plot_per_metric_agreement(
+    fig_dpath: Path,
+    stamp: str,
+    *pairs: dict[str, Any],
+    level_key: str = 'instance_level',
+    thresholds: list[float] | None = None,
+    plot_layout: PlotLayout | None = None,
+) -> Path | None:
     """Create per-metric agreement curve plots."""
     if thresholds is None:
         thresholds = [1e-12, 1e-9, 1e-6, 1e-3, 1e-2, 0.1, 0.25, 0.5, 1.0]
@@ -544,7 +607,12 @@ def _plot_per_metric_agreement(fig_dpath: Path, stamp: str, *pairs: dict[str, An
         col_idx = idx % n_cols
         fig.delaxes(axes[row_idx][col_idx])
 
-    fig.suptitle('Per-Metric Agreement vs Absolute Tolerance', fontsize=14)
+    _set_suptitle(
+        fig,
+        'Per-Metric Agreement vs Absolute Tolerance',
+        fontsize=14,
+        plot_layout=plot_layout,
+    )
     fig_fpath = fig_dpath / f'core_metric_per_metric_agreement_{stamp}.png'
     fig.savefig(fig_fpath, dpi=180)
     plt.close(fig)
@@ -593,6 +661,8 @@ def _plot_pair_metric_distributions(
     stamp: str,
     pairs: list[dict[str, Any]],
     run_spec_name: str,
+    *,
+    plot_layout: PlotLayout | None = None,
 ) -> Path | None:
     pairs = [pair for pair in pairs if pair]
     if not pairs:
@@ -642,11 +712,13 @@ def _plot_pair_metric_distributions(
             legend = ax.get_legend()
             if legend is not None:
                 legend.set_title('')
-    fig.suptitle(
+    _set_suptitle(
+        fig,
         'Core Metric Score Distributions Within Each Comparison Pair\n'
         f'Run Spec: {run_spec_name}\n'
         'Each panel shows the per-instance score distribution for side A vs side B.',
         fontsize=16,
+        plot_layout=plot_layout,
     )
     out_fpath = fig_dpath / f'core_metric_distributions_{stamp}.png'
     fig.savefig(out_fpath, dpi=180)
@@ -754,6 +826,7 @@ def _plot_run_metric_distributions(
     title: str = 'Overlay of Per-Instance Core Metric Score Distributions by Run',
     subtitle: str = 'This shows the raw score distributions for each core metric across the selected runs.',
     ecdf: bool = False,
+    plot_layout: PlotLayout | None = None,
 ) -> dict[str, Path] | None:
     frames = [
         _single_run_instance_core_rows(run_path, label)
@@ -818,12 +891,14 @@ def _plot_run_metric_distributions(
         legend = ax.get_legend()
         if legend is not None:
             legend.set_title('')
-    fig.suptitle(
+    _set_suptitle(
+        fig,
         f'{title}\n'
         f'Run Spec: {run_spec_name}\n'
         f'{subtitle}\n'
         f'Legend uses short aliases; see the sidecar legend artifact for the full labels.',
         fontsize=15,
+        plot_layout=plot_layout,
     )
     out_fpath = fig_dpath / f'{out_name}_{stamp}.png'
     fig.savefig(out_fpath, dpi=180)
@@ -864,6 +939,8 @@ def _plot_three_run_metric_distributions(
     kwdagger_b_run: str,
     official_run: str,
     run_spec_name: str,
+    *,
+    plot_layout: PlotLayout | None = None,
 ) -> Path | None:
     df = pd.concat([
         _single_run_instance_core_rows(kwdagger_a_run, 'kwdagger A'),
@@ -907,11 +984,13 @@ def _plot_three_run_metric_distributions(
                 ax.set_title(run_label)
             ax.set_xlabel('Core metric value')
             ax.set_ylabel(metric if col_idx == 0 else '')
-    fig.suptitle(
+    _set_suptitle(
+        fig,
         'Per-Run Instance-Level Core Metric Score Distributions\n'
         f'Run Spec: {run_spec_name}\n'
         'Columns are kwdagger repeat A, kwdagger repeat B, and the official HELM run.',
         fontsize=16,
+        plot_layout=plot_layout,
     )
     out_fpath = fig_dpath / f'core_metric_three_run_distributions_{stamp}.png'
     fig.savefig(out_fpath, dpi=180)
@@ -926,6 +1005,8 @@ def _plot_overlay_metric_distributions(
     kwdagger_b_run: str,
     official_run: str,
     run_spec_name: str,
+    *,
+    plot_layout: PlotLayout | None = None,
 ) -> dict[str, Path] | None:
     return _plot_run_metric_distributions(
         fig_dpath,
@@ -939,6 +1020,7 @@ def _plot_overlay_metric_distributions(
         out_name='core_metric_overlay_distributions',
         title='Overlay of Per-Instance Core Metric Score Distributions by Run',
         subtitle='This shows the raw score distributions for each core metric across kwdagger repeats and the official HELM run.',
+        plot_layout=plot_layout,
     )
 
 
@@ -949,6 +1031,8 @@ def _plot_overlay_metric_ecdfs(
     kwdagger_b_run: str,
     official_run: str,
     run_spec_name: str,
+    *,
+    plot_layout: PlotLayout | None = None,
 ) -> dict[str, Path] | None:
     return _plot_run_metric_distributions(
         fig_dpath,
@@ -963,6 +1047,7 @@ def _plot_overlay_metric_ecdfs(
         title='ECDF of Per-Instance Core Metric Scores by Run',
         subtitle='This often communicates sparse or zero-heavy metric distributions more clearly than histograms.',
         ecdf=True,
+        plot_layout=plot_layout,
     )
 
 
@@ -1075,6 +1160,8 @@ def _plot_single_pair_summary(
     stamp: str,
     pair: dict[str, Any],
     run_spec_name: str,
+    *,
+    plot_layout: PlotLayout | None = None,
 ) -> Path:
     sns.set_theme(style='whitegrid', context='talk')
     fig, axes = plt.subplots(1, 2, figsize=(18, 7.5), constrained_layout=True)
@@ -1088,12 +1175,14 @@ def _plot_single_pair_summary(
     axes[0].set_ylabel('Absolute Difference in Core Metric Value')
     _plot_distribution(axes[1], pair, level_key='instance_level')
     axes[1].set_title('Official vs Local Agreement vs Tolerance')
-    fig.suptitle(
+    _set_suptitle(
+        fig,
         'Core Metric Agreement and Difference Summary\n'
         f'Run Spec: {run_spec_name}\n'
         f'Pair: {pair["label"]}\n'
         f'Instance-level N: {pair["instance_level"]["n_rows"]}',
         fontsize=15,
+        plot_layout=plot_layout,
     )
     fig_fpath = fig_dpath / f'core_metric_report_{stamp}.png'
     fig.savefig(fig_fpath, dpi=180)
@@ -1528,7 +1617,53 @@ def main(argv: list[str] | None = None) -> None:
             'plot styling: edit core_metrics.py and rerun redraw_plots.sh in the report directory.'
         ),
     )
+    parser.add_argument(
+        '--plot_suptitle_y',
+        type=float,
+        default=None,
+        help=(
+            'Optional Matplotlib figure-coordinate y position for figure suptitles. '
+            'Increase above the default when subplot titles overlap a multi-line suptitle.'
+        ),
+    )
+    parser.add_argument(
+        '--plot-suptitle-y',
+        dest='plot_suptitle_y',
+        type=float,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        '--plot_constrained_h_pad',
+        type=float,
+        default=None,
+        help=(
+            'Optional constrained-layout vertical padding in inches. '
+            'Useful for adding space between suptitles, subplot titles, and axes.'
+        ),
+    )
+    parser.add_argument(
+        '--plot-constrained-h-pad',
+        dest='plot_constrained_h_pad',
+        type=float,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        '--plot_constrained_hspace',
+        type=float,
+        default=None,
+        help=(
+            'Optional constrained-layout vertical spacing between subplot groups. '
+            'Use with --plot_constrained_h_pad when crowded figures still overlap.'
+        ),
+    )
+    parser.add_argument(
+        '--plot-constrained-hspace',
+        dest='plot_constrained_hspace',
+        type=float,
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args(argv)
+    plot_layout = _plot_layout_from_cli(args)
 
     thresholds = [0.0, 1e-12, 1e-9, 1e-6, 1e-4, 1e-3, 1e-2, 2e-2, 5e-2, 1e-1, 2.5e-1, 5e-1, 1.0]
     report_dpath = Path(args.report_dpath).expanduser().resolve()
@@ -1632,7 +1767,13 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit('No enabled comparisons were available to render a core metric report')
 
     if len(pairs) == 1:
-        fig_fpath = _plot_single_pair_summary(history_dpath, stamp, official_vs_local, run_spec_name)
+        fig_fpath = _plot_single_pair_summary(
+            history_dpath,
+            stamp,
+            official_vs_local,
+            run_spec_name,
+            plot_layout=plot_layout,
+        )
     else:
         fig_fpath = history_dpath / f'core_metric_report_{stamp}.png'
         extra_pair = _load_optional_cross_machine_pair(report_dpath)
@@ -1664,18 +1805,26 @@ def main(argv: list[str] | None = None) -> None:
         axes[1, 1].set_title('Instance-Level Agreement vs Tolerance', fontsize=11)
         axes[0, 0].title.set_fontsize(11)
         axes[0, 1].title.set_fontsize(11)
-        fig.suptitle(
+        _set_suptitle(
+            fig,
             'Core Metric Agreement and Difference Summary\n'
             f'Run Spec: {run_spec_name}\n'
             f'{pair_line}',
             fontsize=15,
+            plot_layout=plot_layout,
         )
         fig.savefig(fig_fpath, dpi=180)
         plt.close(fig)
 
     render_pairwise = args.render_heavy_pairwise_plots
     if render_pairwise:
-        dist_fig_fpath = _plot_pair_metric_distributions(history_dpath, stamp, pairs, run_spec_name)
+        dist_fig_fpath = _plot_pair_metric_distributions(
+            history_dpath,
+            stamp,
+            pairs,
+            run_spec_name,
+            plot_layout=plot_layout,
+        )
         run_specs = [(component['run_path'], component['display_name']) for component in components]
         overlay_dist_artifacts = _plot_run_metric_distributions(
             history_dpath,
@@ -1685,6 +1834,7 @@ def main(argv: list[str] | None = None) -> None:
             out_name='core_metric_overlay_distributions',
             title='Overlay of Per-Instance Core Metric Score Distributions by Component',
             subtitle='Each series comes from a selected report component declared in the components manifest.',
+            plot_layout=plot_layout,
         )
         ecdf_artifacts = _plot_run_metric_distributions(
             history_dpath,
@@ -1695,6 +1845,7 @@ def main(argv: list[str] | None = None) -> None:
             title='ECDF of Per-Instance Core Metric Scores by Component',
             subtitle='Each series comes from a selected report component declared in the components manifest.',
             ecdf=True,
+            plot_layout=plot_layout,
         )
         per_metric_agree_fpath = _plot_per_metric_agreement(
             history_dpath,
@@ -1702,6 +1853,7 @@ def main(argv: list[str] | None = None) -> None:
             *pairs,
             level_key='instance_level',
             thresholds=thresholds,
+            plot_layout=plot_layout,
         )
     else:
         dist_fig_fpath = None

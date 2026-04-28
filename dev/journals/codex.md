@@ -1187,3 +1187,25 @@ Reusable design takeaways from the pass:
 1. Discovery enrichment must happen after cheap scoping; otherwise a normalized backend can turn small reports into accidental index-wide probes.
 2. Manifest ids can be long and explicit, but filesystem artifact names need a bounded derived form with one shared helper.
 3. During EEE migration, HELM-origin EEE aggregates and raw HELM per-instance evidence should be combined deliberately rather than pretending converted sample hashes are already a stable cross-source join contract.
+
+## 2026-04-28 19:54:46 +0000
+
+Summary of user intent: inspect `eval_audit/reports/core_metrics.py` for controls over spacing between Matplotlib subplot titles and figure suptitles, then add an adjustable mechanism because rendered report text is overlapping.
+
+Model and configuration: Codex GPT-5, collaboration mode `Default`, danger-full-access filesystem, approval policy `never`, network enabled.
+
+This started as a read-only presentation-path inspection and then became a small layout-control patch. I traced the core report plotting functions and found a consistent pattern: figures are created with `constrained_layout=True`, axes receive local titles with `ax.set_title(...)`, and figure-level headings are added with `fig.suptitle(...)`. There was no explicit user-facing argument, helper, rcParam wrapper, `subplots_adjust`, `tight_layout(rect=...)`, `suptitle(y=...)`, or constrained-layout pad adjustment dedicated to spacing. The previous behavior was therefore delegated mostly to Matplotlib's automatic constrained layout, which can still fail on multi-line suptitles, long run specs, or dense subplot grids.
+
+I added a `PlotLayout` dataclass and routed every `fig.suptitle(...)` in `core_metrics.py` through a shared `_set_suptitle(...)` helper. The layout object now carries code-level defaults (`suptitle_y=0.995`, `constrained_h_pad=0.20`, `constrained_hspace=0.12`) so normal report generation gets more headroom without extra flags. The CLI exposes underscore-style overrides, `--plot_suptitle_y`, `--plot_constrained_h_pad`, and `--plot_constrained_hspace`, which lets a maintainer redraw only plots and tune the gap without changing report JSON/text artifacts. I kept the initial hyphenated spellings as hidden compatibility aliases, because existing generated scripts or shell history may already contain them.
+
+The main residual uncertainty is still which specific artifact is worst in the user's rendered report. The mechanism is intentionally general across the core report, heavy pairwise distributions, ECDFs, and per-metric agreement plots, but the actual best values will be empirical. I used the newer Matplotlib layout-engine API when available and kept an older fallback, because the first test pass surfaced a deprecation warning around `set_constrained_layout_pads`. I chose conservative defaults that keep the suptitle inside the figure while increasing vertical padding; if real artifacts still crowd, the defaults are now one obvious dataclass edit rather than scattered plot surgery.
+
+Follow-up during the same session: the user noticed that rerunning a real `redraw_plots.sh` emitted repeated “Instance-level eval log was successfully saved” messages under `/tmp/eval-audit-eee-load-*`. That was not a canonical report rewrite, but it did reveal an avoidable heavy-plot reload bug. The main comparison path used manifest-aware component loading, but the overlay/ECDF helper reduced components to `(run_path, display_name)` pairs and therefore lost `artifact_format='eee'` / `eee_artifact_path`. That forced `_single_run_instance_core_rows` through the raw HELM fallback, whose loader calls the EEE HELM adapter in a temporary directory and triggers those sample-jsonl print statements. I patched the heavy plot run specs to carry the component dict through to `_load_component_run`, and added a focused test so future plot refactors preserve manifest-aware loading.
+
+Validation: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /home/agent/.local/uv/envs/uvpy3.13.2/bin/python -m pytest -q tests/test_core_metrics_single_run.py` passed with 5 tests. A compile check on `eval_audit/reports/core_metrics.py` and `tests/test_core_metrics_single_run.py` also passed.
+
+Design takeaways:
+1. Automatic constrained layout is useful but is not a report-quality spacing contract when suptitles are multi-line and data labels are long.
+2. Plot title spacing should be centralized when a file repeats the same `subplots(..., constrained_layout=True)` plus `fig.suptitle(...)` pattern.
+3. Layout-tuning flags pair naturally with a plots-only redraw mode, because the right values are visual and should not require regenerating canonical report metadata.
+4. Plot-only redraws still need manifest-aware data loading; otherwise “presentation” helpers can accidentally re-enter expensive conversion paths.

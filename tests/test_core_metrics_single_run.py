@@ -13,6 +13,66 @@ def _write_manifest(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
+def test_plot_layout_controls_suptitle_spacing():
+    calls = {}
+
+    class FakeFigure:
+        def set_constrained_layout_pads(self, **kwargs):
+            calls["pads"] = kwargs
+
+        def suptitle(self, text, **kwargs):
+            calls["suptitle"] = (text, kwargs)
+
+    layout = core_metrics.PlotLayout(
+        suptitle_y=1.04,
+        constrained_h_pad=0.25,
+        constrained_hspace=0.18,
+    )
+    core_metrics._set_suptitle(FakeFigure(), "Demo", fontsize=13, plot_layout=layout)
+
+    assert calls["pads"] == {"h_pad": 0.25, "hspace": 0.18}
+    assert calls["suptitle"] == ("Demo", {"fontsize": 13, "y": 1.04})
+
+
+def test_plot_layout_defaults_are_code_level_controls():
+    default = core_metrics.PlotLayout()
+
+    assert default.suptitle_y == 0.995
+    assert default.constrained_h_pad == 0.40
+    assert default.constrained_hspace == 0.42
+
+
+def test_single_run_instance_rows_honor_manifest_component(monkeypatch):
+    component = {"component_id": "c1", "artifact_format": "eee"}
+    calls = []
+    marker = object()
+
+    monkeypatch.setattr(
+        core_metrics,
+        "_load_component_run",
+        lambda arg: calls.append(("component", arg)) or marker,
+    )
+    monkeypatch.setattr(
+        core_metrics,
+        "_load_normalized",
+        lambda arg: calls.append(("raw", arg)) or object(),
+    )
+    monkeypatch.setattr(
+        core_metrics.ncompare,
+        "instance_core_score_records",
+        lambda nrun: calls.append(("records", nrun)) or [],
+    )
+
+    rows = core_metrics._single_run_instance_core_rows(
+        "/tmp/raw-run",
+        "demo",
+        component=component,
+    )
+
+    assert rows.empty
+    assert calls == [("component", component), ("records", marker)]
+
+
 def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(tmp_path, monkeypatch):
     report_dpath = tmp_path / "report"
     report_dpath.mkdir()
@@ -250,7 +310,15 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
     # --plots-only must refresh plot symlinks but leave canonical artifacts
     # exactly as they were. Fast iteration on plot styling should not churn
     # the JSON/text/management/warnings/runlevel surface.
-    core_metrics.main(base_argv + ["--render-heavy-pairwise-plots", "--plots-only"])
+    core_metrics.main(
+        base_argv + [
+            "--render-heavy-pairwise-plots",
+            "--plots-only",
+            "--plot_suptitle_y", "1.03",
+            "--plot_constrained_h_pad", "0.25",
+            "--plot_constrained_hspace", "0.16",
+        ]
+    )
 
     for name, prior_target in pre_redraw_canonical.items():
         assert (report_dpath / name).resolve() == prior_target, (
