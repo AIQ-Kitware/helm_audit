@@ -131,7 +131,7 @@ Success criterion: this returns a normal chat completion without transport or ch
 
 ## 4) `manifest.smoke.yaml`
 
-This is the cleanest path through your existing `helm_audit` / `kwdagger` bridge:
+This is the cleanest path through your existing `eval_audit` / `kwdagger` bridge:
 
 ```yaml
 experiment_name: audit-qwen35-9b-vllm-smoke
@@ -165,7 +165,7 @@ Why this works:
 
 ## Direct manual HELM smoke test
 
-Before involving `helm_audit`, the agent should also validate the HELM side directly in a throwaway directory:
+Before involving `eval_audit`, the agent should also validate the HELM side directly in a throwaway directory:
 
 ```bash
 mkdir -p /tmp/helm-qwen35-smoke/prod_env
@@ -185,21 +185,21 @@ If that succeeds, then run the audit wrapper path.
 
 ---
 
-## Run through `helm_audit`
+## Run through `eval_audit`
 
 Given your current bridge, the agent can schedule the smoke manifest directly. Your bridge builds a kwdagger matrix containing `helm.run_entry`, `helm.max_eval_instances`, `helm.local_path`, and, when present, `helm.model_deployments_fpath`. 
 
 Example:
 
 ```bash
-python -m helm_audit.integrations.kwdagger_bridge \
+python -m eval_audit.integrations.kwdagger_bridge \
   # or whatever entrypoint you use to schedule manifests
 ```
 
 Or, if you already have a manifest runner:
 
 ```bash
-helm-audit-run \
+eval-audit-run \
   --experiment_name audit-qwen35-9b-vllm-smoke \
   --manifests_dpath /ABS/PATH/TO/manifests \
   --max_jobs 1 \
@@ -301,7 +301,7 @@ The cleanest patch is to stop hardcoding “HF-only” as the only acceptable lo
 
 ## Final bottom line
 
-For **upstream HELM main**, the feature gap is already closed: HELM already has the vLLM client classes and already knows about `qwen/qwen3.5-9b` as a model/tokenizer. The implementation you need is a **local deployment registration** plus a **local vLLM server**, and your current `helm_audit` wrapper already has the manifest plumbing to inject that deployment file per job. ([CRFM HELM][1])     
+For **upstream HELM main**, the feature gap is already closed: HELM already has the vLLM client classes and already knows about `qwen/qwen3.5-9b` as a model/tokenizer. The implementation you need is a **local deployment registration** plus a **local vLLM server**, and your current `eval_audit` wrapper already has the manifest plumbing to inject that deployment file per job. ([CRFM HELM][1])     
 
 If you want, I can turn this into a literal patch plan with filename-by-filename diffs.
 

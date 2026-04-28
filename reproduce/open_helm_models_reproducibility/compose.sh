@@ -22,7 +22,7 @@ for path in "${required_inputs[@]}"; do
 done
 
 cd "$ROOT"
-PYTHONPATH="$ROOT" "$PYTHON_BIN" -m helm_audit.cli.build_virtual_experiment \
+PYTHONPATH="$ROOT" "$PYTHON_BIN" -m eval_audit.cli.build_virtual_experiment \
     --manifest "$MANIFEST_FPATH" \
     --ensure-local-eee \
     --allow-single-repeat \

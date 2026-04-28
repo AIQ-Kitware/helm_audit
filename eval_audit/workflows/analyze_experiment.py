@@ -1,0 +1,626 @@
+from __future__ import annotations
+
+import argparse
+import csv
+import datetime as datetime_mod
+import json
+import shlex
+import sys
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+from loguru import logger
+
+from eval_audit.reports.aggregate import _find_curve_value
+from eval_audit.infra.api import audit_root, default_index_root
+from eval_audit.infra.logging import rich_link, setup_cli_logging
+from eval_audit.infra.paths import official_public_index_dpath
+from eval_audit.utils.numeric import nested_get
+from eval_audit.infra.fs_publish import symlink_to, write_latest_alias
+from eval_audit.infra.paths import experiment_analysis_dpath
+from eval_audit.infra.report_layout import (
+    legacy_repo_publication_root,
+    portable_repo_root_lines,
+    publication_experiments_root,
+    write_reproduce_script,
+)
+from eval_audit.planning.core_report_planner import build_planning_artifact
+from eval_audit.reports.core_packet_summary import (
+    find_report_pair,
+    load_core_report_packet,
+    packet_component_by_source_kind,
+    packet_local_reference_component,
+    render_path_link,
+)
+from eval_audit.reports import pair_report
+from eval_audit.reports.paper_labels import load_paper_label_manager
+from eval_audit.workflows.plan_core_report_packets import write_planning_outputs
+from eval_audit.workflows.rebuild_core_report import (
+    latest_index_csv,
+    latest_official_index_csv,
+    load_rows,
+    main as rebuild_core_report_main,
+    slugify_identifier,
+)
+
+
+def _load_json(fpath: Path) -> dict[str, Any]:
+    return json.loads(fpath.read_text())
+
+
+def _coerce_float(value: Any) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float("-inf")
+
+
+def _is_truthy_text(value: Any) -> bool:
+    return str(value).strip().lower() in {"true", "1", "yes"}
+
+
+def _latest_matching_aiq_gpu_row(
+    rows: list[dict[str, Any]],
+    *,
+    run_entry: str,
+    exclude_experiment_name: str,
+) -> dict[str, Any] | None:
+    candidates = []
+    for row in rows:
+        if row.get("run_entry") != run_entry:
+            continue
+        if row.get("experiment_name") == exclude_experiment_name:
+            continue
+        if row.get("machine_host") != "aiq-gpu":
+            continue
+        if row.get("status") not in {"computed", "reused", "unknown", ""}:
+            continue
+        if not _is_truthy_text(row.get("has_run_spec")):
+            continue
+        run_dir = row.get("run_dir")
+        if not run_dir:
+            continue
+        candidates.append(row)
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda r: (
+            _coerce_float(r.get("manifest_timestamp")),
+            str(r.get("experiment_name") or ""),
+            str(r.get("job_id") or ""),
+        ),
+        reverse=True,
+    )
+    return candidates[0]
+
+
+def _latest_pair_report(report_dpath: Path) -> tuple[Path | None, Path | None]:
+    json_cands = sorted(report_dpath.glob("pair_report_*.json"), reverse=True)
+    txt_cands = sorted(report_dpath.glob("pair_report_*.txt"), reverse=True)
+    return (
+        json_cands[0] if json_cands else None,
+        txt_cands[0] if txt_cands else None,
+    )
+
+
+def _write_latest_pair_aliases(report_dpath: Path) -> dict[str, str]:
+    json_fpath, txt_fpath = _latest_pair_report(report_dpath)
+    created: dict[str, str] = {}
+    if json_fpath is not None:
+        write_latest_alias(json_fpath, report_dpath, "pair_report.latest.json")
+        created["pair_report.latest.json"] = str(report_dpath / "pair_report.latest.json")
+    if txt_fpath is not None:
+        write_latest_alias(txt_fpath, report_dpath, "pair_report.latest.txt")
+        created["pair_report.latest.txt"] = str(report_dpath / "pair_report.latest.txt")
+    return created
+
+
+def _benchmark_completion_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_benchmark: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        benchmark = str(row.get('benchmark') or 'unknown')
+        info = by_benchmark.setdefault(
+            benchmark,
+            {
+                'benchmark': benchmark,
+                'total_rows': 0,
+                'completed_rows': 0,
+                'status_counts': Counter(),
+                'example_run_entries': [],
+            },
+        )
+        info['total_rows'] += 1
+        status = str(row.get('status') or '')
+        info['status_counts'][status] += 1
+        if _is_truthy_text(row.get('has_run_spec')):
+            info['completed_rows'] += 1
+        run_entry = row.get('run_entry')
+        if run_entry and len(info['example_run_entries']) < 3:
+            info['example_run_entries'].append(run_entry)
+
+    summary_rows = []
+    for benchmark, info in sorted(by_benchmark.items()):
+        total = info['total_rows']
+        completed = info['completed_rows']
+        summary_rows.append({
+            'benchmark': benchmark,
+            'total_rows': total,
+            'completed_rows': completed,
+            'completion_rate': (completed / total) if total else None,
+            'status_counts': dict(info['status_counts']),
+            'example_run_entries': info['example_run_entries'],
+        })
+    return summary_rows
+
+
+def _summarize_core_report(report_json: Path, *, experiment_name: str) -> dict[str, Any]:
+    bundle = {
+        "report": _load_json(report_json),
+        "packet": load_core_report_packet(report_json.parent),
+    }
+    report = bundle["report"]
+    packet = bundle["packet"]
+    official_pair = find_report_pair(report, "official_vs_local")
+    repeat_pair = find_report_pair(report, "local_repeat")
+    official_component = packet_component_by_source_kind(packet, "official_vs_local", "official")
+    local_component = packet_local_reference_component(packet)
+    run_diagnostics = report.get("run_diagnostics", {}) or {}
+    official_diag = run_diagnostics.get(official_component.get("component_id"), {})
+    local_diag = run_diagnostics.get(local_component.get("component_id"), {})
+    warnings_manifest = packet.get("warnings_manifest") or {}
+    return {
+        "experiment_name": experiment_name,
+        "run_spec_name": report.get("run_spec_name"),
+        "run_entry": packet["components_manifest"].get("run_entry"),
+        "packet_id": packet["components_manifest"].get("packet_id"),
+        "selected_public_track": packet["components_manifest"].get("selected_public_track"),
+        "report_dir": str(report_json.parent),
+        "generated_utc": report.get("generated_utc"),
+        "diagnostic_flags": report.get("diagnostic_flags", []),
+        "components_manifest": str(packet["components_manifest_path"]),
+        "comparisons_manifest": str(packet["comparisons_manifest_path"]),
+        "warnings_manifest": str(packet["warnings_manifest_path"]),
+        "packet_warnings": warnings_manifest.get("packet_warnings", []),
+        "packet_caveats": warnings_manifest.get("packet_caveats", []),
+        "has_warnings": bool(
+            warnings_manifest.get("packet_warnings")
+            or report.get("diagnostic_flags")
+            or any(
+                comparison.get("warnings") or comparison.get("disabled_reason")
+                for comparison in warnings_manifest.get("comparisons", [])
+            )
+        ),
+        "local_reference_empty_completion_rate": local_diag.get("empty_completion_rate"),
+        "local_reference_mean_output_tokens": nested_get(local_diag, "output_token_count", "mean"),
+        "official_empty_completion_rate": official_diag.get("empty_completion_rate"),
+        "official_mean_output_tokens": nested_get(official_diag, "output_token_count", "mean"),
+        "repeat_instance_agree_0": _find_curve_value(repeat_pair.get("instance_level", {}).get("agreement_vs_abs_tol", []), 0.0),
+        "official_instance_agree_0": _find_curve_value(official_pair.get("instance_level", {}).get("agreement_vs_abs_tol", []), 0.0),
+        "official_instance_agree_01": _find_curve_value(official_pair.get("instance_level", {}).get("agreement_vs_abs_tol", []), 0.1),
+        "official_instance_agree_025": _find_curve_value(official_pair.get("instance_level", {}).get("agreement_vs_abs_tol", []), 0.25),
+        "official_instance_agree_05": _find_curve_value(official_pair.get("instance_level", {}).get("agreement_vs_abs_tol", []), 0.5),
+        "official_runlevel_p90": nested_get(official_pair, "run_level", "overall_quantiles", "abs_delta", "p90"),
+        "official_runlevel_max": nested_get(official_pair, "run_level", "overall_quantiles", "abs_delta", "max"),
+        "analysis_single_run": not bool(repeat_pair),
+    }
+
+
+def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--experiment-name', required=True)
+    parser.add_argument('--index-fpath', default=None)
+    parser.add_argument('--index-dpath', default=str(default_index_root()))
+    parser.add_argument('--official-index-fpath', default=None)
+    parser.add_argument('--official-index-dpath', default=str(official_public_index_dpath()))
+    parser.add_argument('--official-eee-root', default=None)
+    parser.add_argument('--local-eee-root', default=None)
+    parser.add_argument('--ensure-local-eee', action='store_true')
+    parser.add_argument('--allow-single-repeat', action='store_true')
+    parser.add_argument(
+        '--analysis-dpath',
+        default=None,
+        help=(
+            'Override the canonical analysis output root '
+            '(experiment_analysis_dpath(experiment_name)) with an explicit '
+            'directory. Used by virtual-experiment composition so the '
+            'derived results land outside the repo without colliding with '
+            'execution-driven experiments.'
+        ),
+    )
+    parser.add_argument(
+        '--publication-root',
+        default=None,
+        help=(
+            'Override the publication surface root (ADR 3). Defaults to '
+            '$HELM_AUDIT_PUBLICATION_ROOT or <audit_store>/reports. The '
+            'experiment-analysis symlink lands at <root>/core-run-analysis/. '
+            'Ignored when --analysis-dpath is supplied: callers managing '
+            'their own publication surface (e.g. virtual experiments) skip '
+            'the symlink entirely.'
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    index_fpath = (
+        Path(args.index_fpath).expanduser().resolve()
+        if args.index_fpath else
+        latest_index_csv(Path(args.index_dpath).expanduser().resolve())
+    )
+    official_index_fpath = (
+        Path(args.official_index_fpath).expanduser().resolve()
+        if args.official_index_fpath else
+        latest_official_index_csv(Path(args.official_index_dpath).expanduser().resolve())
+    )
+    rows = load_rows(index_fpath)
+    experiment_rows = [r for r in rows if r.get('experiment_name') == args.experiment_name]
+    if not experiment_rows:
+        raise SystemExit(f'No rows found for experiment_name={args.experiment_name!r}')
+    run_entries = sorted({r.get('run_entry') for r in experiment_rows if r.get('run_entry')})
+    benchmark_completion = _benchmark_completion_summary(experiment_rows)
+
+    if args.analysis_dpath:
+        # Caller (e.g. virtual-experiment composer) supplied an explicit
+        # output root. Skip the legacy-path migration since it only applies
+        # to the canonical experiment_analysis_dpath() location.
+        out_dpath = Path(args.analysis_dpath).expanduser().resolve()
+    else:
+        out_dpath = experiment_analysis_dpath(args.experiment_name)
+        # Migrate existing real dir from the pre-parameterization in-repo
+        # location to the canonical store location. Only the in-repo legacy
+        # path is checked here; the new publication root is parameterized and
+        # never holds the canonical analysis content.
+        compat_dpath = legacy_repo_publication_root() / f'experiment-analysis-{slugify_identifier(args.experiment_name)}'
+        if compat_dpath.is_dir() and not compat_dpath.is_symlink() and not out_dpath.exists():
+            import shutil
+            logger.info(
+                "Migrating legacy report dir: "
+                f"{rich_link(compat_dpath)} -> {rich_link(out_dpath)}"
+            )
+            out_dpath.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(compat_dpath), str(out_dpath))
+    out_dpath.mkdir(parents=True, exist_ok=True)
+    reports_dpath = out_dpath / 'core-reports'
+    reports_dpath.mkdir(parents=True, exist_ok=True)
+    planning_dpath = out_dpath / 'planning'
+    planning_artifact = build_planning_artifact(
+        local_index_fpath=index_fpath,
+        official_index_fpath=official_index_fpath,
+        experiment_name=args.experiment_name,
+        official_eee_root=args.official_eee_root,
+        local_eee_root=args.local_eee_root,
+        ensure_local_eee=args.ensure_local_eee,
+    )
+    planning_paths = write_planning_outputs(
+        artifact=planning_artifact,
+        out_dpath=planning_dpath,
+    )
+
+    built_report_paths = []
+    skipped_run_entries: list[dict[str, Any]] = []
+    packets = planning_artifact.get("packets") or []
+    for packet in packets:
+        run_entry = packet.get("run_entry")
+        packet_id = packet.get("packet_id")
+        report_dpath = reports_dpath / f'core-metrics-{slugify_identifier(str(packet_id or run_entry))}'
+        try:
+            argv = [
+                '--packet-id', str(packet_id),
+                '--run-entry', str(run_entry),
+                '--index-fpath', str(index_fpath),
+                '--official-index-fpath', str(official_index_fpath),
+                '--planner-artifact-fpath', str(planning_paths['comparison_intents_json']),
+                '--experiment-name', str(args.experiment_name),
+                '--report-dpath', str(report_dpath),
+            ]
+            if args.official_eee_root:
+                argv.extend(['--official-eee-root', str(args.official_eee_root)])
+            if args.local_eee_root:
+                argv.extend(['--local-eee-root', str(args.local_eee_root)])
+            if args.ensure_local_eee:
+                argv.append('--ensure-local-eee')
+            if args.allow_single_repeat:
+                argv.append('--allow-single-repeat')
+            rebuild_core_report_main(argv)
+        except (Exception, SystemExit) as ex:
+            skipped_run_entries.append({
+                'packet_id': packet_id,
+                'run_entry': run_entry,
+                'reason': 'rebuild_failed',
+                'returncode': getattr(ex, 'returncode', None),
+                'error': str(ex),
+            })
+            continue
+        built_report_paths.append(report_dpath / 'core_metric_report.latest.json')
+
+    summary_rows = []
+    for report_json in built_report_paths:
+        if not report_json.exists():
+            continue
+        summary_rows.append(_summarize_core_report(report_json, experiment_name=args.experiment_name))
+
+    paper_labels = load_paper_label_manager(style='paper_short')
+    summary_by_run_spec = {
+        row['run_spec_name']: row
+        for row in summary_rows
+        if row.get('run_spec_name')
+    }
+    cross_machine_rows: list[dict[str, Any]] = []
+    for run_spec_name, summary_row in summary_by_run_spec.items():
+        run_entry = summary_row.get('run_entry')
+        if not run_entry:
+            continue
+        experiment_match = next(
+            (
+                row for row in experiment_rows
+                if row.get('run_entry') == run_entry and _is_truthy_text(row.get('has_run_spec')) and row.get('run_dir')
+            ),
+            None,
+        )
+        if experiment_match is None:
+            continue
+        aiq_gpu_match = _latest_matching_aiq_gpu_row(
+            rows,
+            run_entry=run_entry,
+            exclude_experiment_name=args.experiment_name,
+        )
+        if aiq_gpu_match is None:
+            continue
+        machine_a = 'aiq-gpu'
+        machine_b = str(experiment_match.get('machine_host') or args.experiment_name)
+        display_label_a = paper_labels.machine_label(machine_a)
+        display_label_b = paper_labels.machine_label(machine_b)
+        cross_report_dpath = Path(summary_row['report_dir']) / 'cross-machine-aiq-gpu'
+        cross_report_dpath.mkdir(parents=True, exist_ok=True)
+        pair_report.main([
+            '--run-a', str(aiq_gpu_match['run_dir']),
+            '--run-b', str(experiment_match['run_dir']),
+            '--label-a', machine_a,
+            '--label-b', machine_b,
+            '--display-label-a', display_label_a,
+            '--display-label-b', display_label_b,
+            '--report-dpath', str(cross_report_dpath),
+        ])
+        latest_links = _write_latest_pair_aliases(cross_report_dpath)
+        cross_json_fpath = cross_report_dpath / 'pair_report.latest.json'
+        cross_txt_fpath = cross_report_dpath / 'pair_report.latest.txt'
+        cross_payload = _load_json(cross_json_fpath) if cross_json_fpath.exists() else {}
+        strict = cross_payload.get('strict_summary', {}) or {}
+        cross_diag = (strict.get('diagnosis', {}) or {})
+        cross_overall = ((strict.get('value_agreement', {}) or {}).get('overall', {}) or {})
+        cross_means = ((strict.get('instance_value_agreement', {}) or {}).get('means', {}) or {})
+        row = {
+            'run_spec_name': run_spec_name,
+            'run_entry': run_entry,
+            'machine_a': machine_a,
+            'machine_b': machine_b,
+            'machine_a_display': display_label_a,
+            'machine_b_display': display_label_b,
+            'report_dir': str(cross_report_dpath),
+            'report_json': str(cross_json_fpath) if cross_json_fpath.exists() else None,
+            'report_txt': str(cross_txt_fpath) if cross_txt_fpath.exists() else None,
+            'diagnosis_label': cross_diag.get('label'),
+            'primary_reason_names': cross_diag.get('primary_reason_names'),
+            'run_level_agree_ratio': cross_overall.get('agree_ratio'),
+            'instance_level_agree_ratio': cross_means.get('agree_ratio'),
+            'run_level_abs_p90': nested_get(cross_payload, 'distance_summary', 'run_level', 'overall', 'abs_delta', 'p90'),
+            'run_level_abs_max': nested_get(cross_payload, 'distance_summary', 'run_level', 'overall', 'abs_delta', 'max'),
+            'instance_level_abs_p90': nested_get(cross_payload, 'distance_summary', 'instance_level', 'overall', 'abs_delta', 'p90'),
+            'instance_level_abs_max': nested_get(cross_payload, 'distance_summary', 'instance_level', 'overall', 'abs_delta', 'max'),
+            'latest_links': latest_links,
+        }
+        summary_row['cross_machine_aiq_gpu'] = row
+        cross_machine_rows.append(row)
+
+    stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime('%Y%m%dT%H%M%SZ')
+    history_dpath = out_dpath / '.history' / stamp[:8]
+    history_dpath.mkdir(parents=True, exist_ok=True)
+
+    table = pd.DataFrame(summary_rows)
+    if 'run_spec_name' in table.columns:
+        table = table.sort_values('run_spec_name')
+    json_fpath = history_dpath / f'experiment_summary_{stamp}.json'
+    csv_fpath = history_dpath / f'experiment_summary_{stamp}.csv'
+    txt_fpath = history_dpath / f'experiment_summary_{stamp}.txt'
+
+    payload = {
+        'generated_utc': stamp,
+        'experiment_name': args.experiment_name,
+        'index_fpath': str(index_fpath),
+        'official_index_fpath': str(official_index_fpath),
+        'official_eee_root': planning_artifact.get('official_eee_root'),
+        'local_eee_root': planning_artifact.get('local_eee_root'),
+        'ensure_local_eee': planning_artifact.get('ensure_local_eee'),
+        'planning_dir': str(planning_dpath),
+        'comparison_intents': str(planning_paths['comparison_intents_json']),
+        'planner_warnings': str(planning_paths['warnings_txt']),
+        'n_run_entries': len(run_entries),
+        'n_planned_packets': len(packets),
+        'n_built_reports': len(summary_rows),
+        'n_skipped_run_entries': len(skipped_run_entries),
+        'benchmark_completion': benchmark_completion,
+        'run_entries': run_entries,
+        'skipped_run_entries': skipped_run_entries,
+        'cross_machine_rows': cross_machine_rows,
+        'rows': summary_rows,
+    }
+    json_fpath.write_text(json.dumps(payload, indent=2))
+    logger.debug(f'Write to: {rich_link(json_fpath)}')
+    table.to_csv(csv_fpath, index=False)
+    logger.debug(f'Write to: {rich_link(csv_fpath)}')
+
+    lines = []
+    lines.append('Experiment Analysis Summary')
+    lines.append('')
+    lines.append(f'generated_utc: {stamp}')
+    lines.append(f'experiment_name: {args.experiment_name}')
+    lines.append(f'index_fpath: {render_path_link(index_fpath)}')
+    lines.append(f'official_index_fpath: {render_path_link(official_index_fpath)}')
+    lines.append(f"official_eee_root: {render_path_link(planning_artifact.get('official_eee_root'))}")
+    lines.append(f"local_eee_root: {render_path_link(planning_artifact.get('local_eee_root'))}")
+    lines.append(f"ensure_local_eee: {planning_artifact.get('ensure_local_eee')}")
+    lines.append(f'planning_dir: {render_path_link(planning_dpath)}')
+    lines.append(f'comparison_intents: {render_path_link(planning_paths["comparison_intents_json"])}')
+    lines.append(f'planner_warnings: {render_path_link(planning_paths["warnings_txt"])}')
+    lines.append(f'n_run_entries: {len(run_entries)}')
+    lines.append(f'n_planned_packets: {len(packets)}')
+    lines.append(f'n_built_reports: {len(summary_rows)}')
+    lines.append(f'n_skipped_run_entries: {len(skipped_run_entries)}')
+    if not summary_rows:
+        lines.append('warning: no per-run reports were built; inspect skipped_run_entries below.')
+    lines.append('')
+    lines.append('benchmark_completion:')
+    for row in benchmark_completion:
+        lines.append(f"  - benchmark: {row['benchmark']}")
+        lines.append(f"    completed_rows: {row['completed_rows']}")
+        lines.append(f"    total_rows: {row['total_rows']}")
+        lines.append(f"    completion_rate: {row['completion_rate']}")
+        lines.append(f"    status_counts: {row['status_counts']}")
+    lines.append('')
+    lines.append('run_entries:')
+    for run_entry in run_entries:
+        lines.append(f'  - {run_entry}')
+    if skipped_run_entries:
+        lines.append('')
+        lines.append('skipped_run_entries:')
+        for item in skipped_run_entries:
+            lines.append(f"  - run_entry: {item['run_entry']}")
+            lines.append(f"    packet_id: {item.get('packet_id')}")
+            lines.append(f"    reason: {item['reason']}")
+            lines.append(f"    returncode: {item['returncode']}")
+            lines.append(f"    error: {item.get('error')}")
+    lines.append('')
+    if cross_machine_rows:
+        lines.append('cross_machine_aiq_gpu:')
+        for row in cross_machine_rows:
+            lines.append(f"  - run_spec_name: {row['run_spec_name']}")
+            lines.append(f"    machine_a: {row['machine_a']}")
+            lines.append(f"    machine_a_display: {row['machine_a_display']}")
+            lines.append(f"    machine_b: {row['machine_b']}")
+            lines.append(f"    machine_b_display: {row['machine_b_display']}")
+            lines.append(f"    report_dir: {render_path_link(row['report_dir'])}")
+            lines.append(f"    report_txt: {render_path_link(row['report_txt'])}")
+            lines.append(f"    diagnosis_label: {row['diagnosis_label']}")
+            lines.append(f"    primary_reason_names: {row['primary_reason_names']}")
+            lines.append(f"    run_level_agree_ratio: {row['run_level_agree_ratio']}")
+            lines.append(f"    instance_level_agree_ratio: {row['instance_level_agree_ratio']}")
+            lines.append(f"    run_level_abs_p90: {row['run_level_abs_p90']}")
+            lines.append(f"    run_level_abs_max: {row['run_level_abs_max']}")
+            lines.append(f"    instance_level_abs_p90: {row['instance_level_abs_p90']}")
+            lines.append(f"    instance_level_abs_max: {row['instance_level_abs_max']}")
+        lines.append('')
+    lines.append('per_run_spec:')
+    for row in summary_rows:
+        lines.append(f"  - run_spec_name: {row['run_spec_name']}")
+        lines.append(f"    report_dir: {render_path_link(row['report_dir'])}")
+        lines.append(f"    components_manifest: {render_path_link(row['components_manifest'])}")
+        lines.append(f"    comparisons_manifest: {render_path_link(row['comparisons_manifest'])}")
+        lines.append(f"    warnings_manifest: {render_path_link(row['warnings_manifest'])}")
+        lines.append(f"    packet_id: {row.get('packet_id')}")
+        lines.append(f"    selected_public_track: {row.get('selected_public_track')}")
+        lines.append(f"    has_warnings: {row.get('has_warnings')}")
+        lines.append(f"    packet_warnings: {row.get('packet_warnings')}")
+        lines.append(f"    diagnostic_flags: {row['diagnostic_flags']}")
+        lines.append(f"    local_reference_empty_completion_rate: {row['local_reference_empty_completion_rate']}")
+        lines.append(f"    local_reference_mean_output_tokens: {row['local_reference_mean_output_tokens']}")
+        lines.append(f"    official_empty_completion_rate: {row['official_empty_completion_rate']}")
+        lines.append(f"    official_mean_output_tokens: {row['official_mean_output_tokens']}")
+        lines.append(f"    repeat_instance_agree_0: {row['repeat_instance_agree_0']}")
+        lines.append(f"    official_instance_agree_0: {row['official_instance_agree_0']}")
+        lines.append(f"    official_instance_agree_01: {row['official_instance_agree_01']}")
+        lines.append(f"    official_instance_agree_025: {row['official_instance_agree_025']}")
+        lines.append(f"    official_instance_agree_05: {row['official_instance_agree_05']}")
+        lines.append(f"    official_runlevel_p90: {row['official_runlevel_p90']}")
+        lines.append(f"    official_runlevel_max: {row['official_runlevel_max']}")
+    txt_fpath.write_text('\n'.join(lines) + '\n')
+    logger.debug(f'Write to: {rich_link(txt_fpath)}')
+
+    write_latest_alias(json_fpath, out_dpath, 'experiment_summary.latest.json')
+    write_latest_alias(csv_fpath, out_dpath, 'experiment_summary.latest.csv')
+    write_latest_alias(txt_fpath, out_dpath, 'experiment_summary.latest.txt')
+    cmd_parts = [
+        '-m',
+        'eval_audit.workflows.analyze_experiment',
+        '--experiment-name',
+        args.experiment_name,
+        '--index-fpath',
+        str(index_fpath),
+        '--official-index-fpath',
+        str(official_index_fpath),
+        *( ['--official-eee-root', str(planning_artifact.get('official_eee_root'))] if planning_artifact.get('official_eee_root') else [] ),
+        *( ['--local-eee-root', str(planning_artifact.get('local_eee_root'))] if planning_artifact.get('local_eee_root') else [] ),
+        *( ['--ensure-local-eee'] if planning_artifact.get('ensure_local_eee') else [] ),
+        *( ['--allow-single-repeat'] if args.allow_single_repeat else [] ),
+    ]
+    reproduce_fpath = write_reproduce_script(out_dpath / 'reproduce.latest.sh', [
+        '#!/usr/bin/env bash',
+        'set -euo pipefail',
+        *portable_repo_root_lines(),
+        'cd "$REPO_ROOT"',
+        'PYTHONPATH="$REPO_ROOT" "$PYTHON_BIN" '
+        + ' '.join(shlex.quote(part) for part in cmd_parts)
+        + ' "$@"',
+    ])
+    write_latest_alias(reproduce_fpath, out_dpath, 'reproduce.sh')
+
+    # Write provenance.json at the experiment root (overwritten each run).
+    provenance: dict[str, Any] = {
+        'generated_utc': stamp,
+        'experiment_name': args.experiment_name,
+        'index_fpath': str(index_fpath),
+        'official_index_fpath': str(official_index_fpath),
+        'official_eee_root': planning_artifact.get('official_eee_root'),
+        'local_eee_root': planning_artifact.get('local_eee_root'),
+        'ensure_local_eee': planning_artifact.get('ensure_local_eee'),
+        'analysis_root': str(out_dpath),
+        'n_run_entries': len(run_entries),
+        'n_planned_packets': len(packets),
+        'n_built_reports': len(summary_rows),
+    }
+    try:
+        import subprocess
+        from eval_audit.infra.env import load_env as _load_env
+        git_sha = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=str(_load_env().repo_root),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        provenance['git_sha'] = git_sha
+    except Exception:
+        pass
+    provenance_fpath = out_dpath / 'provenance.json'
+    provenance_fpath.write_text(json.dumps(provenance, indent=2))
+    logger.debug(f'Write to: {rich_link(provenance_fpath)}')
+
+    # Publish a symlink under the publication surface (ADR 3) pointing at
+    # the canonical analysis location. The publication root is parameterized
+    # via publication_experiments_root() (default: <audit_store>/reports/
+    # core-run-analysis), and ``--publication-root`` overrides it for this
+    # invocation. Skip entirely when ``--analysis-dpath`` is set: callers
+    # like the virtual-experiment composer manage their own publication
+    # surface under ``output.root`` and don't want a second alias dropped.
+    if not args.analysis_dpath:
+        if args.publication_root:
+            link_root = Path(args.publication_root).expanduser().resolve() / 'core-run-analysis'
+        else:
+            link_root = publication_experiments_root()
+        link_root.mkdir(parents=True, exist_ok=True)
+        compat_link = link_root / f'experiment-analysis-{slugify_identifier(args.experiment_name)}'
+        if not compat_link.is_symlink():
+            try:
+                symlink_to(out_dpath, compat_link)
+            except Exception as ex:
+                logger.warning(f'Could not create publication symlink {rich_link(compat_link)}: {ex}')
+
+    logger.info(f'Canonical analysis root: {rich_link(out_dpath)}')
+    logger.info(f'Wrote experiment summary json: {rich_link(json_fpath)}')
+    logger.info(f'Wrote experiment summary csv: {rich_link(csv_fpath)}')
+    logger.info(f'Wrote experiment summary txt: {rich_link(txt_fpath)}')
+
+
+if __name__ == '__main__':
+    setup_cli_logging()
+    main()

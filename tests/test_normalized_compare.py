@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from helm_audit.normalized import (
+from eval_audit.normalized import (
     NormalizedRunRef,
     SourceKind,
     load_run,
 )
-from helm_audit.normalized import compare as ncompare
+from eval_audit.normalized import compare as ncompare
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -61,7 +61,7 @@ def test_core_metric_keys_are_core_classified() -> None:
     nrun = _load()
     keys = ncompare.core_metric_keys(nrun)
     assert keys
-    from helm_audit.helm import metrics as hm
+    from eval_audit.helm import metrics as hm
     for key in keys:
         cls, _ = hm.classify_metric(key)
         assert cls == "core"

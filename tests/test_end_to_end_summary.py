@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from helm_audit.reports.core_packet import comparison_sample_latest_name
-from helm_audit.workflows.build_reports_summary import (
+from eval_audit.reports.core_packet import comparison_sample_latest_name
+from eval_audit.workflows.build_reports_summary import (
     ATTEMPTED_LABEL,
     FILTER_SELECTION_EXCLUDED_LABEL,
     FILTER_SELECTION_SELECTED_LABEL,
@@ -835,7 +835,7 @@ def test_prioritized_example_repairs_missing_latest_artifacts(tmp_path, monkeypa
             (report_dir / name).write_text("repaired")
 
     monkeypatch.setattr(
-        "helm_audit.workflows.build_reports_summary.rebuild_core_report_main",
+        "eval_audit.workflows.build_reports_summary.rebuild_core_report_main",
         _fake_rebuild,
     )
 

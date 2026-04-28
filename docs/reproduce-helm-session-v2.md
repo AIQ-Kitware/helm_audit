@@ -444,7 +444,7 @@ Original context:
 
 Current equivalents in this repo:
 - repo root: `/home/joncrall/code/helm-reproducibility`
-- workflow roots: `configs/`, `reproduce/`, `helm_audit/`, `reports/`
+- workflow roots: `configs/`, `reproduce/`, `eval_audit/`, `reports/`
 
 Unless explicitly stated otherwise, historical paths and commands above should be
 interpreted as pre-split references.

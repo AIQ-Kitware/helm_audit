@@ -234,7 +234,7 @@ should *either* run with corrected prompts *or* call out as
 ./reproduce/open_helm_models_reproducibility/build_summary.sh
 ```
 
-Both are thin wrappers over `helm-audit-build-virtual-experiment` and
-`helm-audit-build-summary` against the checked-in manifest. Compose
+Both are thin wrappers over `eval-audit-build-virtual-experiment` and
+`eval-audit-build-summary` against the checked-in manifest. Compose
 takes ~30 minutes mostly because it converts ~180 local HELM runs to
 EEE format on demand; the actual analysis is fast.

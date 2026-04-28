@@ -92,7 +92,7 @@ Local reproduced runs:
 
 Main audit workflow:
 
-- `configs/`, `reproduce/`, `helm_audit/`, and `reports/` in this repo
+- `configs/`, `reproduce/`, `eval_audit/`, and `reports/` in this repo
 
 Research notes:
 
@@ -344,7 +344,7 @@ Original context:
 
 Current equivalents in this repo:
 - repo root: `/home/joncrall/code/helm-reproducibility`
-- workflow roots: `configs/`, `reproduce/`, `helm_audit/`, `reports/`
+- workflow roots: `configs/`, `reproduce/`, `eval_audit/`, `reports/`
 
 Unless explicitly stated otherwise, historical paths and commands above should be
 interpreted as pre-split references.
@@ -353,4 +353,4 @@ interpreted as pre-split references.
 
 This file contains historical text from before the repository split. When following
 instructions operationally, prefer current repo-local paths in `README.md`, `configs/`,
-`reproduce/`, and `helm_audit/` over legacy `aiq-magnet` paths.
+`reproduce/`, and `eval_audit/` over legacy `aiq-magnet` paths.

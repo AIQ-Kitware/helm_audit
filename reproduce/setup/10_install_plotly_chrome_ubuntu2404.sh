@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Install Google Chrome for Plotly/Kaleido static image export on a headless
 # Ubuntu 24.04 VM. This keeps Chrome in the repo-local cache path already used
-# by helm_audit's Plotly helpers.
+# by eval_audit's Plotly helpers.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CACHE_ROOT="${REPO_ROOT}/.cache/plotly-chrome"
@@ -40,4 +40,4 @@ fi
 echo "installed_chrome=${CHROME_BIN}"
 echo
 echo "Verify with:"
-echo "  PYTHONPATH=${REPO_ROOT} python -m helm_audit.cli.check_env --plotly-static-only"
+echo "  PYTHONPATH=${REPO_ROOT} python -m eval_audit.cli.check_env --plotly-static-only"

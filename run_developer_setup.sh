@@ -8,7 +8,7 @@ VENV_DIR="${VENV_DIR:-.venv}"
 PYTHON_BIN="${PYTHON_BIN:-python3.10}"
 VENV_PYTHON="$VENV_DIR/bin/python"
 
-echo "[helm_audit] repo root: $REPO_ROOT"
+echo "[eval_audit] repo root: $REPO_ROOT"
 
 need_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -20,41 +20,41 @@ need_cmd() {
 need_cmd git
 need_cmd uv
 
-echo "[helm_audit] syncing submodules"
+echo "[eval_audit] syncing submodules"
 git submodule sync --recursive
 git submodule update --init --recursive
 
 if [[ ! -x "$VENV_PYTHON" ]]; then
-    echo "[helm_audit] creating virtual environment at $VENV_DIR"
+    echo "[eval_audit] creating virtual environment at $VENV_DIR"
     uv venv "$VENV_DIR" --python "$PYTHON_BIN"
 else
-    echo "[helm_audit] reusing existing virtual environment at $VENV_DIR"
+    echo "[eval_audit] reusing existing virtual environment at $VENV_DIR"
 fi
 
-echo "[helm_audit] upgrading packaging tools"
+echo "[eval_audit] upgrading packaging tools"
 uv pip install --python "$VENV_PYTHON" --upgrade pip setuptools wheel
 
-echo "[helm_audit] installing root package in editable mode"
+echo "[eval_audit] installing root package in editable mode"
 uv pip install --python "$VENV_PYTHON" -e .
 
 install_editable_pkg() {
     local pkg_path="$1"
 
     if [[ ! -d "$pkg_path" ]]; then
-        echo "[helm_audit] skipping missing path: $pkg_path"
+        echo "[eval_audit] skipping missing path: $pkg_path"
         return 0
     fi
 
     if [[ -f "$pkg_path/pyproject.toml" || -f "$pkg_path/setup.py" || -f "$pkg_path/setup.cfg" ]]; then
-        echo "[helm_audit] installing editable package: $pkg_path"
+        echo "[eval_audit] installing editable package: $pkg_path"
         uv pip install --python "$VENV_PYTHON" -e "$pkg_path"
     else
-        echo "[helm_audit] skipping non-python submodule: $pkg_path"
+        echo "[eval_audit] skipping non-python submodule: $pkg_path"
     fi
 }
 
 if [[ -f .gitmodules ]]; then
-    echo "[helm_audit] discovering submodules from .gitmodules"
+    echo "[eval_audit] discovering submodules from .gitmodules"
 
     declare -A seen_paths=()
 
@@ -64,14 +64,14 @@ if [[ -f .gitmodules ]]; then
         install_editable_pkg "$sm_path"
     done < <(git config --file .gitmodules --get-regexp path | awk '{print $2}')
 else
-    echo "[helm_audit] no .gitmodules found"
+    echo "[eval_audit] no .gitmodules found"
 fi
 
 echo
-echo "[helm_audit] setup complete"
+echo "[eval_audit] setup complete"
 echo "venv python: $VENV_PYTHON"
 echo "activate with:"
 echo "  source $VENV_DIR/bin/activate"
 echo
 echo "sanity check:"
-echo "  $VENV_PYTHON -m helm_audit.cli.check_env"
+echo "  $VENV_PYTHON -m eval_audit.cli.check_env"

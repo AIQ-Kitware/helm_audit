@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from helm_audit.reports import core_metrics
+from eval_audit.reports import core_metrics
 
 
 def _write_manifest(path: Path, payload: dict) -> None:

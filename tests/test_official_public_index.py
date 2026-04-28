@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from helm_audit.cli.index_historic_helm_runs import (
+from eval_audit.cli.index_historic_helm_runs import (
     KNOWN_STRUCTURAL_JUNK_NAMES,
     _classify_run_entry,
     _compute_run_spec_hash,

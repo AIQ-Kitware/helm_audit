@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from helm_audit.workflows import compare_batch
+from eval_audit.workflows import compare_batch
 
 
 def test_collect_historic_candidates_ignores_local_model_deployment(

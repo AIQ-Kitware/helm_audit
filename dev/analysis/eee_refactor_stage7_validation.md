@@ -27,7 +27,7 @@ gpt2) through `_build_pair`:
 
 * Both indexes still produced by their dedicated CLIs
   (`index_historic_helm_runs`, `index_results`). Schema lives in
-  `helm_audit.indexing.schema` and now carries `artifact_format` +
+  `eval_audit.indexing.schema` and now carries `artifact_format` +
   `eee_artifact_path` on both column lists.
 * No combined index of truth. `build_reports_summary` derives breakdowns
   from per-packet manifests + the local index; the `artifact_format`
@@ -70,7 +70,7 @@ gpt2) through `_build_pair`:
 
 ### Cheap rebuilds of derived artifacts
 
-* `helm_audit.normalized.load_run` is the single load entry point.
+* `eval_audit.normalized.load_run` is the single load entry point.
   Re-rendering reports against existing on-disk EEE artifacts (when
   `artifact_format='eee'`) skips the in-memory HELM->EEE conversion
   entirely.
@@ -83,7 +83,7 @@ gpt2) through `_build_pair`:
 * Raw HELM JSONs untouched on disk. `compat/helm_outputs.py` is now
   documented as discovery-only.
 * Derived analysis lives under the planner / Stage-5 reports as
-  before; the new `helm_audit.normalized` package sits between them
+  before; the new `eval_audit.normalized` package sits between them
   and the raw artifacts.
 * `reports/` remains the publication surface; no schema changes here.
 
@@ -104,7 +104,7 @@ gpt2) through `_build_pair`:
 
 ## Generality check (not POC-shaped)
 
-* `helm_audit.normalized.loaders` uses a registry keyed by
+* `eval_audit.normalized.loaders` uses a registry keyed by
   `ArtifactFormat`. Adding a future format (e.g. `lm_eval`,
   `inspect_ai`) is a one-line `register_loader(...)` plus the loader
   class.

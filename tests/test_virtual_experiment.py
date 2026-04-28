@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from helm_audit.virtual import (
+from eval_audit.virtual import (
     AuditIndexSource,
     OfficialPublicIndexSource,
     ScopeFilter,
@@ -23,8 +23,8 @@ from helm_audit.virtual import (
     load_manifest,
     write_synthesized_indexes,
 )
-from helm_audit.virtual.compose import provenance_payload
-from helm_audit.virtual.manifest import (
+from eval_audit.virtual.compose import provenance_payload
+from eval_audit.virtual.manifest import (
     ExternalEeeComponent,
     ExternalEeeSource,
     ManifestError,
@@ -254,8 +254,8 @@ def test_pre_filter_helm_stage1_parsing_and_scoped_inventory():
     pre_filter; the composer then re-stamps the upstream inventory so a
     row is ``selected`` iff it both passed Stage-1 AND matches manifest
     scope."""
-    from helm_audit.virtual.compose import build_scoped_filter_inventory
-    from helm_audit.virtual.manifest import HelmStage1PreFilter
+    from eval_audit.virtual.compose import build_scoped_filter_inventory
+    from eval_audit.virtual.manifest import HelmStage1PreFilter
 
     parsed = parse_manifest({
         "name": "x", "description": "",

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from helm_audit.cli.index_historic_helm_runs import (
+from eval_audit.cli.index_historic_helm_runs import (
     build_filter_inventory_rows,
     describe_run_spec,
 )
-from helm_audit.reports.filter_analysis import (
+from eval_audit.reports.filter_analysis import (
     emit_filter_analysis_artifacts,
     emit_filter_report_artifacts,
 )

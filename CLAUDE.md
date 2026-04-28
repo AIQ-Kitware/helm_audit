@@ -1,4 +1,4 @@
-# Working in helm_audit
+# Working in eval_audit
 
 You are an expert Python developer, computer scientist, and research collaborator. This document describes how to work effectively in this codebase.
 
@@ -70,9 +70,9 @@ When working on features or fixes:
 See [`docs/pipeline.md`](docs/pipeline.md) for the canonical pipeline. The high-level stages:
 
 - **Stage 1 (index_historic_helm_runs.py)**: Discovers runs, applies eligibility filters, emits filter report with sankey showing what was kept/dropped and why
-- **Stage 2 (helm-audit-make-manifest)**: Converts run specs to execution manifests
-- **Stage 3 (helm-audit-run)**: Executes on GPUs via kwdagger scheduler
-- **Stage 4 (helm-audit-index)**: Builds master index CSV
+- **Stage 2 (eval-audit-make-manifest)**: Converts run specs to execution manifests
+- **Stage 3 (eval-audit-run)**: Executes on GPUs via kwdagger scheduler
+- **Stage 4 (eval-audit-index)**: Builds master index CSV
 - **Stage 5 (analyze-experiment / rebuild-core)**: Per-run reproducibility analysis with tolerance sweeps and per-metric curves
 - **Stage 6 (build_reports_summary)**: Aggregate reporting with operational sankey, reproducibility sankey, agreement curves, and per-metric breakdowns
 
@@ -80,10 +80,10 @@ See [`docs/pipeline.md`](docs/pipeline.md) for the canonical pipeline. The high-
 
 | File | Purpose |
 |---|---|
-| `helm_audit/cli/index_historic_helm_runs.py` | Stage 1: filtering, filter-step analysis, sankey emission |
-| `helm_audit/reports/core_metrics.py` | Per-metric agreement curves, tolerance thresholds, instance-level vs. run-level metrics |
-| `helm_audit/workflows/build_reports_summary.py` | Aggregate reporting, README generation, symlink management |
-| `helm_audit/utils/sankey.py` | Sankey renderer (`emit_sankey_artifacts`), handles HTML+JPG sidecar generation |
+| `eval_audit/cli/index_historic_helm_runs.py` | Stage 1: filtering, filter-step analysis, sankey emission |
+| `eval_audit/reports/core_metrics.py` | Per-metric agreement curves, tolerance thresholds, instance-level vs. run-level metrics |
+| `eval_audit/workflows/build_reports_summary.py` | Aggregate reporting, README generation, symlink management |
+| `eval_audit/utils/sankey.py` | Sankey renderer (`emit_sankey_artifacts`), handles HTML+JPG sidecar generation |
 | `docs/pipeline.md` | User-facing pipeline documentation (start here for "how do I run this?") |
 | `docs/helm-reproduction-research-journal.md` | Research context, failure taxonomies, what we learned |
 | `dev/journals/codex.md` | Design narratives of past decisions (read to understand architecture choices) |
@@ -120,8 +120,8 @@ If working on machine `aivm-2404` with username `agent`:
 
 Validate changes with:
 ```bash
-python -m py_compile helm_audit/cli/index_historic_helm_runs.py
-python -m py_compile helm_audit/workflows/build_reports_summary.py
+python -m py_compile eval_audit/cli/index_historic_helm_runs.py
+python -m py_compile eval_audit/workflows/build_reports_summary.py
 ```
 
 ## Summary

@@ -4,9 +4,9 @@ import csv
 import json
 from pathlib import Path
 
-from helm_audit.planning import core_report_planner
-from helm_audit.normalized.eee_artifacts import local_eee_parent_for_row
-from helm_audit.workflows import plan_core_report_packets
+from eval_audit.planning import core_report_planner
+from eval_audit.normalized.eee_artifacts import local_eee_parent_for_row
+from eval_audit.workflows import plan_core_report_packets
 
 
 def _write_json(path: Path, payload: dict) -> None:

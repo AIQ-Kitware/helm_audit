@@ -46,7 +46,7 @@ else
     INVENTORY_FLAGS=(--no-filter-inventory)
 fi
 
-PYTHONPATH="$ROOT" "$PYTHON_BIN" -m helm_audit.workflows.build_reports_summary \
+PYTHONPATH="$ROOT" "$PYTHON_BIN" -m eval_audit.workflows.build_reports_summary \
     --experiment-name "$EXPERIMENT_NAME" \
     --index-fpath "$INDEX_FPATH" \
     --summary-root "$SUMMARY_ROOT" \

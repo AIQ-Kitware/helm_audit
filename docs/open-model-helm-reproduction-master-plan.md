@@ -372,8 +372,8 @@ Recommended cleanup items:
 
 One useful new helper already added:
 
-- `python -m helm_audit.cli.portfolio_status`
-- `python -m helm_audit.cli.analyze_many`
+- `python -m eval_audit.cli.portfolio_status`
+- `python -m eval_audit.cli.analyze_many`
 
 This command reads the checked-in aggregate run inventory and gives a concise status report even on a machine that does not currently have the `/data` run trees mounted.
 The second command runs multiple experiment analyses in one Python process so the cached official-run index is reused instead of rebuilt for every experiment.
@@ -409,7 +409,7 @@ Recommended approach:
 
 Recommended eventual code location:
 
-- `helm_audit/integrations/eee_export.py`
+- `eval_audit/integrations/eee_export.py`
 
 Recommended first validation:
 
@@ -467,8 +467,8 @@ Read these in order:
 Then run:
 
 ```bash
-python -m helm_audit.cli.portfolio_status
-python -m helm_audit.cli.portfolio_status --experiment-name audit-historic-grid
+python -m eval_audit.cli.portfolio_status
+python -m eval_audit.cli.portfolio_status --experiment-name audit-historic-grid
 ```
 
 This gives the fastest current-state refresh from checked-in artifacts.
@@ -495,31 +495,31 @@ If those exist, the next execution sequence should be:
 export AUDIT_RESULTS_ROOT="${AUDIT_RESULTS_ROOT:-/data/crfm-helm-audit}"
 export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 
-helm-audit-index \
+eval-audit-index \
   --results-root "$AUDIT_RESULTS_ROOT" \
   --report-dpath "$AUDIT_STORE_ROOT/indexes"
 
-helm-audit-analyze-experiment \
+eval-audit-analyze-experiment \
   --experiment-name audit-vicuna-nochat-overnight \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
   --allow-single-repeat
 
-helm-audit-analyze-experiment \
+eval-audit-analyze-experiment \
   --experiment-name audit-vicuna-nochat-server \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
   --allow-single-repeat
 
-helm-audit-analyze-experiment \
+eval-audit-analyze-experiment \
   --experiment-name audit-yardrat-subset \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
   --allow-single-repeat
 
-helm-audit-analyze-experiment \
+eval-audit-analyze-experiment \
   --experiment-name audit-namek-subset \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
   --allow-single-repeat
 
-python -m helm_audit.workflows.build_reports_summary \
+python -m eval_audit.workflows.build_reports_summary \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
   --filter-inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
 ```
@@ -527,7 +527,7 @@ python -m helm_audit.workflows.build_reports_summary \
 Then rerun:
 
 ```bash
-python -m helm_audit.cli.portfolio_status
+python -m eval_audit.cli.portfolio_status
 ```
 
 At that point decide whether to proceed immediately to:
@@ -561,7 +561,7 @@ If you land on a machine in this state, do one of:
 
 ### Session 1: Consolidate the current truth
 
-- Run `python -m helm_audit.cli.portfolio_status`
+- Run `python -m eval_audit.cli.portfolio_status`
 - Verify machine state
 - If live data exists, analyze the four small Vicuna subset experiments
 - Rebuild aggregate summary
@@ -612,7 +612,7 @@ If you land on a machine in this state, do one of:
 These are not mandatory for the science, but they will make the project much easier to operate.
 
 - Add a stable scope manifest for `paper_core`.
-- Add an EEE export module under `helm_audit/integrations/`.
+- Add an EEE export module under `eval_audit/integrations/`.
 - Normalize machine provenance and host aliases.
 - Make Stage 6 aggregate summary the obvious source of truth for small follow-up experiments, not only historic-grid.
 - Preserve richer diagnosis labels for official-vs-local drift.
@@ -653,15 +653,15 @@ These are not mandatory for the science, but they will make the project much eas
 Current repo-only orientation:
 
 ```bash
-python -m helm_audit.cli.portfolio_status
-python -m helm_audit.cli.portfolio_status --experiment-name audit-historic-grid
+python -m eval_audit.cli.portfolio_status
+python -m eval_audit.cli.portfolio_status --experiment-name audit-historic-grid
 ```
 
 Failure triage for a synced result root:
 
 ```bash
-python -m helm_audit.cli.summarize_experiment_failures /data/crfm-helm-audit/audit-qwen25-7b-aiq
-python -m helm_audit.cli.summarize_experiment_failures /data/crfm-helm-audit/audit-historic-grid
+python -m eval_audit.cli.summarize_experiment_failures /data/crfm-helm-audit/audit-qwen25-7b-aiq
+python -m eval_audit.cli.summarize_experiment_failures /data/crfm-helm-audit/audit-historic-grid
 ```
 
 Analysis-only rebuild once the result roots are present:
@@ -670,16 +670,16 @@ Analysis-only rebuild once the result roots are present:
 export AUDIT_RESULTS_ROOT=/data/crfm-helm-audit
 export AUDIT_STORE_ROOT=/data/crfm-helm-audit-store
 
-helm-audit-index \
+eval-audit-index \
   --results-root "$AUDIT_RESULTS_ROOT" \
   --report-dpath "$AUDIT_STORE_ROOT/indexes"
 
-helm-audit-analyze-experiment \
+eval-audit-analyze-experiment \
   --experiment-name audit-historic-grid \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
   --allow-single-repeat
 
-python -m helm_audit.workflows.build_reports_summary \
+python -m eval_audit.workflows.build_reports_summary \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
   --filter-inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
 ```
@@ -687,7 +687,7 @@ python -m helm_audit.workflows.build_reports_summary \
 Multi-experiment refresh in one cached Python process:
 
 ```bash
-python -m helm_audit.cli.analyze_many \
+python -m eval_audit.cli.analyze_many \
   --index-fpath /data/crfm-helm-audit-store/indexes/audit_results_index_20260416T184216Z.csv \
   --allow-single-repeat \
   --experiment-name audit-vicuna-nochat-overnight \
@@ -701,7 +701,7 @@ python -m helm_audit.cli.analyze_many \
 Targeted backlog rebuild for only the completed-but-not-yet-analyzed rows:
 
 ```bash
-python -m helm_audit.cli.analyze_backlog \
+python -m eval_audit.cli.analyze_backlog \
   --index-fpath /data/crfm-helm-audit-store/indexes/audit_results_index_20260416T184216Z.csv \
   --run-inventory-csv /home/joncrall/code/helm_audit/reports/aggregate-summary/all-results/run_inventory.latest.csv \
   --allow-single-repeat \
@@ -722,8 +722,8 @@ Observed result from the follow-up historic-grid targeted pass:
 - 4 `synthetic_reasoning_natural` rows now publish Stage 6 reports
 - historic-grid moved from 81 analyzed / 60 completed-not-analyzed to 85 analyzed / 56 completed-not-analyzed
 - the remaining historic-grid backlog is still dominated by rows with no official historic HELM counterpart under the current matching logic
-- `helm_audit/cli/analyze_backlog.py` now prints a grouped `SKIP_SUMMARY`, which should make the remaining backlog easier to classify quickly tomorrow
-- `python -m helm_audit.cli.portfolio_status --experiment-name audit-historic-grid --classify-backlog` now makes that distinction explicit:
+- `eval_audit/cli/analyze_backlog.py` now prints a grouped `SKIP_SUMMARY`, which should make the remaining backlog easier to classify quickly tomorrow
+- `python -m eval_audit.cli.portfolio_status --experiment-name audit-historic-grid --classify-backlog` now makes that distinction explicit:
   - 4 rows have report artifacts but no scalar agreement value yet
   - 56 rows have no report and no official historic counterpart
   - 0 rows remain in the “no report but currently comparable” bucket

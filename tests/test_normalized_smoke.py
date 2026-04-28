@@ -1,4 +1,4 @@
-"""Stage-2 smoke tests for helm_audit.normalized.
+"""Stage-2 smoke tests for eval_audit.normalized.
 
 These tests exercise the loader contract with the small HELM fixtures shipped
 inside ``submodules/every_eval_ever/tests/data/helm/``. They validate that
@@ -18,14 +18,14 @@ from pathlib import Path
 
 import pytest
 
-from helm_audit.normalized import (
+from eval_audit.normalized import (
     ArtifactFormat,
     NormalizedRunRef,
     SourceKind,
     join_run_level,
     load_run,
 )
-from helm_audit.normalized.loaders import LoaderError
+from eval_audit.normalized.loaders import LoaderError
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

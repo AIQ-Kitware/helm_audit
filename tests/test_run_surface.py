@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from helm_audit.integrations.kwdagger_bridge import (
+from eval_audit.integrations.kwdagger_bridge import (
     kwdagger_schedule_argv,
     prepare_schedule_request,
 )
-from helm_audit.infra.paths import repo_root
-from helm_audit.manifests import builders as manifest_builders
-from helm_audit.workflows import run_from_manifest as run_workflow
+from eval_audit.infra.paths import repo_root
+from eval_audit.manifests import builders as manifest_builders
+from eval_audit.workflows import run_from_manifest as run_workflow
 
 
 def _write_manifest(tmp_path: Path) -> Path:

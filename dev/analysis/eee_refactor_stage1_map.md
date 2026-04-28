@@ -1,6 +1,6 @@
 # Stage 1 — Current vs. Target Architecture Map (EEE refactor)
 
-This document maps the current `helm_audit` architecture against the target
+This document maps the current `eval_audit` architecture against the target
 defined in `ARCHITECTURE.md`, with specific attention to where Every Eval Ever
 (EEE) becomes the normalized comparison layer.
 
@@ -26,14 +26,14 @@ defined in `ARCHITECTURE.md`, with specific attention to where Every Eval Ever
 
 ### Indexing (Stage 1, Stage 4)
 
-* `helm_audit.cli.index_historic_helm_runs` — discovers public HELM runs from
+* `eval_audit.cli.index_historic_helm_runs` — discovers public HELM runs from
   filesystem; writes `official_public_index_*.csv`, `run_specs.yaml`, and a
   filter inventory JSON. Uses `magnet.backends.helm.helm_outputs.HelmOutputs`
   via direct import (`HelmOutputs.coerce(bo)`).
-* `helm_audit.workflows.index_results` — discovers local audit results from a
+* `eval_audit.workflows.index_results` — discovers local audit results from a
   results root; writes `audit_results_index_*.csv`. Uses
-  `helm_audit.compat.helm_outputs.HelmOutputs.coerce(bo)`.
-* `helm_audit.indexing.schema` — shared CSV column schema and identity helpers
+  `eval_audit.compat.helm_outputs.HelmOutputs.coerce(bo)`.
+* `eval_audit.indexing.schema` — shared CSV column schema and identity helpers
   (`OFFICIAL_COMPONENT_COLUMNS`, `LOCAL_COMPONENT_COLUMNS`,
   `extract_run_spec_fields`, `component_id_for_official/local`,
   `logical_run_key_for_*`). This is already the right place to hang a
@@ -44,55 +44,55 @@ exists at the `COMMON_COMPONENT_COLUMNS` level.
 
 ### Run reading (HELM-native)
 
-* `helm_audit.compat.helm_outputs` — local re-implementation of the
+* `eval_audit.compat.helm_outputs` — local re-implementation of the
   `magnet.backends.helm.helm_outputs` API: `HelmRun`, `HelmSuite`,
   `HelmOutputs`. Pure JSON readers over `run_spec.json`,
   `scenario_state.json`, `stats.json`, `per_instance_stats.json`.
-* `helm_audit.helm.analysis.HelmRunAnalysis` — wraps a `HelmRun`, caches
+* `eval_audit.helm.analysis.HelmRunAnalysis` — wraps a `HelmRun`, caches
   derived indices: `stat_index()`, `joined_instance_stat_table()`,
   `summary_dict()`. The join logic that builds
   `JoinedInstanceStatTable` is the central HELM-shaped computation.
-* `helm_audit.helm.diff.HelmRunDiff` — pairwise comparison of two
+* `eval_audit.helm.diff.HelmRunDiff` — pairwise comparison of two
   `HelmRunAnalysis` instances. Produces tolerance sweeps, value-distance
   profiles, instance agreement, run-spec semantic diff, diagnosis labels.
   ~2,629 lines — this is the single largest HELM-shaped surface.
-* `helm_audit.helm.hashers`, `helm_audit.helm.metrics`,
-  `helm_audit.helm.run_entries` — small utilities (stable hashing, metric
+* `eval_audit.helm.hashers`, `eval_audit.helm.metrics`,
+  `eval_audit.helm.run_entries` — small utilities (stable hashing, metric
   classification, run-name parsing). Some are general (`run_entries`
   parsing); `metrics.classify_metric` is HELM-specific.
 
 ### Comparison planning
 
-* `helm_audit.planning.core_report_planner` — consumes the official + local
+* `eval_audit.planning.core_report_planner` — consumes the official + local
   CSV indexes, normalizes rows into `NormalizedPlannerComponent`, applies an
   "official selection policy" (latest suite version per public track), and
   emits packets containing components + comparisons + comparability facts +
   warnings. Already source-kind-aware.
-* `helm_audit.workflows.plan_core_report_packets` — packet manifest writer.
-* `helm_audit.reports.core_packet` / `core_packet_summary` — packet manifest
+* `eval_audit.workflows.plan_core_report_packets` — packet manifest writer.
+* `eval_audit.reports.core_packet` / `core_packet_summary` — packet manifest
   IO + small summary helpers.
 
 ### Pairwise comparison + report core
 
-* `helm_audit.reports.core_metrics` — the central per-packet report
+* `eval_audit.reports.core_metrics` — the central per-packet report
   generator. It loads each `(component_id, run_path)` pair via
   `HelmRun.coerce(run_path)` and `HelmRunAnalysis`, then runs
   `HelmRunDiff` to compute `_run_level_core_rows` and
   `_instance_level_core_rows`. These reach into `joined_instance_stat_table`
   and `stat_index` for HELM-specific structures.
-* `helm_audit.reports.pair_report` — a thinner pair report (writes
+* `eval_audit.reports.pair_report` — a thinner pair report (writes
   `pair_report_*.json`); also goes through `HelmRun` + `HelmRunDiff`.
-* `helm_audit.reports.pair_samples` — text dump of mismatched instance
+* `eval_audit.reports.pair_samples` — text dump of mismatched instance
   samples, also via `HelmRunDiff`.
-* `helm_audit.reports.quantiles` — left/right pair quantile comparison via
+* `eval_audit.reports.quantiles` — left/right pair quantile comparison via
   `HelmRunDiff`.
 
 ### Aggregates / publication
 
-* `helm_audit.workflows.analyze_experiment` — runs the planner per experiment
+* `eval_audit.workflows.analyze_experiment` — runs the planner per experiment
   and triggers `rebuild_core_report_main` for each packet.
-* `helm_audit.workflows.rebuild_core_report` — drives `core_metrics.main`.
-* `helm_audit.workflows.build_reports_summary` — Stage 6 aggregate. Loads
+* `eval_audit.workflows.rebuild_core_report` — drives `core_metrics.main`.
+* `eval_audit.workflows.build_reports_summary` — Stage 6 aggregate. Loads
   per-packet `core_metric_report.latest.json`, joins with the index, emits
   end-to-end + reproducibility sankeys, breakdowns, and prioritized-example
   drilldowns. Already operates on the **normalized JSON outputs** of Stage 5,
@@ -123,7 +123,7 @@ reads these JSONs and propagates flags.
   surfaced by the corpus sweep (already enumerated; some may already be
   patched in the submodule).
 
-EEE is **not** wired into the helm_audit code paths today. Comparison still
+EEE is **not** wired into the eval_audit code paths today. Comparison still
 goes through `HelmRunDiff` end-to-end.
 
 ## Seams identified for the refactor
@@ -211,7 +211,7 @@ conversion (in-memory) when not.
 
 ## Stage-by-stage execution plan (preview)
 
-1. **Stage 2** — introduce `helm_audit.normalized` package containing
+1. **Stage 2** — introduce `eval_audit.normalized` package containing
    `NormalizedRunRef`, `NormalizedRun`, and an `Loader` registry keyed by
    `artifact_format`. Two loaders: `EeeLoader` (reads converted JSON) and
    `HelmJsonLoader` (in-memory HELM→EEE conversion using
@@ -234,8 +234,8 @@ conversion (in-memory) when not.
    component; manifests grow these fields; aggregate sankeys/breakdowns
    carry `artifact_format` provenance. Combined union artifacts (for
    Sankeys) remain dumb derived views.
-5. **Stage 6** — quarantine `helm_audit.helm.analysis` /
-   `helm_audit.helm.diff` to "raw HELM evidence inspection only". Update
+5. **Stage 6** — quarantine `eval_audit.helm.analysis` /
+   `eval_audit.helm.diff` to "raw HELM evidence inspection only". Update
    `compat/helm_outputs.py` to be the documented raw-source ingest path
    for the loader (not for comparison). Update docs/pipeline.md.
 6. **Stage 7** — re-read ARCHITECTURE.md and check item-by-item; smoke

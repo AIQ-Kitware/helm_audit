@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from helm_audit.virtual.coverage import (
+from eval_audit.virtual.coverage import (
     compute_coverage,
     write_coverage_artifacts,
 )

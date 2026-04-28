@@ -6,7 +6,7 @@ This document covers the complete reproducibility audit pipeline: from discoveri
 - Operator runbook: [`reproduce/README.md`](../reproduce/README.md)
 - Package reference: [`README.md`](../README.md)
 - Design journal: [`dev/journals/codex.md`](../dev/journals/codex.md)
-- Normalized layer (EEE): [`helm_audit/normalized/`](../helm_audit/normalized/) — `NormalizedRun`, loaders for `helm` and `eee` artifact formats, compare core. All per-pair comparison code paths flow through this boundary; raw HELM JSONs remain on disk as evidence.
+- Normalized layer (EEE): [`eval_audit/normalized/`](../eval_audit/normalized/) — `NormalizedRun`, loaders for `helm` and `eee` artifact formats, compare core. All per-pair comparison code paths flow through this boundary; raw HELM JSONs remain on disk as evidence.
 
 ---
 
@@ -77,7 +77,7 @@ huggingface-cli login  # or pass --token to index_historic_helm_runs
 # Python deps already include plotly + kaleido via pyproject.toml
 uv pip install -e .
 bash reproduce/setup/10_install_plotly_chrome_ubuntu2404.sh
-PYTHONPATH=. python -m helm_audit.cli.check_env --plotly-static-only
+PYTHONPATH=. python -m eval_audit.cli.check_env --plotly-static-only
 
 # Chrome is searched in this order:
 #   1. .cache/plotly-chrome/chrome-linux64/chrome
@@ -95,7 +95,7 @@ PYTHONPATH=. python -m helm_audit.cli.check_env --plotly-static-only
 ```bash
 export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 
-python -m helm_audit.cli.index_historic_helm_runs \
+python -m eval_audit.cli.index_historic_helm_runs \
   /data/crfm-helm-public \
   --out_fpath "$AUDIT_STORE_ROOT/configs/run_specs.yaml" \
   --out_detail_fpath "$AUDIT_STORE_ROOT/configs/run_details.yaml" \
@@ -138,7 +138,7 @@ python -m helm_audit.cli.index_historic_helm_runs \
 Use this when you want to iterate on the filter analyses, Sankeys, or report directory structure without re-scanning HELM outputs:
 
 ```bash
-PYTHONPATH=. python -m helm_audit.cli.reports filter \
+PYTHONPATH=. python -m eval_audit.cli.reports filter \
   --report-dpath reports/filtering \
   --inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
 ```
@@ -179,7 +179,7 @@ For the richer secondary analysis, also inspect:
 
 **Command:**
 ```bash
-helm-audit-make-manifest historic \
+eval-audit-make-manifest historic \
   --run-specs-fpath "$AUDIT_STORE_ROOT/configs/run_specs.yaml" \
   --run-details-fpath "$AUDIT_STORE_ROOT/configs/run_details.yaml" \
   --experiment-name audit-historic-grid \
@@ -212,13 +212,13 @@ helm-audit-make-manifest historic \
 
 **Command (preview mode — default):**
 ```bash
-helm-audit-run \
+eval-audit-run \
   "$AUDIT_STORE_ROOT/configs/manifests/historic_grid.generated.yaml"
 ```
 
 **Command (execute mode):**
 ```bash
-helm-audit-run \
+eval-audit-run \
   "$AUDIT_STORE_ROOT/configs/manifests/historic_grid.generated.yaml" \
   --run 1
 ```
@@ -257,7 +257,7 @@ rsync -avz --progress user@<gpu_host>:results/ /home/joncrall/data/helm_runs/
 ```bash
 export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 
-helm-audit-index \
+eval-audit-index \
   --results-root /data/crfm-helm-audit \
   --report-dpath "$AUDIT_STORE_ROOT/indexes"
 ```
@@ -283,7 +283,7 @@ helm-audit-index \
 
 If you already have run outputs under `/data/crfm-helm-audit` and want to rebuild the full reporting stack from existing data, the practical path is:
 1. rebuild the index in `$AUDIT_STORE_ROOT/indexes`
-2. rebuild experiment-level core reports with `helm-audit-analyze-experiment`
+2. rebuild experiment-level core reports with `eval-audit-analyze-experiment`
 3. rebuild the aggregate summary from those Stage 5 outputs
 
 ### Analysis-Only Rebuild From Existing Data
@@ -295,16 +295,16 @@ export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 export AUDIT_RESULTS_ROOT="${AUDIT_RESULTS_ROOT:-/data/crfm-helm-audit}"
 export EXPERIMENT_NAME="${EXPERIMENT_NAME:-audit-historic-grid}"
 
-helm-audit-index \
+eval-audit-index \
   --results-root "$AUDIT_RESULTS_ROOT" \
   --report-dpath "$AUDIT_STORE_ROOT/indexes"
 
-helm-audit-analyze-experiment \
+eval-audit-analyze-experiment \
   --experiment-name "$EXPERIMENT_NAME" \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
   --allow-single-repeat
 
-python -m helm_audit.workflows.build_reports_summary \
+python -m eval_audit.workflows.build_reports_summary \
   --experiment-name "$EXPERIMENT_NAME" \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
   --filter-inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
@@ -324,7 +324,7 @@ export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 export AUDIT_RESULTS_ROOT="${AUDIT_RESULTS_ROOT:-/data/crfm-helm-audit}"
 export PYTHON_BIN="${PYTHON_BIN:-/home/agent/.local/uv/envs/uvpy3.13.2/bin/python}"
 
-helm-audit-index \
+eval-audit-index \
   --results-root "$AUDIT_RESULTS_ROOT" \
   --report-dpath "$AUDIT_STORE_ROOT/indexes"
 
@@ -350,13 +350,13 @@ print(" ".join(names))
 PY
 )
 do
-  helm-audit-analyze-experiment \
+  eval-audit-analyze-experiment \
     --experiment-name "$EXPERIMENT_NAME" \
     --index-fpath "$LATEST_INDEX" \
     --allow-single-repeat
 done
 
-python -m helm_audit.workflows.build_reports_summary \
+python -m eval_audit.workflows.build_reports_summary \
   --index-fpath "$LATEST_INDEX" \
   --filter-inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
 ```
@@ -366,7 +366,7 @@ python -m helm_audit.workflows.build_reports_summary \
 **Command:**
 ```bash
 export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
-helm-audit-rebuild-core \
+eval-audit-rebuild-core \
   --run-entry "boolq:model=eleutherai/pythia-6.9b,data_augmentation=canonical" \
   --experiment-name audit-historic-grid \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
@@ -388,7 +388,7 @@ helm-audit-rebuild-core \
 ```bash
 
 export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
-helm-audit-analyze-experiment \
+eval-audit-analyze-experiment \
   --experiment-name audit-historic-grid \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
   --allow-single-repeat
@@ -407,12 +407,12 @@ helm-audit-analyze-experiment \
 
 **Purpose:** Load all per-run reports, synthesize findings into operator-facing views, and generate publication-ready artifacts.
 
-This stage is safe to rerun while `helm-audit-analyze-experiment` is still in progress. It snapshots whatever Stage 5 reports currently exist on disk, so intermediate rebuilds are useful. Runs that have completed execution but are not yet analyzed will appear in the high-level summaries as `completed_not_yet_analyzed` or `not_analyzed_yet`, then move downstream on the next rebuild.
+This stage is safe to rerun while `eval-audit-analyze-experiment` is still in progress. It snapshots whatever Stage 5 reports currently exist on disk, so intermediate rebuilds are useful. Runs that have completed execution but are not yet analyzed will appear in the high-level summaries as `completed_not_yet_analyzed` or `not_analyzed_yet`, then move downstream on the next rebuild.
 
 **Command:**
 ```bash
 export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
-python -m helm_audit.workflows.build_reports_summary \
+python -m eval_audit.workflows.build_reports_summary \
   --experiment-name audit-historic-grid \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
   --filter-inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
@@ -497,7 +497,7 @@ Use this when you already have Stage 5 reports and want to iterate on directory 
 
 ```bash
 export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
-PYTHONPATH=. python -m helm_audit.workflows.build_reports_summary \
+PYTHONPATH=. python -m eval_audit.workflows.build_reports_summary \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
   --filter-inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
 ```
@@ -528,44 +528,44 @@ This step is independent of recomputing model executions. It only reads existing
 export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 
 # Stage 1: Discover & filter
-python -m helm_audit.cli.index_historic_helm_runs \
+python -m eval_audit.cli.index_historic_helm_runs \
   /data/crfm-helm-public \
   --out_fpath "$AUDIT_STORE_ROOT/configs/qwen_run_specs.yaml" \
   --out_inventory_json "$AUDIT_STORE_ROOT/analysis/qwen_filter_inventory.json"
 
 # Stage 1a: Build filter analysis from saved inventory
-python -m helm_audit.cli.reports filter \
+python -m eval_audit.cli.reports filter \
   --report-dpath reports/filtering/qwen \
   --inventory-json "$AUDIT_STORE_ROOT/analysis/qwen_filter_inventory.json"
 
 # Stage 2: Generate a stored manifest
-helm-audit-make-manifest historic \
+eval-audit-make-manifest historic \
   --run-specs-fpath "$AUDIT_STORE_ROOT/configs/qwen_run_specs.yaml" \
   --experiment-name audit-qwen25-7b \
   --suite audit-qwen25-7b \
   --output "$AUDIT_STORE_ROOT/configs/manifests/qwen.generated.yaml"
 
 # Stage 3: Execute (preview first, then run)
-helm-audit-run "$AUDIT_STORE_ROOT/configs/manifests/qwen.generated.yaml"
+eval-audit-run "$AUDIT_STORE_ROOT/configs/manifests/qwen.generated.yaml"
 
 # When ready to execute:
-helm-audit-run "$AUDIT_STORE_ROOT/configs/manifests/qwen.generated.yaml" --run 1
+eval-audit-run "$AUDIT_STORE_ROOT/configs/manifests/qwen.generated.yaml" --run 1
 
 # Sync results back to analysis host (run on GPU host or via CI/CD)
 rsync -avz --progress results/ /home/joncrall/data/helm_runs/
 
 # Stage 4: Index results
-helm-audit-index \
+eval-audit-index \
   --results-root /data/crfm-helm-audit \
   --report-dpath "$AUDIT_STORE_ROOT/indexes"
 
 # Stage 5: Analyze per-run reproducibility
-helm-audit-analyze-experiment \
+eval-audit-analyze-experiment \
   --experiment-name audit-qwen25-7b \
   --index-dpath "$AUDIT_STORE_ROOT/indexes"
 
 # Stage 6: Build aggregate reports
-python -m helm_audit.workflows.build_reports_summary \
+python -m eval_audit.workflows.build_reports_summary \
   --index-dpath "$AUDIT_STORE_ROOT/indexes" \
   --filter-inventory-json "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
 
@@ -604,7 +604,7 @@ On this repo's headless Ubuntu 24.04 workflow, use:
 ```bash
 uv pip install -e .
 bash reproduce/setup/10_install_plotly_chrome_ubuntu2404.sh
-PYTHONPATH=. python -m helm_audit.cli.check_env --plotly-static-only
+PYTHONPATH=. python -m eval_audit.cli.check_env --plotly-static-only
 ```
 
 The installer downloads Chrome into the repo-local cache at `.cache/plotly-chrome/`, which is the first location searched by the shared Plotly helper. If Chrome is still absent, HTMLs will render and JPG/PNG sidecars will be skipped with `plotly_error` recorded in the generated report metadata.

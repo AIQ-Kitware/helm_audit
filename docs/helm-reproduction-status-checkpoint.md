@@ -31,7 +31,7 @@ Important code and experiment roots:
 
 - public historic HELM runs: `/data/crfm-helm-public`
 - local reproduced runs: `/data/crfm-helm-audit`
-- audit workflow: this repository (`configs/`, `reproduce/`, `helm_audit/`, `reports/`)
+- audit workflow: this repository (`configs/`, `reproduce/`, `eval_audit/`, `reports/`)
 
 ## Core Research Goal
 
@@ -526,7 +526,7 @@ Original context:
 
 Current equivalents in this repo:
 - repo root: `/home/joncrall/code/helm-reproducibility`
-- workflow roots: `configs/`, `reproduce/`, `helm_audit/`, `reports/`
+- workflow roots: `configs/`, `reproduce/`, `eval_audit/`, `reports/`
 
 Unless explicitly stated otherwise, historical paths and commands above should be
 interpreted as pre-split references.
@@ -535,4 +535,4 @@ interpreted as pre-split references.
 
 This file contains historical text from before the repository split. When following
 instructions operationally, prefer current repo-local paths in `README.md`, `configs/`,
-`reproduce/`, and `helm_audit/` over legacy `aiq-magnet` paths.
+`reproduce/`, and `eval_audit/` over legacy `aiq-magnet` paths.

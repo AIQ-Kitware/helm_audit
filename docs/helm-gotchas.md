@@ -33,7 +33,7 @@ HELM didn't write at all:
 A canonical-recipe hash that strips/defaults these fields produces
 realistic match rates across releases.
 
-**Workaround.** `helm_audit.virtual.coverage._canonical_recipe_hash`
+**Workaround.** `eval_audit.virtual.coverage._canonical_recipe_hash`
 computes a schema-collapsed hash; the coverage funnel reports both the
 raw-hash match (= byte-for-byte identical) and the canonical-hash match
 (= schema-collapsed). The gap between them is HELM-version churn; the
@@ -254,6 +254,6 @@ but the canonicalization rules are HELM-version-dependent. New fields
 added in newer releases mean the canonicalized form differs.
 
 **Workaround.** Use the *coverage*-side canonical hash
-(`_canonical_recipe_hash` in `helm_audit/virtual/coverage.py`), which
+(`_canonical_recipe_hash` in `eval_audit/virtual/coverage.py`), which
 applies our own normalization on top of HELM's. The output is stable
 across HELM releases for the same recipe.

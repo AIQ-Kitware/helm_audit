@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from helm_audit.reports.core_packet import comparison_sample_latest_name
-from helm_audit.workflows import analyze_experiment, build_reports_summary
+from eval_audit.reports.core_packet import comparison_sample_latest_name
+from eval_audit.workflows import analyze_experiment, build_reports_summary
 
 
 def _write_json(path: Path, payload: dict) -> None:

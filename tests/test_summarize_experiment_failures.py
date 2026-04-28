@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from helm_audit.cli.summarize_experiment_failures import summarize_failures
+from eval_audit.cli.summarize_experiment_failures import summarize_failures
 
 
 def test_summarize_failures_classifies_known_failure_patterns(tmp_path):

@@ -4,18 +4,18 @@ from pathlib import Path
 
 import pytest
 
-from helm_audit.cli.check_env import main as check_env_main
-from helm_audit.cli.compare import main as compare_main
-from helm_audit.cli.manifests import main as manifests_main
-from helm_audit.cli.reports import main as reports_main
-from helm_audit.cli.run import main as run_main
-from helm_audit.helm.run_entries import (
+from eval_audit.cli.check_env import main as check_env_main
+from eval_audit.cli.compare import main as compare_main
+from eval_audit.cli.manifests import main as manifests_main
+from eval_audit.cli.reports import main as reports_main
+from eval_audit.cli.run import main as run_main
+from eval_audit.helm.run_entries import (
     discover_benchmark_output_dirs,
     normalize_run_entry_for_historic_lookup,
     parse_run_entry_description,
     run_dir_matches_requested,
 )
-from helm_audit.workflows.compare_batch import aggregate_report
+from eval_audit.workflows.compare_batch import aggregate_report
 
 
 @pytest.mark.parametrize(

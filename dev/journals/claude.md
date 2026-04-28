@@ -48,7 +48,7 @@ Before touching anything, I did a full codebase audit using the Explore subagent
 
 `_safe_float` existed in three files — `helm/analysis.py`, `helm/diff.py`, and `reports/core_metrics.py` — and had silently diverged. The `analysis.py` version was the most defensive: it included a `math.isnan()` guard that the other two lacked. Left unaddressed, any bug fix to one copy would not propagate to the others. Similarly, `_quantile` appeared in `diff.py` and `core_metrics.py`; the `core_metrics.py` version sorted its input internally while `diff.py`'s assumed pre-sorted input (callers in `diff.py` happened to sort first, so both worked, but the inconsistency was a trap for anyone adding a new call site).
 
-The fix: create `helm_audit/utils/numeric.py` with canonical, documented implementations of `safe_float`, `quantile` (sorts internally, the safer choice), and `nested_get` (new). Each file that previously defined these locally now imports from `utils.numeric` using a private alias (`_safe_float = safe_float`) so call sites need zero changes. The `analysis.py`'s version was adopted as canonical since it was most defensive; callers in `diff.py` that happened to pre-sort still work correctly since sorting an already-sorted list is a no-op.
+The fix: create `eval_audit/utils/numeric.py` with canonical, documented implementations of `safe_float`, `quantile` (sorts internally, the safer choice), and `nested_get` (new). Each file that previously defined these locally now imports from `utils.numeric` using a private alias (`_safe_float = safe_float`) so call sites need zero changes. The `analysis.py`'s version was adopted as canonical since it was most defensive; callers in `diff.py` that happened to pre-sort still work correctly since sorting an already-sorted list is a no-op.
 
 **nested_get helper**
 
@@ -204,21 +204,21 @@ The `reports/` tree is gitignored, so it was already a local-only artifact. Maki
 ### Migration story
 
 - Existing experiment dirs at `reports/core-run-analysis/experiment-analysis-{name}/`: migrated to store automatically on first re-run. Between now and that re-run, `build_reports_summary.py` still finds them via the dual-scan glob.
-- Existing index files in `/data/crfm-helm-audit-store/indexes/`: timestamped files remain; next `helm-audit-index` run will also write `latest` aliases.
+- Existing index files in `/data/crfm-helm-audit-store/indexes/`: timestamped files remain; next `eval-audit-index` run will also write `latest` aliases.
 - No history deleted, no content modified.
 
 ### Files changed
 
-- `helm_audit/infra/paths.py` — +5 lines (`experiment_analysis_dpath`)
-- `helm_audit/infra/report_layout.py` — `core_run_reports_root` redirected, `compat_core_run_reports_root` added
-- `helm_audit/workflows/analyze_experiment.py` — new canonical path, migration, provenance.json, compat symlink
-- `helm_audit/workflows/build_reports_summary.py` — dual-scan glob, `experiment_analysis_dpath` lookup
-- `helm_audit/workflows/index_results.py` — `latest` aliases for index files
+- `eval_audit/infra/paths.py` — +5 lines (`experiment_analysis_dpath`)
+- `eval_audit/infra/report_layout.py` — `core_run_reports_root` redirected, `compat_core_run_reports_root` added
+- `eval_audit/workflows/analyze_experiment.py` — new canonical path, migration, provenance.json, compat symlink
+- `eval_audit/workflows/build_reports_summary.py` — dual-scan glob, `experiment_analysis_dpath` lookup
+- `eval_audit/workflows/index_results.py` — `latest` aliases for index files
 
 ### Command to rerun analysis and inspect new canonical output
 
 ```bash
-python -m helm_audit.workflows.analyze_experiment \
+python -m eval_audit.workflows.analyze_experiment \
   --experiment-name audit-small-models-kubeai-overnight \
   --index-fpath /data/crfm-helm-audit-store/indexes/audit_results_index.latest.csv
 
@@ -299,7 +299,7 @@ Claude Sonnet 4.6.
 
 **Changes made.**
 
-1. `helm_audit/model_registry.py` (new): `LocalModelEntry` dataclass + `LOCAL_MODEL_REGISTRY` list populated from `PRESET_CONFIGS` and `KNOWN_HF_OVERRIDES`. Fields: `model`, `expected_local_served`, `replaces_helm_deployment` (null = off-story extension, non-null = public HELM model being reproduced), `source`, `notes`. Single `local_model_registry_by_name()` lookup helper.
+1. `eval_audit/model_registry.py` (new): `LocalModelEntry` dataclass + `LOCAL_MODEL_REGISTRY` list populated from `PRESET_CONFIGS` and `KNOWN_HF_OVERRIDES`. Fields: `model`, `expected_local_served`, `replaces_helm_deployment` (null = off-story extension, non-null = public HELM model being reproduced), `source`, `notes`. Single `local_model_registry_by_name()` lookup helper.
 
 2. Renamed `no-hf-deployment` → `no-local-helm-deployment` across all six files: `index_historic_helm_runs.py`, `filter_analysis.py`, `build_reports_summary.py`, both test files. Updated the detail message to say "no default local HELM deployment path is known to the Stage 1 automatic filter."
 
@@ -309,7 +309,7 @@ Claude Sonnet 4.6.
 
 5. New artifact `filter_local_serving_summary.latest.txt` emitted by `emit_filter_report_artifacts` at both `static/` and filter report root. Aliased alongside `filter_cardinality_summary.latest.txt`.
 
-**Design choice: no YAML config file.** Registry lives in Python (`model_registry.py`) rather than YAML so it gets code review and imports cleanly without a loader. The user explicitly wanted it in `helm_audit`.
+**Design choice: no YAML config file.** Registry lives in Python (`model_registry.py`) rather than YAML so it gets code review and imports cleanly without a loader. The user explicitly wanted it in `eval_audit`.
 
 **What was NOT done (intentional scope constraints):**
 - No runtime verification of vllm_service profile switching — noted as TODO in `model_registry.py` docstring.
@@ -334,8 +334,8 @@ Key design decisions:
 - Structural junk detection: known names (`groups`, `confs`, `logs`, `__pycache__`) → `structural_non_run`; dirs with `:` → `benchmark_run`; others → `unknown`.
 - `public_track` = relative path from root to `benchmark_output` parent (`.` → `'main'`).
 
-**Part B — `helm_audit/workflows/analyze_official_index.py`:**
-Standalone tool consuming a single official index CSV. Produces 8 artifacts: summary txt/json, per-track/version/model/benchmark CSVs, duplicates report, version-drift report. Does NOT rescan filesystem. Registered as `helm-audit-analyze-official-index` entrypoint.
+**Part B — `eval_audit/workflows/analyze_official_index.py`:**
+Standalone tool consuming a single official index CSV. Produces 8 artifacts: summary txt/json, per-track/version/model/benchmark CSVs, duplicates report, version-drift report. Does NOT rescan filesystem. Registered as `eval-audit-analyze-official-index` entrypoint.
 
 **Path helpers added to `paths.py`:** `official_public_index_dpath()` → `indexes/`, `official_public_analysis_dpath()` → `analysis/official-public-index/`.
 
@@ -361,7 +361,7 @@ Single flag approach: `--render-pairwise-interactives` added to `core_metrics.ma
 
 `rebuild_core_report.py` gains two things:
 1. `_CANDIDATE_OF_INTEREST_KINDS: frozenset[str] = frozenset()` — the explicit, named selection point for auto-rendering heavy artifacts. Empty by default. Extend this set to designate specific comparison kinds for full auto-rendering.
-2. A `render_pairwise_interactives.latest.sh` script written next to the canonical reproduce script. The render script calls `helm_audit.reports.core_metrics` with `--render-pairwise-interactives` using the stable `components_manifest.latest.json` / `comparisons_manifest.latest.json` aliases (not the timestamped copies) so it stays valid across multiple rebuilds.
+2. A `render_pairwise_interactives.latest.sh` script written next to the canonical reproduce script. The render script calls `eval_audit.reports.core_metrics` with `--render-pairwise-interactives` using the stable `components_manifest.latest.json` / `comparisons_manifest.latest.json` aliases (not the timestamped copies) so it stays valid across multiple rebuilds.
 
 The management summary now includes: `on_demand_pairwise_interactives: render_pairwise_interactives.sh (in this directory)`.
 
@@ -524,7 +524,7 @@ discovered=36046, succeeded=34683, failed=1126, skipped_too_large=237).
 
 **Stage-2 sanity.** First `pytest` invocation returned EMFILE on every
 collection. Diagnosed as virtiofs page-cache pressure (1M FD limit but
-opening any directory in `/home/joncrall/code/helm_audit/helm_audit` failed
+opening any directory in `/home/joncrall/code/helm_audit/eval_audit` failed
 in bare bash). Cleared with `echo 3 | sudo tee /proc/sys/vm/drop_caches`.
 Tests then green: 139/139 passed in 207s. Worth remembering for next
 session: virtiofs in this VM can wedge after long idle periods, drop_caches
@@ -536,7 +536,7 @@ with `--ensure-local-eee`. n_planned=1, n_built=1, n_skipped=0. The
 fixed the prior "File name too long" crash in `component_link_basename`,
 so the boolq smoke now succeeds where the Apr 22 run had n_built=0.
 
-**Threading EEE flags through analyze_many.** `helm_audit.cli.analyze_many`
+**Threading EEE flags through analyze_many.** `eval_audit.cli.analyze_many`
 didn't pipe `--official-eee-root`, `--local-eee-root`, `--ensure-local-eee`,
 or `--official-index-fpath` through to per-experiment analyses. Added all
 four; without `--ensure-local-eee` the broad pass would skip every local
@@ -560,11 +560,11 @@ local components with `run_path=None`; `_write_component_symlinks` then
 crashed on `Path(None).resolve()`.
 
 Fix in two places (both shipped in this session):
-1. `helm_audit/planning/core_report_planner.py:_prefilter_index_rows` —
+1. `eval_audit/planning/core_report_planner.py:_prefilter_index_rows` —
    drop local rows with no run_path before normalization. This is the
    correctness fix; these rows have no instances to compare so the packet
    should never have existed.
-2. `helm_audit/workflows/rebuild_core_report.py:_write_component_symlinks` —
+2. `eval_audit/workflows/rebuild_core_report.py:_write_component_symlinks` —
    defensively skip `component["run_path"] is None` entries instead of
    crashing. Belt-and-braces in case any slip past the prefilter.
 
@@ -645,9 +645,9 @@ prioritize. Once split, the planner fix is a 4-line change that turns
   free.
 
 **Files changed this session (uncommitted as of this entry):**
-- `helm_audit/planning/core_report_planner.py` — no-run-path prefilter
-- `helm_audit/workflows/rebuild_core_report.py` — None-guard symlink writer
-- `helm_audit/cli/analyze_many.py` — thread EEE flags + official-index-fpath
+- `eval_audit/planning/core_report_planner.py` — no-run-path prefilter
+- `eval_audit/workflows/rebuild_core_report.py` — None-guard symlink writer
+- `eval_audit/cli/analyze_many.py` — thread EEE flags + official-index-fpath
 - `dev/poc/eee-audit/sweep.py` — `--show-failure-paths`, combinable read-only modes
 - `submodules/aiq-magnet/...download_helm_results.py` — drop classic quirk
 

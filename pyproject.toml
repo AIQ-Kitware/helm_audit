@@ -3,7 +3,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "helm-audit"
+name = "eval-audit"
 version = "0.0.1"
 description = "Python-first HELM audit and reproducibility workflow"
 readme = "README.md"
@@ -40,22 +40,22 @@ dependencies = [
 
 
 [project.scripts]
-helm-audit-check-env = "helm_audit.cli.check_env:main"
-helm-audit-make-manifest = "helm_audit.cli.manifests:main"
-helm-audit-run = "helm_audit.cli.run:main"
-helm-audit-index = "helm_audit.workflows.index_results:main"
-helm-audit-compare-pair = "helm_audit.reports.pair_report:main"
-helm-audit-compare-batch = "helm_audit.workflows.compare_batch:main"
-helm-audit-report-core = "helm_audit.reports.core_metrics:main"
-helm-audit-report-aggregate = "helm_audit.reports.aggregate:main"
-helm-audit-rebuild-core = "helm_audit.workflows.rebuild_core_report:main"
-helm-audit-analyze-experiment = "helm_audit.workflows.analyze_experiment:main"
-helm-audit-analyze-many = "helm_audit.cli.analyze_many:main"
-helm-audit-build-summary = "helm_audit.workflows.build_reports_summary:main"
-helm-audit-portfolio-status = "helm_audit.cli.portfolio_status:main"
-helm-audit-analyze-index-snapshot = "helm_audit.workflows.analyze_index_snapshot:main"
-helm-audit-prepare-eee = "helm_audit.workflows.prepare_eee_artifacts:main"
-helm-audit-build-virtual-experiment = "helm_audit.cli.build_virtual_experiment:main"
+eval-audit-check-env = "eval_audit.cli.check_env:main"
+eval-audit-make-manifest = "eval_audit.cli.manifests:main"
+eval-audit-run = "eval_audit.cli.run:main"
+eval-audit-index = "eval_audit.workflows.index_results:main"
+eval-audit-compare-pair = "eval_audit.reports.pair_report:main"
+eval-audit-compare-batch = "eval_audit.workflows.compare_batch:main"
+eval-audit-report-core = "eval_audit.reports.core_metrics:main"
+eval-audit-report-aggregate = "eval_audit.reports.aggregate:main"
+eval-audit-rebuild-core = "eval_audit.workflows.rebuild_core_report:main"
+eval-audit-analyze-experiment = "eval_audit.workflows.analyze_experiment:main"
+eval-audit-analyze-many = "eval_audit.cli.analyze_many:main"
+eval-audit-build-summary = "eval_audit.workflows.build_reports_summary:main"
+eval-audit-portfolio-status = "eval_audit.cli.portfolio_status:main"
+eval-audit-analyze-index-snapshot = "eval_audit.workflows.analyze_index_snapshot:main"
+eval-audit-prepare-eee = "eval_audit.workflows.prepare_eee_artifacts:main"
+eval-audit-build-virtual-experiment = "eval_audit.cli.build_virtual_experiment:main"
 
 [tool.setuptools.packages.find]
-include = ["helm_audit*"]
+include = ["eval_audit*"]

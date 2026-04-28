@@ -7,7 +7,7 @@ BUNDLE_ROOT="${QWEN2_72B_BUNDLE_ROOT:-$STORE_ROOT/local-bundles/qwen2_72b_vllm}"
 QWEN_VLLM_BASE_URL="${QWEN_VLLM_BASE_URL:-http://localhost:8000/v1}"
 
 cd "$ROOT"
-python -m helm_audit.integrations.vllm_service export-benchmark-bundle \
+python -m eval_audit.integrations.vllm_service export-benchmark-bundle \
   --preset qwen2_72b_vllm \
   --bundle-root "$BUNDLE_ROOT" \
   --base-url "$QWEN_VLLM_BASE_URL"

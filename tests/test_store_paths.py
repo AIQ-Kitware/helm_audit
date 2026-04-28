@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from helm_audit.infra.api import default_index_root, default_manifest_root
-from helm_audit.infra.env import env_defaults
-from helm_audit.infra.paths import run_details_fpath, run_specs_fpath
+from eval_audit.infra.api import default_index_root, default_manifest_root
+from eval_audit.infra.env import env_defaults
+from eval_audit.infra.paths import run_details_fpath, run_specs_fpath
 
 
 def test_store_root_drives_generated_paths(monkeypatch, tmp_path: Path):

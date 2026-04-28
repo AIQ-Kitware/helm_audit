@@ -1,11 +1,11 @@
-# helm_audit
+# eval_audit
 
-`helm_audit` is a Python-first repository for reproducing, auditing, and
+`eval_audit` is a Python-first repository for reproducing, auditing, and
 reporting on public HELM runs under a local open-weight recipe.
 
 This repo now treats the experiment as its own product:
 
-- `helm_audit/` is the package
+- `eval_audit/` is the package
 - `reproduce/` is the human-readable runbook layer
 - `configs/` holds checked-in manifests and overrides only
 - `/data/crfm-helm-audit-store` (or `$AUDIT_STORE_ROOT`) holds generated manifests, selection files, inventories, and indexes
@@ -13,20 +13,20 @@ This repo now treats the experiment as its own product:
 
 ## Layout
 
-- `helm_audit/cli/`
+- `eval_audit/cli/`
   Thin CLI wrappers and entrypoints.
-- `helm_audit/workflows/`
+- `eval_audit/workflows/`
   End-to-end sequencing for indexing, comparison, and experiment analysis.
-- `helm_audit/integrations/`
+- `eval_audit/integrations/`
   External-tool bridges. `kwdagger` friction lives in
-  [`helm_audit/integrations/kwdagger_bridge.py`](helm_audit/integrations/kwdagger_bridge.py).
-- `helm_audit/helm/`
+  [`eval_audit/integrations/kwdagger_bridge.py`](eval_audit/integrations/kwdagger_bridge.py).
+- `eval_audit/helm/`
   Local HELM output readers, analysis, metric categorization, and diff logic.
-- `helm_audit/reports/`
+- `eval_audit/reports/`
   Pair reports, core metric reports, aggregate summaries, and paper label helpers.
-  The `helm-audit-compare-pair`, `helm-audit-report-core`, and
-  `helm-audit-report-aggregate` entrypoints resolve directly to modules here.
-- `helm_audit/utils/`
+  The `eval-audit-compare-pair`, `eval-audit-report-core`, and
+  `eval-audit-report-aggregate` entrypoints resolve directly to modules here.
+- `eval_audit/utils/`
   Generic Sankey helpers and shared utilities.
 - `reproduce/`
   Numbered scenario runbooks for smoke runs, apples-to-apples controls, historic
@@ -36,20 +36,20 @@ This repo now treats the experiment as its own product:
 
 The stable CLI surface is intentionally small:
 
-- `helm-audit-check-env`
-- `helm-audit-make-manifest`
-- `helm-audit-run`
-- `helm-audit-index`
-- `helm-audit-compare-pair`
-- `helm-audit-compare-batch`
-- `helm-audit-report-core`
-- `helm-audit-report-aggregate`
-- `helm-audit-rebuild-core`
-- `helm-audit-analyze-experiment`
+- `eval-audit-check-env`
+- `eval-audit-make-manifest`
+- `eval-audit-run`
+- `eval-audit-index`
+- `eval-audit-compare-pair`
+- `eval-audit-compare-batch`
+- `eval-audit-report-core`
+- `eval-audit-report-aggregate`
+- `eval-audit-rebuild-core`
+- `eval-audit-analyze-experiment`
 
 Additional report-oriented entrypoints are available in `pyproject.toml`.
 
-`helm-audit-run` is inspect-first by default. Use `--run=0` to preview the
+`eval-audit-run` is inspect-first by default. Use `--run=0` to preview the
 generated `kwdagger` invocation and `--run=1` to execute it intentionally.
 
 ## Reproduce
@@ -66,7 +66,7 @@ relying on repo-specific shell glue.
 If you want Plotly JPG/PNG sidecars on a headless Ubuntu 24.04 VM, the repo now
 documents and scripts the extra Chrome dependency. Use
 [`reproduce/setup/10_install_plotly_chrome_ubuntu2404.sh`](reproduce/setup/10_install_plotly_chrome_ubuntu2404.sh),
-then verify with `PYTHONPATH=. python -m helm_audit.cli.check_env --plotly-static-only`.
+then verify with `PYTHONPATH=. python -m eval_audit.cli.check_env --plotly-static-only`.
 
 Generated reports are converging on a family layout under [`reports/`](reports):
 - `reports/filtering/`
@@ -83,11 +83,11 @@ Generated machine-readable workflow state now defaults to:
 
 - `kwdagger` remains the real external scheduling boundary.
 - Runtime execution controls for `kwdagger` are handled in
-  [`helm_audit/integrations/kwdagger_bridge.py`](helm_audit/integrations/kwdagger_bridge.py)
+  [`eval_audit/integrations/kwdagger_bridge.py`](eval_audit/integrations/kwdagger_bridge.py)
   via a small explicit runtime object.
-- HELM diff / analysis ownership now lives in `helm_audit/helm/`.
+- HELM diff / analysis ownership now lives in `eval_audit/helm/`.
 - Generic Sankey machinery lives in:
-  - [`helm_audit/utils/sankey.py`](helm_audit/utils/sankey.py)
-  - [`helm_audit/utils/sankey_builder.py`](helm_audit/utils/sankey_builder.py)
+  - [`eval_audit/utils/sankey.py`](eval_audit/utils/sankey.py)
+  - [`eval_audit/utils/sankey_builder.py`](eval_audit/utils/sankey_builder.py)
 - One demo-only MAGNeT seam remains in
-  [`helm_audit/helm/outputs.py`](helm_audit/helm/outputs.py).
+  [`eval_audit/helm/outputs.py`](eval_audit/helm/outputs.py).

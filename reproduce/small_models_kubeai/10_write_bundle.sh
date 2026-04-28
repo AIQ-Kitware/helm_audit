@@ -7,7 +7,7 @@ BUNDLE_ROOT="${SMALL_MODELS_KUBEAI_BUNDLE_ROOT:-$STORE_ROOT/local-bundles/small_
 KUBEAI_BASE_URL="${KUBEAI_BASE_URL:-http://127.0.0.1:8000/openai/v1}"
 
 cd "$ROOT"
-python3 -m helm_audit.integrations.vllm_service export-benchmark-bundle \
+python3 -m eval_audit.integrations.vllm_service export-benchmark-bundle \
   --preset small_models_kubeai_overnight \
   --bundle-root "$BUNDLE_ROOT" \
   --base-url "$KUBEAI_BASE_URL"

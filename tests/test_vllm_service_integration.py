@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from helm_audit.integrations.vllm_service.adapter import (
+from eval_audit.integrations.vllm_service.adapter import (
     export_benchmark_bundle,
     load_profile_contract,
 )

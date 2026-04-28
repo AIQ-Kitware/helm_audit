@@ -13,7 +13,7 @@ if [[ -f "$ENV_FPATH" ]]; then
 fi
 
 cd "$ROOT"
-python -m helm_audit.integrations.vllm_service export-benchmark-bundle \
+python -m eval_audit.integrations.vllm_service export-benchmark-bundle \
   --preset gpt_oss_20b_vllm \
   --bundle-root "$BUNDLE_ROOT" \
   --base-url "${LITELLM_BASE_URL}/v1"

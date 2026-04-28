@@ -6,13 +6,13 @@ RESULTS_ROOT="${AUDIT_RESULTS_ROOT:-/data/crfm-helm-audit}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-audit-historic-grid-gpt-oss-20b-vllm}"
 cd "$ROOT"
 
-python -m helm_audit.workflows.index_results \
+python -m eval_audit.workflows.index_results \
   --results-root "$RESULTS_ROOT" \
   --report-dpath "$STORE_ROOT/indexes"
 
-python -m helm_audit.workflows.analyze_experiment \
+python -m eval_audit.workflows.analyze_experiment \
   --experiment-name "$EXPERIMENT_NAME" \
   --index-dpath "$STORE_ROOT/indexes"
 
-python -m helm_audit.workflows.build_reports_summary \
+python -m eval_audit.workflows.build_reports_summary \
   --experiment-name "$EXPERIMENT_NAME"

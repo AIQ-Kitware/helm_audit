@@ -1,4 +1,4 @@
-# helm_audit Architecture Design
+# eval_audit Architecture Design
 
 ## Table of contents
 
@@ -26,7 +26,7 @@
 
 ## Purpose
 
-`helm_audit` exists to answer one question:
+`eval_audit` exists to answer one question:
 
 **When we try to reproduce public HELM benchmark results locally, what matches, what does not match, and why?**
 
@@ -428,7 +428,7 @@ The system needs both a canonical analysis area and a presentation/browsing area
 
 Treat experiment analysis roots as the canonical derived analysis area, and treat a folder named `reports/` as the publication and browsing surface.
 
-The folder is *named* `reports/` consistently, but its **location is parameterized** via `helm_audit.infra.paths.publication_root()`. The default points at `<audit_store>/reports/` so derived outputs do not pollute the checked-in repository tree. The `HELM_AUDIT_PUBLICATION_ROOT` environment variable, and per-CLI flags such as `analyze_experiment --publication-root` or `build_reports_summary --summary-root`, override the default. Code must obtain the publication root via the helper, not by hard-coding `<repo>/reports/`.
+The folder is *named* `reports/` consistently, but its **location is parameterized** via `eval_audit.infra.paths.publication_root()`. The default points at `<audit_store>/reports/` so derived outputs do not pollute the checked-in repository tree. The `HELM_AUDIT_PUBLICATION_ROOT` environment variable, and per-CLI flags such as `analyze_experiment --publication-root` or `build_reports_summary --summary-root`, override the default. Code must obtain the publication root via the helper, not by hard-coding `<repo>/reports/`.
 
 ### Consequences
 

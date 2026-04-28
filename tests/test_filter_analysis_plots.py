@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from helm_audit.reports.filter_analysis import (
+from eval_audit.reports.filter_analysis import (
     _make_selected_excluded_rows,
     _title_with_n,
     make_open_access_exclusion_reason_table,
@@ -11,9 +11,9 @@ from helm_audit.reports.filter_analysis import (
     make_reason_breakout_table,
     make_reason_combo_table,
 )
-from helm_audit.infra.fs_publish import history_publish_root
-from helm_audit.utils import sankey_builder
-from helm_audit.utils.sankey import emit_sankey_artifacts
+from eval_audit.infra.fs_publish import history_publish_root
+from eval_audit.utils import sankey_builder
+from eval_audit.utils.sankey import emit_sankey_artifacts
 
 
 def test_make_selected_excluded_rows_groups_by_facet():
@@ -199,7 +199,7 @@ def test_emit_sankey_artifacts_writes_png_and_latest_alias(tmp_path: Path, monke
             Path(fpath).write_bytes(b"PNG")
 
     monkeypatch.setattr(sankey_builder.SankeyDiGraph, "to_plotly", lambda self, title="Sankey": FakeFigure())
-    monkeypatch.setattr("helm_audit.utils.sankey.configure_plotly_chrome", lambda: None)
+    monkeypatch.setattr("eval_audit.utils.sankey.configure_plotly_chrome", lambda: None)
 
     root = sankey_builder.Root(label="demo")
     root.group(by="kind", name="Kind")

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from helm_audit.workflows import index_results
+from eval_audit.workflows import index_results
 
 
 def _write_json(fpath: Path, data: dict) -> None:
@@ -266,7 +266,7 @@ def test_row_run_spec_hash_is_stable_and_present(tmp_path, monkeypatch):
     assert row_a['run_spec_hash'] == row_b['run_spec_hash']
 
     # Shared helper must produce the same hash from the raw run_spec.json.
-    from helm_audit.indexing.schema import compute_run_spec_hash
+    from eval_audit.indexing.schema import compute_run_spec_hash
     shared = compute_run_spec_hash(run_dir / 'run_spec.json')
     assert row_a['run_spec_hash'] == shared
 
@@ -336,7 +336,7 @@ def test_combined_component_index_is_normalized_union(tmp_path, monkeypatch):
     assert set(df['source_kind']) == {'official', 'local'}
     assert len(df) == 2
     # The union must carry the shared component columns and nothing grouped.
-    from helm_audit.indexing.schema import COMMON_COMPONENT_COLUMNS
+    from eval_audit.indexing.schema import COMMON_COMPONENT_COLUMNS
     for col in COMMON_COMPONENT_COLUMNS:
         assert col in df.columns, f'Missing common column: {col}'
 

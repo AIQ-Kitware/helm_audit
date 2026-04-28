@@ -2,4 +2,4 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
-helm-audit-check-env --require-precomputed-root
+eval-audit-check-env --require-precomputed-root

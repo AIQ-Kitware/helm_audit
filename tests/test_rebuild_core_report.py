@@ -4,13 +4,13 @@ import csv
 import json
 from pathlib import Path
 
-from helm_audit.planning.core_report_planner import (
+from eval_audit.planning.core_report_planner import (
     build_planning_artifact,
     _comparability_warning_lines,
 )
-from helm_audit.reports.core_packet import component_link_basename, comparison_sample_latest_name
-from helm_audit.workflows import rebuild_core_report
-from helm_audit.workflows.rebuild_core_report import (
+from eval_audit.reports.core_packet import component_link_basename, comparison_sample_latest_name
+from eval_audit.workflows import rebuild_core_report
+from eval_audit.workflows.rebuild_core_report import (
     _should_auto_render_heavy_pairwise_plots,
 )
 
@@ -210,7 +210,7 @@ def test_single_run_core_report_uses_planner_packet_and_cleans_repeat_artifacts(
     assert render_script.exists(), "render script must be written"
     script_text = render_script.read_text()
     assert "--render-heavy-pairwise-plots" in script_text
-    assert "helm_audit.reports.core_metrics" in script_text
+    assert "eval_audit.reports.core_metrics" in script_text
     assert "components_manifest.latest.json" in script_text
     assert "comparisons_manifest.latest.json" in script_text
     assert "--plots-only" not in script_text, "render script must NOT skip non-plot writes"
@@ -275,7 +275,7 @@ def test_multi_run_core_report_renders_only_declared_planner_comparisons(tmp_pat
     assert render_script.exists(), "render script must be written"
     script_text = render_script.read_text()
     assert "--render-heavy-pairwise-plots" in script_text
-    assert "helm_audit.reports.core_metrics" in script_text
+    assert "eval_audit.reports.core_metrics" in script_text
     assert "components_manifest.latest.json" in script_text
     assert "comparisons_manifest.latest.json" in script_text
     assert "--plots-only" not in script_text

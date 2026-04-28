@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from helm_audit.cli.index_historic_helm_runs import OFFICIAL_INDEX_COLUMNS
-from helm_audit.workflows.analyze_index_snapshot import analyze_index_snapshot
+from eval_audit.cli.index_historic_helm_runs import OFFICIAL_INDEX_COLUMNS
+from eval_audit.workflows.analyze_index_snapshot import analyze_index_snapshot
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # reproduce/
 
-This directory is the operator runbook layer for `helm_audit`.
+This directory is the operator runbook layer for `eval_audit`.
 
 Most scenario folders are short numbered sequences (the original convention):
 
@@ -26,9 +26,9 @@ Current scenarios:
 - `pythia_mmlu_stress/`: virtual-experiment slice (Pythia × MMLU) over already-executed audit data; analysis + publication only, no execution step yet
 
 The shell files here are intentionally thin. They are runbook steps, not the
-implementation. Each one should delegate to a `helm_audit` Python CLI such as
-`helm-audit-run`, `helm-audit-index`, or `helm-audit-analyze-experiment`.
-For `helm-audit-run`, preview is the default. Use `--run=1` in runbooks when
+implementation. Each one should delegate to a `eval_audit` Python CLI such as
+`eval-audit-run`, `eval-audit-index`, or `eval-audit-analyze-experiment`.
+For `eval-audit-run`, preview is the default. Use `--run=1` in runbooks when
 you actually want to execute the scheduled `kwdagger` job.
 
 Generated manifests referenced by these runbooks now default to
