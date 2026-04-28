@@ -89,6 +89,84 @@ def _logical_run_key(row: dict[str, Any]) -> str:
     return str(row.get("logical_run_key") or row.get("run_entry") or row.get("run_name") or "").strip()
 
 
+# HELM's run_spec.json schema evolved across releases. These adapter_spec
+# fields are present in newer HELM run_spec.json output but missing on
+# older runs (= public HELM v0.2.x / v0.3.0 era), where the implicit
+# default was the value to the right. When we compute a *canonical*
+# recipe hash for cross-version comparison, missing fields are treated
+# as their default values so the hash matches the newer-version run_spec
+# that explicitly carries them.
+_RUN_SPEC_SCHEMA_DEFAULTS = {
+    "adapter_spec": {
+        "chain_of_thought_prefix": "",
+        "chain_of_thought_suffix": "\n",
+        "global_suffix": "",
+        "num_trials": 1,
+    },
+}
+
+# Top-level run_spec keys that are routinely schema-evolved between
+# HELM versions and whose content does not affect model output for a
+# given prompt. Excluding them from the canonical hash collapses
+# version-only drift while preserving the recipe-meaningful axes.
+_RUN_SPEC_SCHEMA_VOLATILE_TOPLEVEL = {
+    "metric_specs",
+    "groups",
+    "annotators",
+}
+
+
+def _canonicalize_run_spec_for_recipe_hash(spec: dict[str, Any]) -> dict[str, Any]:
+    """Strip / default the HELM-version-evolved fields from a run_spec.
+
+    The result keeps the recipe-meaningful axes (scenario, prompts,
+    decoding parameters, max_train_instances) and drops the fields
+    whose presence/absence is driven by HELM version rather than recipe.
+    """
+    canon: dict[str, Any] = {}
+    for k, v in spec.items():
+        if k in _RUN_SPEC_SCHEMA_VOLATILE_TOPLEVEL:
+            continue
+        if k == "adapter_spec" and isinstance(v, dict):
+            canon_adapter = dict(v)
+            for sk, default in _RUN_SPEC_SCHEMA_DEFAULTS["adapter_spec"].items():
+                # Inject the default if missing; if present, honour the
+                # explicit value. After this both sides have the field,
+                # and a missing-vs-default-value pair hashes the same.
+                canon_adapter.setdefault(sk, default)
+            # ``model_deployment`` is partly schema-evolution and partly
+            # recipe: older HELM didn't record it (defaulted to "huggingface
+            # API"), newer HELM does. We drop it from the canonical hash
+            # because the "missing → huggingface/<model>" pair is a
+            # version artifact, while the rare "litellm/X vs together/Y"
+            # pair is real serving-stack drift recorded separately by
+            # the comparison's diagnosis label. A separate analysis can
+            # tally meaningful model_deployment drift directly.
+            canon_adapter.pop("model_deployment", None)
+            canon["adapter_spec"] = canon_adapter
+        else:
+            canon[k] = v
+    return canon
+
+
+def _canonical_recipe_hash(spec: dict[str, Any]) -> str:
+    """Stable canonical-recipe hash. Used to count recipe-identical pairs
+    after collapsing HELM-version schema drift."""
+    canon = _canonicalize_run_spec_for_recipe_hash(spec)
+    return stable_hash36(canon)
+
+
+def _load_run_spec(path: Path | None) -> dict[str, Any] | None:
+    if path is None:
+        return None
+    try:
+        if not path.is_file():
+            return None
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
 def _short_alias_map(values: list[str], *, prefix: str = "v") -> dict[str, str]:
     """Build a deterministic short alias for each long label.
 
@@ -122,12 +200,20 @@ class TargetCoverageRow:
     suite_version: str
     public_track: str
     target_run_path: str | None
+    target_run_spec_hash: str | None
     # Coverage by logical key (version-collapsed):
     matched_logical: bool
     n_local_logical_matches: int
     # Coverage by (logical_key, suite_version):
     matched_versioned: bool
     n_local_versioned_matches: int
+    # Coverage by run_spec_hash (recipe-identical, the byte-for-byte
+    # reproduction). When 0, every "reproduction" carries documented
+    # adapter / max_eval_instances drift relative to the public recipe.
+    matched_recipe_identical: bool
+    n_local_recipe_identical_matches: int
+    matched_recipe_canonical: bool
+    n_local_recipe_canonical_matches: int
     # Downstream stage:
     has_completed_local: bool   # at least one logical-matched local row has a run_path on disk
     has_analyzed_local: bool    # at least one logical-matched local row has a packet/report
@@ -143,6 +229,8 @@ class CoverageReport:
     n_target: int
     n_reproduced_logical: int
     n_reproduced_versioned: int
+    n_reproduced_recipe_identical: int
+    n_reproduced_recipe_canonical: int
     n_completed: int
     n_analyzed: int
     by_dim: dict[str, list[dict[str, Any]]]
@@ -201,9 +289,11 @@ def compute_coverage(
     breakdown_dims: tuple[str, ...] = ("model", "benchmark", "suite_version"),
 ) -> CoverageReport:
     """Join target + local rows and compute the Stage-B coverage funnel."""
-    # Bucket local rows by both join keys.
+    # Bucket local rows by every join key we support.
     local_by_logical: dict[str, list[dict[str, Any]]] = defaultdict(list)
     local_by_versioned: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    local_by_hash: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    local_by_canonical_hash: dict[str, list[dict[str, Any]]] = defaultdict(list)
     versioned_meaningful = False
     public_version_re = re.compile(r"^v\d+\.\d+(\.\d+)?$")
     for row in local_rows:
@@ -225,6 +315,26 @@ def compute_coverage(
         else:
             version = suite_version or suite or "unversioned"
         local_by_versioned[(key, version)].append(row)
+        # Hash-based join: byte-for-byte recipe identity (run_spec.json
+        # canonical hash). When this matches, the local and official
+        # rows describe the same recipe (same adapter_spec, same
+        # max_eval_instances, same scenario_spec). When it doesn't, even
+        # a logical_run_key match is apples-to-something.
+        h = (row.get("run_spec_hash") or "").strip()
+        if h:
+            local_by_hash[h].append(row)
+        # Canonical-recipe hash: read the run_spec.json on disk, strip
+        # HELM-version-evolved schema fields (chain_of_thought_*,
+        # global_suffix, num_trials, model_deployment, metric_specs,
+        # groups, annotators), then re-hash. This collapses pure
+        # version-of-HELM drift while preserving recipe-meaningful
+        # axes (scenario, prompts, decoding, max_train_instances).
+        local_run_path = (row.get("run_path") or row.get("run_dir") or "").strip()
+        if local_run_path:
+            spec = _load_run_spec(Path(local_run_path) / "run_spec.json")
+            if spec is not None:
+                ch = _canonical_recipe_hash(spec)
+                local_by_canonical_hash[ch].append(row)
 
     analyzed_keys, analyzed_examples = _analyzed_logical_keys(analysis_root)
 
@@ -233,8 +343,18 @@ def compute_coverage(
         logical = _logical_run_key(row)
         run_name = (row.get("run_name") or logical or "").strip()
         version = (row.get("suite_version") or "unversioned").strip() or "unversioned"
+        target_hash = (row.get("run_spec_hash") or "").strip() or None
         local_logical_matches = local_by_logical.get(logical, [])
         local_versioned_matches = local_by_versioned.get((logical, version), [])
+        local_hash_matches = local_by_hash.get(target_hash, []) if target_hash else []
+        # Compute the official side's canonical-recipe hash on the fly.
+        target_run_path_str = (row.get("run_path") or row.get("public_run_dir") or "").strip()
+        canonical_hash = None
+        if target_run_path_str:
+            spec = _load_run_spec(Path(target_run_path_str) / "run_spec.json")
+            if spec is not None:
+                canonical_hash = _canonical_recipe_hash(spec)
+        local_canonical_matches = local_by_canonical_hash.get(canonical_hash, []) if canonical_hash else []
         completed = [
             (r.get("run_path") or r.get("run_dir") or "").strip()
             for r in local_logical_matches
@@ -259,10 +379,15 @@ def compute_coverage(
                 suite_version=version,
                 public_track=(row.get("public_track") or "main").strip() or "main",
                 target_run_path=(row.get("run_path") or row.get("public_run_dir") or None),
+                target_run_spec_hash=target_hash,
                 matched_logical=bool(local_logical_matches),
                 n_local_logical_matches=len(local_logical_matches),
                 matched_versioned=bool(local_versioned_matches),
                 n_local_versioned_matches=len(local_versioned_matches),
+                matched_recipe_identical=bool(local_hash_matches),
+                n_local_recipe_identical_matches=len(local_hash_matches),
+                matched_recipe_canonical=bool(local_canonical_matches),
+                n_local_recipe_canonical_matches=len(local_canonical_matches),
                 has_completed_local=bool(completed),
                 has_analyzed_local=bool(analyzed_dirs),
                 example_local_run_paths=completed[:3],
@@ -276,6 +401,8 @@ def compute_coverage(
     n_target = len(annotated)
     n_reproduced_logical = sum(1 for r in annotated if r.matched_logical)
     n_reproduced_versioned = sum(1 for r in annotated if r.matched_versioned)
+    n_reproduced_recipe_identical = sum(1 for r in annotated if r.matched_recipe_identical)
+    n_reproduced_recipe_canonical = sum(1 for r in annotated if r.matched_recipe_canonical)
     n_completed = sum(1 for r in annotated if r.has_completed_local)
     n_analyzed = sum(1 for r in annotated if r.has_analyzed_local)
 
@@ -285,6 +412,8 @@ def compute_coverage(
             "target": 0,
             "reproduced_logical": 0,
             "reproduced_versioned": 0,
+            "reproduced_recipe_identical": 0,
+            "reproduced_recipe_canonical": 0,
             "completed": 0,
             "analyzed": 0,
         })
@@ -296,6 +425,10 @@ def compute_coverage(
                 grp["reproduced_logical"] += 1
             if r.matched_versioned:
                 grp["reproduced_versioned"] += 1
+            if r.matched_recipe_identical:
+                grp["reproduced_recipe_identical"] += 1
+            if r.matched_recipe_canonical:
+                grp["reproduced_recipe_canonical"] += 1
             if r.has_completed_local:
                 grp["completed"] += 1
             if r.has_analyzed_local:
@@ -314,6 +447,8 @@ def compute_coverage(
         n_target=n_target,
         n_reproduced_logical=n_reproduced_logical,
         n_reproduced_versioned=n_reproduced_versioned,
+        n_reproduced_recipe_identical=n_reproduced_recipe_identical,
+        n_reproduced_recipe_canonical=n_reproduced_recipe_canonical,
         n_completed=n_completed,
         n_analyzed=n_analyzed,
         by_dim=by_dim,
@@ -353,6 +488,10 @@ def _format_summary(coverage: CoverageReport) -> list[str]:
         f"  reproduced (logical, version-collapsed):     "
         f"{coverage.n_reproduced_logical:>5}  ({_pct(coverage.n_reproduced_logical, coverage.n_target)} of target)",
         versioned_line,
+        f"  reproduced (recipe-identical, run_spec_hash):  "
+        f"{coverage.n_reproduced_recipe_identical:>4}  ({_pct(coverage.n_reproduced_recipe_identical, coverage.n_target)} of target)",
+        f"  reproduced (recipe-canonical, schema-collapsed): "
+        f"{coverage.n_reproduced_recipe_canonical:>3}  ({_pct(coverage.n_reproduced_recipe_canonical, coverage.n_target)} of target)",
         f"  completed   (reproduced AND run_path exists): "
         f"{coverage.n_completed:>5}  ({_pct(coverage.n_completed, coverage.n_reproduced_logical)} of reproduced; "
         f"{_pct(coverage.n_completed, coverage.n_target)} of target)",
@@ -363,21 +502,34 @@ def _format_summary(coverage: CoverageReport) -> list[str]:
         "Note on join keys:",
         "  - logical (version-collapsed) is the primary narrative — \"we have a repro for this run-spec\"",
         "  - versioned makes a target row count as reproduced only if a local row matches its specific public-track version.",
+        "  - recipe-identical (strictest) requires byte-for-byte run_spec.json match. A zero here",
+        "    is common because HELM's run_spec.json schema evolved (newer HELM populates fields like",
+        "    chain_of_thought_prefix that older HELM left implicit), so byte-identical hashes don't",
+        "    survive across releases even when the underlying recipe is the same.",
+        "  - recipe-canonical collapses pure HELM-version schema drift (defaults missing fields,",
+        "    drops metric_specs / groups / annotators / model_deployment) and re-hashes. Still requires",
+        "    matching scenario_spec, adapter_spec.method, prompts (instructions / input_prefix /",
+        "    output_prefix), decoding parameters, and max_train_instances. The gap between logical",
+        "    and recipe-canonical reproductions is the actual recipe drift in this dataset.",
         "",
     ]
     for dim, rows in coverage.by_dim.items():
         if not rows:
             continue
         lines.append(f"By {dim}:")
-        header = f"  {dim:<32s} {'target':>7} {'reproduced':>11} {'completed':>10} {'analyzed':>9} {'%anal':>7}"
+        header = (
+            f"  {dim:<32s} {'target':>7} {'repro_log':>10} "
+            f"{'recipe_canon':>13} {'recipe_id':>10} {'analyzed':>9} {'%anal':>7}"
+        )
         lines.append(header)
         lines.append("  " + "-" * (len(header) - 2))
         for entry in rows:
             t = entry["target"]
             a = entry["analyzed"]
             lines.append(
-                f"  {entry['value']:<32s} {t:>7d} {entry['reproduced_logical']:>11d} "
-                f"{entry['completed']:>10d} {a:>9d} {_pct(a, t):>7}"
+                f"  {entry['value']:<32s} {t:>7d} {entry['reproduced_logical']:>10d} "
+                f"{entry['reproduced_recipe_canonical']:>13d} "
+                f"{entry['reproduced_recipe_identical']:>10d} {a:>9d} {_pct(a, t):>7}"
             )
         lines.append("")
     if coverage.missing:
@@ -401,6 +553,9 @@ def _coverage_payload(coverage: CoverageReport) -> dict[str, Any]:
             "n_target": coverage.n_target,
             "n_reproduced_logical": coverage.n_reproduced_logical,
             "n_reproduced_versioned": coverage.n_reproduced_versioned,
+            "n_reproduced_recipe_identical": coverage.n_reproduced_recipe_identical,
+            "n_reproduced_recipe_canonical": coverage.n_reproduced_recipe_canonical,
+            "versioned_join_meaningful": coverage.versioned_join_meaningful,
             "n_completed": coverage.n_completed,
             "n_analyzed": coverage.n_analyzed,
             "by_dim": coverage.by_dim,
