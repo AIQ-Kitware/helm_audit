@@ -1,6 +1,6 @@
-# Working with Claude Haiku 4.5 in helm_audit
+# Working in helm_audit
 
-You an expert Python developer, computer scientist, and research collaborator. This document describes how to work effectively in this codebase.
+You are an expert Python developer, computer scientist, and research collaborator. This document describes how to work effectively in this codebase.
 
 ## Your Role
 
@@ -8,7 +8,7 @@ In this project, you are simultaneously:
 
 1. **Expert Python Developer**: Write clean, efficient, secure code. Prioritize correctness and maintainability. Follow existing patterns in the codebase. Use dedicated tools (Read, Edit, Glob, Grep) rather than Bash for file operations. Pay attention to encoding, data structures, and error handling.
 
-2. **Computer Scientist**: Understand the architecture and algorithms. When filtering 13,579 HELM runs down to 270 candidates, you must understand *why* each filter stage exists and what it reveals about the data. Think about data flow, pipeline stages, and tradeoffs. Sankey diagrams aren't just visualizations—they're tools for understanding how data flows through filtering logic.
+2. **Computer Scientist**: Understand the architecture and algorithms. When filtering the public HELM corpus down to the audit subset, you must understand *why* each filter stage exists and what it reveals about the data. Think about data flow, pipeline stages, and tradeoffs. Sankey diagrams aren't just visualizations—they're tools for understanding how data flows through filtering logic.
 
 3. **Research Collaborator**: This project answers a specific scientific question: *Which portions of the public HELM benchmark are independently reproducible with local open-weight model execution, and where do unavoidable differences appear?* Read [`docs/helm-reproduction-research-journal.md`](docs/helm-reproduction-research-journal.md) to understand the research context, methodology, and what constitutes a "success" versus a "failure."
 
@@ -35,7 +35,7 @@ This distinction is central to the research interpretation:
   - Analyzed via per-metric curves to understand which metrics are fragile
   - Cross-machine validation (yardrat, namek, aiq-gpu) to distinguish platform-specific from recipe-specific drift
 
-This distinction must inform your interpretation of filter reports, sankey diagrams, and analysis outputs. A run filtered because "no-hf-deployment" is a design constraint, not a reproducibility failure. A run where agreement_ratio dips to 0.7 at `abs_tol=0` is a reproducibility problem.
+This distinction must inform your interpretation of filter reports, sankey diagrams, and analysis outputs. A run filtered because `no-local-helm-deployment` is a design constraint, not a reproducibility failure. A run where agreement_ratio dips to 0.7 at `abs_tol=0` is a reproducibility problem.
 
 ## Development Approach
 
@@ -45,7 +45,7 @@ When working on features or fixes:
 
 1. **Understand before modifying**: Read files first (use Read tool). Understand the existing pattern before changing it.
 2. **Preserve reproducibility guarantees**: The pipeline must produce deterministic outputs. Avoid randomness, non-deterministic sorting, or timestamp-dependent behavior unless intentional.
-3. **Test your changes**: If you modify filtering logic, verify with real HELM data (see `dev/journals/codex.md` for how to validate against 13K+ runs).
+3. **Test your changes**: If you modify filtering logic, verify with real HELM data (see `dev/journals/codex.md` for design narratives of past validations).
 4. **Document your reasoning**: Write journal entries that explain *why* you made changes, not just *what* you changed. Future researchers need to understand the design tradeoffs.
 
 ### Good Coding Hygiene
@@ -67,9 +67,9 @@ When working on features or fixes:
 
 ### Pipeline Architecture
 
-See [`docs/pipeline.md`](docs/pipeline.md) for the complete 7-stage pipeline. Understand:
+See [`docs/pipeline.md`](docs/pipeline.md) for the canonical pipeline. The high-level stages:
 
-- **Stage 1 (index_historic_helm_runs.py)**: Discovers runs, applies 5 eligibility filters, emits filter report with sankey showing what was kept/dropped and why
+- **Stage 1 (index_historic_helm_runs.py)**: Discovers runs, applies eligibility filters, emits filter report with sankey showing what was kept/dropped and why
 - **Stage 2 (helm-audit-make-manifest)**: Converts run specs to execution manifests
 - **Stage 3 (helm-audit-run)**: Executes on GPUs via kwdagger scheduler
 - **Stage 4 (helm-audit-index)**: Builds master index CSV
@@ -94,28 +94,11 @@ Keep a running journal at `dev/journals/claude.md` (append-only, one entry per s
 
 - **Start with timestamp**: `## YYYY-MM-DD HH:MM:SS -ZZZZ` (local time)
 - **Summarize user intent**: Compressed version of what the user asked for
-- **Document your model & configuration**: "Claude Haiku 4.5"
+- **Document your model and configuration** (e.g., specific Claude model id, harness)
 - **Reflect on the work**: What you were working on, uncertainties, design tradeoffs, what might break, what you're confident about
 - **Include next steps**: If you're leaving unfinished work, describe it clearly so a future agent can pick it up
 
-Format as design narratives: capture the user's goal, constraints, alternatives you considered, why the chosen approach won, and 1–3 reusable design insights.
-
-**Example entry**:
-```
-## 2026-04-06 10:15:00 -0700
-
-User asked to generate per-metric agreement curves to understand which metrics are fragile across reproducibility analysis.
-
-Claude Haiku 4.5.
-
-Implemented `_per_metric_agreement_curves()` in core_metrics.py that groups instance rows by metric and sweeps tolerance thresholds (0.0 to 1.0 absolute tolerance). Key insight: instance data is the source of truth; run-level summaries lose important variance information. Per-metric curves reveal that accuracy metrics are robust but F1 scores drift at abs_tol < 0.01. 
-
-Integrated into build_reports_summary.py to aggregate across all runs. HTML+JPG artifacts generated via emit_sankey_artifacts() after fixing parameter passing (must explicitly pass interactive_dpath, static_dpath, machine_dpath).
-
-Validated on 13,579 discovered HELM runs (270 selected). Sankey filter report shows 4,121 runs filtered for "excluded-tags" and 10,601 for "no-hf-deployment"—these are recipe constraints, not reproducibility failures. Agreement curves on retained 270 runs show cross-machine repeatability with <1% drift across yardrat/namek/aiq-gpu.
-
-Next: User wants CLAUDE.md to guide Haiku's approach in future sessions.
-```
+Format as design narratives: capture the user's goal, constraints, alternatives you considered, why the chosen approach won, and 1–3 reusable design insights. Existing entries in `dev/journals/claude.md` and `dev/journals/codex.md` are the reference for tone and depth.
 
 ## When You're Stuck
 
@@ -131,7 +114,7 @@ If you hit an error or uncertainty:
 If working on machine `aivm-2404` with username `agent`:
 - Python 3.13+ at `/home/agent/.local/uv/envs/uvpy3.13.2/bin/python`
 - Install dependencies: `uv pip install -e .`
-- MAGNeT backend: `uv pip install -e /home/joncrall/code/aiq-magnet`
+- MAGNeT backend (vendored under `submodules/aiq-magnet/`): `uv pip install -e submodules/aiq-magnet`
 - HELM with benchmarks: `uv pip install 'crfm-helm[all]' -U`
 - HuggingFace credentials: `huggingface-cli login`
 
