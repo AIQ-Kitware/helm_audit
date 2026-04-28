@@ -576,8 +576,14 @@ def _build_attempted_to_repro_rows(
     return sankey_rows
 
 
-def _build_filter_to_attempt_root() -> tuple[sankey_builder.Root, list[str], dict[str, list[str]]]:
-    root = sankey_builder.Root(label="All discovered historic HELM runs")
+def _build_universe_to_scope_root() -> tuple[sankey_builder.Root, list[str], dict[str, list[str]]]:
+    """Stage A: Universe -> Scope.
+
+    Chains the per-source eligibility gates to the selection waist.
+    Terminal nodes are ``selected`` (= in scope) and the various
+    ``excluded: <reason>`` outcomes. Stage B picks up from ``selected``.
+    """
+    root = sankey_builder.Root(label="Universe (all discovered runs)")
     structural = root.group(by="structural_gate", name="Structural Gate")
     structural["excluded: structurally incomplete"].connect(None)
     metadata = structural["kept: structurally complete"].group(by="metadata_gate", name="Metadata Gate")
@@ -594,8 +600,10 @@ def _build_filter_to_attempt_root() -> tuple[sankey_builder.Root, list[str], dic
         sankey_builder.Group(name="Selection", by="selection_gate")
     )
     assert isinstance(selection, sankey_builder.Group)
+    # Terminal: selected = in scope; excluded = filtered out at selection time.
+    # Stage B (sankey_b_scope_to_analyzed) picks up from the selected branch.
     selection[FILTER_SELECTION_EXCLUDED_LABEL].connect(None)
-    selection[FILTER_SELECTION_SELECTED_LABEL].group(by="attempt_stage", name="Attempt")
+    selection[FILTER_SELECTION_SELECTED_LABEL].connect(None)
 
     stage_names = [
         "Structural Gate",
@@ -605,7 +613,6 @@ def _build_filter_to_attempt_root() -> tuple[sankey_builder.Root, list[str], dic
         "Deployment Gate",
         "Size Gate",
         "Selection",
-        "Attempt",
     ]
     stage_defs = {
         "Structural Gate": [
@@ -636,24 +643,39 @@ def _build_filter_to_attempt_root() -> tuple[sankey_builder.Root, list[str], dic
             FILTER_SELECTION_SELECTED_LABEL,
             FILTER_SELECTION_EXCLUDED_LABEL,
         ],
-        "Attempt": [
-            ATTEMPTED_LABEL,
-            NOT_ATTEMPTED_LABEL,
-        ],
     }
     return root, stage_names, stage_defs
 
 
-def _build_attempted_to_repro_root() -> tuple[sankey_builder.Root, list[str], dict[str, list[str]]]:
-    root = sankey_builder.Root(label="Attempted reproduction runs")
-    execution = root.group(by="execution_stage", name="Execution")
+def _build_filter_to_attempt_root() -> tuple[sankey_builder.Root, list[str], dict[str, list[str]]]:
+    # Backwards-compatible alias for callers that still import the old name.
+    # The new ``_build_universe_to_scope_root`` is the canonical Stage-A.
+    return _build_universe_to_scope_root()
+
+
+def _build_scope_to_analyzed_root() -> tuple[sankey_builder.Root, list[str], dict[str, list[str]]]:
+    """Stage B: Scope -> Attempt -> Execution -> Analysis -> Reproduction.
+
+    Picks up from Stage A's ``selected`` branch. The first stage
+    (``Attempt``) splits ``in scope`` into ``attempted`` vs
+    ``selected but not attempted`` so the funnel surfaces the gap
+    between "we wanted to run this" and "we actually ran this".
+    """
+    root = sankey_builder.Root(label="Scope (in-scope after Stage-A filtering)")
+    attempt = root.group(by="attempt_stage", name="Attempt")
+    attempt[NOT_ATTEMPTED_LABEL].connect(None)
+    execution = attempt[ATTEMPTED_LABEL].group(by="execution_stage", name="Execution")
     execution["attempted_not_finished"].connect(None)
     execution["attempted_failed_or_incomplete"].connect(None)
     analysis = execution["completed_with_run_artifacts"].group(by="analysis_stage", name="Analysis")
     analysis["completed_not_yet_analyzed"].connect(None)
     analysis["analyzed"].group(by="reproduction_stage", name="Reproduction")
-    stage_names = ["Execution", "Analysis", "Reproduction"]
+    stage_names = ["Attempt", "Execution", "Analysis", "Reproduction"]
     stage_defs = {
+        "Attempt": [
+            ATTEMPTED_LABEL,
+            NOT_ATTEMPTED_LABEL,
+        ],
         "Execution": [
             "attempted_not_finished",
             "attempted_failed_or_incomplete",
@@ -672,6 +694,113 @@ def _build_attempted_to_repro_root() -> tuple[sankey_builder.Root, list[str], di
         ],
     }
     return root, stage_names, stage_defs
+
+
+def _build_attempted_to_repro_root() -> tuple[sankey_builder.Root, list[str], dict[str, list[str]]]:
+    # Deprecated alias for callers that still import the old name. The
+    # canonical Stage B builder is ``_build_scope_to_analyzed_root``.
+    return _build_scope_to_analyzed_root()
+
+
+def _build_scope_to_analyzed_rows(
+    filter_inventory_rows: list[dict[str, Any]],
+    scope_rows: list[dict[str, Any]],
+    repro_rows: list[dict[str, Any]],
+    *,
+    tol_key: str,
+) -> list[dict[str, str]]:
+    """Stage B rows: in-scope (selected) -> attempt -> execution -> analysis -> reproduction.
+
+    Source population is filter_inventory rows with selection_status=='selected'
+    (i.e. the rows that *are* in scope after Stage A). Each row is then
+    annotated with whether we attempted, completed, analyzed, and at what
+    agreement level it landed.
+    """
+    scope_rows_by_run_entry = _group_scope_rows_by_run_entry(scope_rows)
+    repro_rows_by_run_entry = _group_repro_rows_by_run_entry(repro_rows)
+    scope_rows_by_key: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in scope_rows:
+        key = (str(row.get("experiment_name") or ""), str(row.get("run_entry") or ""))
+        scope_rows_by_key[key].append(row)
+
+    sankey_rows: list[dict[str, str]] = []
+    for row in filter_inventory_rows:
+        if row.get("selection_status") != "selected":
+            continue
+        run_entry = str(row.get("run_spec_name") or "")
+        scope_rows_for_entry = scope_rows_by_run_entry.get(run_entry, [])
+        repro_rows_for_entry = repro_rows_by_run_entry.get(run_entry, [])
+        flow: dict[str, str] = {}
+        if not scope_rows_for_entry:
+            flow["attempt_stage"] = NOT_ATTEMPTED_LABEL
+            sankey_rows.append(flow)
+            continue
+        flow["attempt_stage"] = ATTEMPTED_LABEL
+        execution = _classify_execution_stage(scope_rows_for_entry)
+        flow["execution_stage"] = execution
+        if execution != "completed_with_run_artifacts":
+            sankey_rows.append(flow)
+            continue
+        repro_row = _choose_repro_row_for_run_entry(repro_rows_for_entry, scope_rows_by_key)
+        if repro_row is None:
+            flow["analysis_stage"] = "completed_not_yet_analyzed"
+            sankey_rows.append(flow)
+            continue
+        flow["analysis_stage"] = "analyzed"
+        flow["reproduction_stage"] = _bucket_agreement(repro_row.get(tol_key))
+        sankey_rows.append(flow)
+    return sankey_rows
+
+
+def _build_universe_to_scope_rows(
+    filter_inventory_rows: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Stage A rows: pure filter-gate flow ending at the Selection waist.
+
+    Same gate logic as the legacy ``_build_filter_to_attempt_rows`` but
+    the row dicts intentionally do *not* carry post-selection keys; the
+    Stage A sankey terminates at Selection.
+    """
+    rows: list[dict[str, str]] = []
+    for row in filter_inventory_rows:
+        reasons = {str(r) for r in (row.get("failure_reasons") or []) if str(r)}
+        flow: dict[str, str] = {}
+        if row.get("is_structurally_incomplete"):
+            flow["structural_gate"] = "excluded: structurally incomplete"
+            rows.append(flow)
+            continue
+        flow["structural_gate"] = "kept: structurally complete"
+        if "missing-model-metadata" in reasons:
+            flow["metadata_gate"] = "excluded: missing model metadata"
+            rows.append(flow)
+            continue
+        flow["metadata_gate"] = "kept: model metadata resolved"
+        if "not-open-access" in reasons:
+            flow["open_weight_gate"] = "excluded: not open weight"
+            rows.append(flow)
+            continue
+        flow["open_weight_gate"] = "kept: open weight"
+        if ("excluded-tags" in reasons) or ("not-text-like" in reasons):
+            flow["tag_gate"] = "excluded: unsuitable text/modality tags"
+            rows.append(flow)
+            continue
+        flow["tag_gate"] = "kept: suitable text tags"
+        if "no-local-helm-deployment" in reasons:
+            flow["deployment_gate"] = "excluded: no runnable local deployment"
+            rows.append(flow)
+            continue
+        flow["deployment_gate"] = "kept: runnable local deployment"
+        if "too-large" in reasons:
+            flow["size_gate"] = "excluded: exceeds size budget"
+            rows.append(flow)
+            continue
+        flow["size_gate"] = "kept: within size budget"
+        if row.get("selection_status") != "selected":
+            flow["selection_gate"] = FILTER_SELECTION_EXCLUDED_LABEL
+        else:
+            flow["selection_gate"] = FILTER_SELECTION_SELECTED_LABEL
+        rows.append(flow)
+    return rows
 
 
 def _build_end_to_end_funnel_root() -> tuple[sankey_builder.Root, list[str], dict[str, list[str]]]:
@@ -2988,9 +3117,8 @@ def _build_high_level_readme(
             "",
             "  explore_execution_coverage (read sankeys in order):",
             "    s01: sankey_s01_operational.latest.html — all attempted runs: benchmark → lifecycle → outcome",
-            "    s02: sankey_s02_filter_to_attempt.latest.html — eligible run-specs → actually attempted",
-            "    s03: sankey_s03_attempted_to_repro.latest.html — attempted runs → reproducibility (exact match)",
-            "    s04: sankey_s04_end_to_end.latest.html — full funnel: discovered → reproducible",
+            "    a:   sankey_a_universe_to_scope.latest.html — Stage A: Universe → Scope (filter funnel)",
+            "    b:   sankey_b_scope_to_analyzed.latest.html — Stage B: Scope → Attempt → Execution → Analysis → Reproduction (abs_tol=0)",
             "    s05: sankey_s05_reproducibility.latest.html — detailed group → repeatability → agreement → diagnosis",
             "    sup: sankey_repro_by_metric.latest.html — per-metric drift (run-level max |official - local|)",
             "    sup: filter_selection_by_model.latest.html — selected vs excluded run-specs by model",
@@ -3031,9 +3159,8 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
     level_002_static = level_002 / "static"
     for src_name in [
         "sankey_s01_operational.latest.html",
-        "sankey_s02_filter_to_attempt.latest.html",
-        "sankey_s03_attempted_to_repro.latest.html",
-        "sankey_s04_end_to_end.latest.html",
+        "sankey_a_universe_to_scope.latest.html",
+        "sankey_b_scope_to_analyzed.latest.html",
         "sankey_s05_reproducibility.latest.html",
         "sankey_repro_by_metric.latest.html",
         "benchmark_status.latest.html",
@@ -3051,12 +3178,10 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         "cardinality_summary.latest.txt",
         "sankey_s01_operational.latest.jpg",
         "sankey_s01_operational.latest.txt",
-        "sankey_s02_filter_to_attempt.latest.jpg",
-        "sankey_s02_filter_to_attempt.latest.txt",
-        "sankey_s03_attempted_to_repro.latest.jpg",
-        "sankey_s03_attempted_to_repro.latest.txt",
-        "sankey_s04_end_to_end.latest.jpg",
-        "sankey_s04_end_to_end.latest.txt",
+        "sankey_a_universe_to_scope.latest.jpg",
+        "sankey_a_universe_to_scope.latest.txt",
+        "sankey_b_scope_to_analyzed.latest.jpg",
+        "sankey_b_scope_to_analyzed.latest.txt",
         "sankey_s05_reproducibility.latest.jpg",
         "sankey_s05_reproducibility.latest.txt",
         "sankey_repro_by_metric.latest.jpg",
@@ -4099,58 +4224,44 @@ def _render_scope_summary(
     repro_tol010_rows = _build_repro_sankey_rows_at_tol(repro_rows, enriched_rows, "official_instance_agree_01")
     repro_tol050_rows = _build_repro_sankey_rows_at_tol(repro_rows, enriched_rows, "official_instance_agree_005")
     metric_sankey_rows = _expand_repro_rows_by_metric(repro_rows, enriched_rows)
-    filter_to_attempt_rows = _build_filter_to_attempt_rows(
-        filter_inventory_rows,
-        scope_rows,
-    )
-    attempted_to_repro_exact_rows = _build_attempted_to_repro_rows(
-        filter_inventory_rows,
-        scope_rows,
-        repro_rows,
-        tol_key="official_instance_agree_0",
-    )
-    attempted_to_repro_tol001_rows = _build_attempted_to_repro_rows(
-        filter_inventory_rows,
-        scope_rows,
-        repro_rows,
-        tol_key="official_instance_agree_001",
-    )
-    attempted_to_repro_tol010_rows = _build_attempted_to_repro_rows(
-        filter_inventory_rows,
-        scope_rows,
-        repro_rows,
-        tol_key="official_instance_agree_01",
-    )
-    attempted_to_repro_tol050_rows = _build_attempted_to_repro_rows(
-        filter_inventory_rows,
-        scope_rows,
-        repro_rows,
-        tol_key="official_instance_agree_005",
-    )
-    end_to_end_exact_rows = _build_end_to_end_funnel_rows(
+    # Stage A — Universe -> Scope: pure filter-funnel ending at the
+    # selection waist. No tolerance variant (Stage A is independent of
+    # reproduction agreement). Replaces the legacy ``filter_to_attempt``
+    # row-builder which also reached into post-selection territory.
+    universe_to_scope_rows = _build_universe_to_scope_rows(filter_inventory_rows)
+
+    # Stage B — Scope -> Attempt -> Execution -> Analysis -> Reproduction.
+    # Source population is filter_inventory rows with selection_status='selected'
+    # (the in-scope set). Tolerance variants drive the reproduction-stage
+    # waist at different abs_tol values.
+    scope_to_analyzed_exact_rows = _build_scope_to_analyzed_rows(
         filter_inventory_rows,
         scope_rows,
         repro_rows,
         tol_key="official_instance_agree_0",
     )
-    end_to_end_tol001_rows = _build_end_to_end_funnel_rows(
+    scope_to_analyzed_tol001_rows = _build_scope_to_analyzed_rows(
         filter_inventory_rows,
         scope_rows,
         repro_rows,
         tol_key="official_instance_agree_001",
     )
-    end_to_end_tol010_rows = _build_end_to_end_funnel_rows(
+    scope_to_analyzed_tol010_rows = _build_scope_to_analyzed_rows(
         filter_inventory_rows,
         scope_rows,
         repro_rows,
         tol_key="official_instance_agree_01",
     )
-    end_to_end_tol050_rows = _build_end_to_end_funnel_rows(
+    scope_to_analyzed_tol050_rows = _build_scope_to_analyzed_rows(
         filter_inventory_rows,
         scope_rows,
         repro_rows,
         tol_key="official_instance_agree_005",
     )
+    # The legacy combined Universe->Reproducible sankey (s04) is intentionally
+    # dropped: Stage A and Stage B together carry the same information without
+    # the eight-stage cramping that made the combined view unreadable. Anyone
+    # reading both sankeys side-by-side recovers the full chain.
 
     scope_title = _scope_label(scope_kind, scope_value)
     if include_visuals:
@@ -4287,135 +4398,97 @@ def _render_scope_summary(
             interactive_dpath=level_001_interactive,
             static_dpath=level_001_static,
         )
-        filter_to_attempt_root, filter_to_attempt_stage_names, filter_to_attempt_stage_defs = _build_filter_to_attempt_root()
-        filter_to_attempt_art = emit_sankey_artifacts(
-            rows=filter_to_attempt_rows,
+        # Stage A — Universe -> Scope (no tolerance variant; tolerance is a
+        # post-selection concept)
+        a_root, a_stage_names, a_stage_defs = _build_universe_to_scope_root()
+        empty_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
+        universe_to_scope_art = emit_sankey_artifacts(
+            rows=universe_to_scope_rows,
             report_dpath=level_001,
             stamp=generated_utc,
-            kind="s02_filter_to_attempt",
-            title=f"Filter Funnel to Attempted Runs: {scope_title}",
-            stage_defs=filter_to_attempt_stage_defs,
+            kind="a_universe_to_scope",
+            title=f"Stage A — Universe → Scope (filter funnel): {scope_title}",
+            stage_defs=a_stage_defs,
             stage_order=[],
-            root=filter_to_attempt_root,
-            explicit_stage_names=filter_to_attempt_stage_names,
+            root=a_root,
+            explicit_stage_names=a_stage_names,
             machine_dpath=level_001_machine,
             interactive_dpath=level_001_interactive,
             static_dpath=level_001_static,
-        ) if filter_to_attempt_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
-        attempted_to_repro_root, attempted_to_repro_stage_names, attempted_to_repro_stage_defs = _build_attempted_to_repro_root()
-        attempted_to_repro_art = emit_sankey_artifacts(
-            rows=attempted_to_repro_exact_rows,
+        ) if universe_to_scope_rows else dict(empty_art)
+
+        # Stage B — Scope -> Attempt -> Execution -> Analysis -> Reproduction
+        b_root, b_stage_names, b_stage_defs = _build_scope_to_analyzed_root()
+        empty_b_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no in-scope rows available"}
+        scope_to_analyzed_art = emit_sankey_artifacts(
+            rows=scope_to_analyzed_exact_rows,
             report_dpath=level_001,
             stamp=generated_utc,
-            kind="s03_attempted_to_repro",
-            title=f"Attempted Runs to Reproducibility at abs_tol=0: {scope_title}",
-            stage_defs=attempted_to_repro_stage_defs,
+            kind="b_scope_to_analyzed",
+            title=f"Stage B — Scope → Analyzed at abs_tol=0: {scope_title}",
+            stage_defs=b_stage_defs,
             stage_order=[],
-            root=attempted_to_repro_root,
-            explicit_stage_names=attempted_to_repro_stage_names,
+            root=b_root,
+            explicit_stage_names=b_stage_names,
             machine_dpath=level_001_machine,
             interactive_dpath=level_001_interactive,
             static_dpath=level_001_static,
-        ) if attempted_to_repro_exact_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no attempted rows available"}
-        attempted_to_repro_tol001_art = emit_sankey_artifacts(
-            rows=attempted_to_repro_tol001_rows,
+        ) if scope_to_analyzed_exact_rows else dict(empty_b_art)
+        scope_to_analyzed_tol001_art = emit_sankey_artifacts(
+            rows=scope_to_analyzed_tol001_rows,
             report_dpath=alt_tol_dpath,
             stamp=generated_utc,
-            kind="attempted_to_repro_tol001",
-            title=f"Attempted Runs to Reproducibility at abs_tol=0.001: {scope_title}",
-            stage_defs=attempted_to_repro_stage_defs,
+            kind="b_scope_to_analyzed_tol001",
+            title=f"Stage B — Scope → Analyzed at abs_tol=0.001: {scope_title}",
+            stage_defs=b_stage_defs,
             stage_order=[],
-            root=attempted_to_repro_root,
-            explicit_stage_names=attempted_to_repro_stage_names,
+            root=b_root,
+            explicit_stage_names=b_stage_names,
             machine_dpath=alt_tol_machine,
             interactive_dpath=alt_tol_interactive,
             static_dpath=alt_tol_static,
-        ) if attempted_to_repro_tol001_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no attempted rows available"}
-        attempted_to_repro_tol010_art = emit_sankey_artifacts(
-            rows=attempted_to_repro_tol010_rows,
+        ) if scope_to_analyzed_tol001_rows else dict(empty_b_art)
+        scope_to_analyzed_tol010_art = emit_sankey_artifacts(
+            rows=scope_to_analyzed_tol010_rows,
             report_dpath=alt_tol_dpath,
             stamp=generated_utc,
-            kind="attempted_to_repro_tol010",
-            title=f"Attempted Runs to Reproducibility at abs_tol=0.010: {scope_title}",
-            stage_defs=attempted_to_repro_stage_defs,
+            kind="b_scope_to_analyzed_tol010",
+            title=f"Stage B — Scope → Analyzed at abs_tol=0.010: {scope_title}",
+            stage_defs=b_stage_defs,
             stage_order=[],
-            root=attempted_to_repro_root,
-            explicit_stage_names=attempted_to_repro_stage_names,
+            root=b_root,
+            explicit_stage_names=b_stage_names,
             machine_dpath=alt_tol_machine,
             interactive_dpath=alt_tol_interactive,
             static_dpath=alt_tol_static,
-        ) if attempted_to_repro_tol010_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no attempted rows available"}
-        attempted_to_repro_tol050_art = emit_sankey_artifacts(
-            rows=attempted_to_repro_tol050_rows,
+        ) if scope_to_analyzed_tol010_rows else dict(empty_b_art)
+        scope_to_analyzed_tol050_art = emit_sankey_artifacts(
+            rows=scope_to_analyzed_tol050_rows,
             report_dpath=alt_tol_dpath,
             stamp=generated_utc,
-            kind="attempted_to_repro_tol050",
-            title=f"Attempted Runs to Reproducibility at abs_tol=0.050: {scope_title}",
-            stage_defs=attempted_to_repro_stage_defs,
+            kind="b_scope_to_analyzed_tol050",
+            title=f"Stage B — Scope → Analyzed at abs_tol=0.050: {scope_title}",
+            stage_defs=b_stage_defs,
             stage_order=[],
-            root=attempted_to_repro_root,
-            explicit_stage_names=attempted_to_repro_stage_names,
+            root=b_root,
+            explicit_stage_names=b_stage_names,
             machine_dpath=alt_tol_machine,
             interactive_dpath=alt_tol_interactive,
             static_dpath=alt_tol_static,
-        ) if attempted_to_repro_tol050_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no attempted rows available"}
-        end_to_end_root, end_to_end_stage_names, end_to_end_stage_defs = _build_end_to_end_funnel_root()
-        end_to_end_art = emit_sankey_artifacts(
-            rows=end_to_end_exact_rows,
-            report_dpath=level_001,
-            stamp=generated_utc,
-            kind="s04_end_to_end",
-            title=f"End-to-End Coverage and Reproducibility at abs_tol=0: {scope_title}",
-            stage_defs=end_to_end_stage_defs,
-            stage_order=[],
-            root=end_to_end_root,
-            explicit_stage_names=end_to_end_stage_names,
-            machine_dpath=level_001_machine,
-            interactive_dpath=level_001_interactive,
-            static_dpath=level_001_static,
-        ) if end_to_end_exact_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
-        end_to_end_tol001_art = emit_sankey_artifacts(
-            rows=end_to_end_tol001_rows,
-            report_dpath=alt_tol_dpath,
-            stamp=generated_utc,
-            kind="end_to_end_tol001",
-            title=f"End-to-End Coverage and Reproducibility at abs_tol=0.001: {scope_title}",
-            stage_defs=end_to_end_stage_defs,
-            stage_order=[],
-            root=end_to_end_root,
-            explicit_stage_names=end_to_end_stage_names,
-            machine_dpath=alt_tol_machine,
-            interactive_dpath=alt_tol_interactive,
-            static_dpath=alt_tol_static,
-        ) if end_to_end_tol001_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
-        end_to_end_tol010_art = emit_sankey_artifacts(
-            rows=end_to_end_tol010_rows,
-            report_dpath=alt_tol_dpath,
-            stamp=generated_utc,
-            kind="end_to_end_tol010",
-            title=f"End-to-End Coverage and Reproducibility at abs_tol=0.010: {scope_title}",
-            stage_defs=end_to_end_stage_defs,
-            stage_order=[],
-            root=end_to_end_root,
-            explicit_stage_names=end_to_end_stage_names,
-            machine_dpath=alt_tol_machine,
-            interactive_dpath=alt_tol_interactive,
-            static_dpath=alt_tol_static,
-        ) if end_to_end_tol010_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
-        end_to_end_tol050_art = emit_sankey_artifacts(
-            rows=end_to_end_tol050_rows,
-            report_dpath=alt_tol_dpath,
-            stamp=generated_utc,
-            kind="end_to_end_tol050",
-            title=f"End-to-End Coverage and Reproducibility at abs_tol=0.050: {scope_title}",
-            stage_defs=end_to_end_stage_defs,
-            stage_order=[],
-            root=end_to_end_root,
-            explicit_stage_names=end_to_end_stage_names,
-            machine_dpath=alt_tol_machine,
-            interactive_dpath=alt_tol_interactive,
-            static_dpath=alt_tol_static,
-        ) if end_to_end_tol050_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
+        ) if scope_to_analyzed_tol050_rows else dict(empty_b_art)
+        # Backwards-compatible aliases for the old variable names so the
+        # downstream manifest schema (and any callers reading it) keeps
+        # working until they migrate to the new keys.
+        filter_to_attempt_art = universe_to_scope_art
+        attempted_to_repro_art = scope_to_analyzed_art
+        attempted_to_repro_tol001_art = scope_to_analyzed_tol001_art
+        attempted_to_repro_tol010_art = scope_to_analyzed_tol010_art
+        attempted_to_repro_tol050_art = scope_to_analyzed_tol050_art
+        # Combined Universe->Reproducible sankey is dropped (see comment above).
+        end_to_end_art = dict(empty_art)
+        end_to_end_tol001_art = dict(empty_art)
+        end_to_end_tol010_art = dict(empty_art)
+        end_to_end_tol050_art = dict(empty_art)
     else:
         operational_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
         repro_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
@@ -4761,37 +4834,38 @@ def _render_scope_summary(
         f"Generated: {generated_utc}",
         f"Scope: {scope_title}",
         "",
-        "Read the five sankeys below in order to follow the full reproducibility story.",
+        "The reproducibility story has two stages plus an executive summary",
+        "and a detail view. Read in order:",
         "",
         "s01 — Executive Operational Summary",
         "  All attempted runs: benchmark group → lifecycle status → outcome/failure reason.",
         "  File: sankey_s01_operational.latest.{html,jpg,txt}",
         "",
-        "s02 — Filter Funnel to Attempted Runs",
-        "  All discovered run-specs through every filter gate (structural, model, tag, deployment,",
-        "  size, selection) to the attempt stage. Shows how much of the universe we ran and why",
-        "  the rest was excluded.",
-        "  File: sankey_s02_filter_to_attempt.latest.{html,jpg,txt}",
+        "Stage A — Universe → Scope (filter funnel)",
+        "  How the source universe gets narrowed to the in-scope set. Every filter gate",
+        "  (structural, model metadata, open-weight, tag/modality, deployment, size,",
+        "  selection) is a stage; terminal nodes are 'selected' (in scope) or",
+        "  'excluded: <reason>'. This is the context-establishment view.",
+        "  File: sankey_a_universe_to_scope.latest.{html,jpg,txt}",
         "",
-        "s03 — Attempted Runs to Reproducibility (exact-match diagnostic)",
-        "  Attempted runs broken down by local reproducibility at abs_tol=0 as a lower-tolerance diagnostic.",
-        "  File: sankey_s03_attempted_to_repro.latest.{html,jpg,txt}",
-        "",
-        "s04 — End-to-End Coverage and Reproducibility",
-        "  Full funnel from all discovered run-specs through to reproducible results.",
-        "  File: sankey_s04_end_to_end.latest.{html,jpg,txt}",
+        "Stage B — Scope → Attempt → Execution → Analysis → Reproduction",
+        "  Of the in-scope rows, how many we attempted, completed, analyzed, and at",
+        "  what agreement bucket they landed (abs_tol=0). This is the coverage view.",
+        "  File: sankey_b_scope_to_analyzed.latest.{html,jpg,txt}",
+        "  Tolerance variants live under alt_tolerances/ as",
+        "  sankey_b_scope_to_analyzed_tol{001,010,050}.",
         "",
         "s05 — Detailed Reproducibility Breakdown",
         "  Group → local repeatability → official-vs-local agreement → diagnosis.",
         "  File: sankey_s05_reproducibility.latest.{html,jpg,txt}",
         "",
         "Supplementary",
-        "  prioritized_breakdowns.latest.txt: triage-first shortlist of good/mid/bad/flagged breakdowns with direct paths",
-        "  prioritized_examples.latest/: filesystem-first symlink tree for direct inspection of shortlisted examples",
-        "  off_story_summary.latest.txt: off-story local extensions with stage counts and provenance",
-        "  run_multiplicity_summary.latest.txt: logical-result identity, repeated attempts, machines, experiments, UUIDs",
+        "  prioritized_breakdowns.latest.txt: triage-first shortlist with direct paths",
+        "  prioritized_examples.latest/: filesystem-first symlink tree for shortlisted examples",
+        "  off_story_summary.latest.txt: off-story local extensions with stage counts",
+        "  run_multiplicity_summary.latest.txt: logical-result identity, repeats, machines",
         "  sankey_repro_by_metric: per-metric drift (max |official - local| across runs)",
-        "  alt_tolerances/: tolerance sweep variants for s03, s04, s05",
+        "  alt_tolerances/: tolerance sweep variants for Stage B and s05",
         "  agreement_curve.latest.html: agreement-rate vs tolerance curve",
         "  coverage_matrix.latest.html: model × benchmark reproducibility heat-map",
     ]
@@ -4800,6 +4874,11 @@ def _render_scope_summary(
     write_latest_alias(story_index_fpath, level_001, "story_index.latest.txt")
 
     _write_scope_level_aliases(level_001, level_002, summary_root)
+
+    # Always sweep legacy s02/s03/s04 aliases so a re-run after the
+    # rename-refactor doesn't surface stale-named sankeys alongside the
+    # new a/b ones.
+    _cleanup_legacy_sankey_aliases(summary_root)
 
     if not filter_inventory_rows:
         # No filter inventory was loaded for this scope (e.g. virtual
@@ -4819,6 +4898,13 @@ _FILTER_ARTIFACT_ALIAS_NAMES = (
     "filter_selection_by_model.latest.html",
     "filter_selection_by_model.latest.jpg",
     "filter_selection_by_model.latest.png",
+    # Stage-A funnel (new) — only meaningful when filter inventory is loaded.
+    "sankey_a_universe_to_scope.latest.html",
+    "sankey_a_universe_to_scope.latest.jpg",
+    "sankey_a_universe_to_scope.latest.txt",
+    "sankey_a_universe_to_scope.latest.json",
+    # Legacy filter sankeys (s02 / s04) — kept here so historic builds get
+    # their stale aliases cleaned up when re-run with --no-filter-inventory.
     "sankey_s02_filter_to_attempt.latest.html",
     "sankey_s02_filter_to_attempt.latest.jpg",
     "sankey_s02_filter_to_attempt.latest.txt",
@@ -4828,6 +4914,36 @@ _FILTER_ARTIFACT_ALIAS_NAMES = (
     "sankey_s04_end_to_end.latest.txt",
     "sankey_s04_end_to_end.latest.json",
 )
+
+
+_LEGACY_SANKEY_ALIAS_NAMES = (
+    "sankey_s02_filter_to_attempt.latest.html",
+    "sankey_s02_filter_to_attempt.latest.jpg",
+    "sankey_s02_filter_to_attempt.latest.txt",
+    "sankey_s02_filter_to_attempt.latest.json",
+    "sankey_s03_attempted_to_repro.latest.html",
+    "sankey_s03_attempted_to_repro.latest.jpg",
+    "sankey_s03_attempted_to_repro.latest.txt",
+    "sankey_s03_attempted_to_repro.latest.json",
+    "sankey_s04_end_to_end.latest.html",
+    "sankey_s04_end_to_end.latest.jpg",
+    "sankey_s04_end_to_end.latest.txt",
+    "sankey_s04_end_to_end.latest.json",
+)
+
+
+def _cleanup_legacy_sankey_aliases(scope_root: Path) -> None:
+    """Unlink legacy s02/s03/s04 sankey aliases after the rename to a/b.
+
+    Stage 2 of the funnel-decomposition refactor renamed:
+      sankey_s02_filter_to_attempt → sankey_a_universe_to_scope
+      sankey_s03_attempted_to_repro → sankey_b_scope_to_analyzed
+      sankey_s04_end_to_end → dropped (decomposable into a + b)
+    """
+    target_names = set(_LEGACY_SANKEY_ALIAS_NAMES)
+    for path in scope_root.rglob("*"):
+        if path.name in target_names:
+            safe_unlink(path)
 
 
 def _cleanup_filter_artifact_aliases(scope_root: Path) -> None:
