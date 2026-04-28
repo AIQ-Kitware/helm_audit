@@ -27,7 +27,11 @@ from helm_audit.virtual import (
     load_manifest,
     write_synthesized_indexes,
 )
-from helm_audit.virtual.compose import provenance_payload
+from helm_audit.virtual.compose import (
+    build_scoped_filter_inventory,
+    provenance_payload,
+    write_scoped_filter_inventory,
+)
 from helm_audit.virtual.coverage import (
     compute_coverage,
     write_coverage_artifacts,
@@ -95,6 +99,46 @@ def main(argv: list[str] | None = None) -> None:
     provenance_fpath = output_root / "provenance.json"
     provenance_fpath.write_text(json.dumps(provenance_payload(result), indent=2) + "\n")
     logger.info(f"Wrote provenance: {rich_link(provenance_fpath)}")
+
+    # If any official-public-index source declared a Stage-1 pre_filter,
+    # re-stamp the upstream inventory with manifest-scope-aware
+    # selection_status and persist it. The publication-side
+    # build_reports_summary can then render Sankey A (Universe -> Scope)
+    # using this scoped inventory and naturally show the manifest scope
+    # as the terminal gate of the funnel.
+    scoped_filter_inventory_fpath: Path | None = None
+    for src in manifest.official_sources:
+        if src.pre_filter is None:
+            continue
+        if src.pre_filter.kind != "helm_stage1":
+            continue
+        inv_path = src.pre_filter.inventory_fpath.expanduser().resolve()
+        if not inv_path.is_file():
+            logger.warning(
+                f"Pre-filter inventory not found at {inv_path}; "
+                "Stage-A sankey won't include manifest-scope context."
+            )
+            continue
+        try:
+            pre_inventory = json.loads(inv_path.read_text())
+        except Exception as ex:
+            logger.warning(f"Could not load pre-filter inventory {inv_path}: {ex}")
+            continue
+        if not isinstance(pre_inventory, list):
+            logger.warning(f"Pre-filter inventory at {inv_path} is not a list; skipping.")
+            continue
+        scoped_inventory = build_scoped_filter_inventory(
+            manifest=manifest,
+            pre_filter_inventory=pre_inventory,
+        )
+        scoped_filter_inventory_fpath = output_root / "scoped_filter_inventory.json"
+        write_scoped_filter_inventory(scoped_inventory, out_fpath=scoped_filter_inventory_fpath)
+        n_selected = sum(1 for r in scoped_inventory if r.get("selection_status") == "selected")
+        logger.info(
+            f"Wrote scoped filter inventory: {rich_link(scoped_filter_inventory_fpath)} "
+            f"({len(scoped_inventory)} rows, {n_selected} in scope)"
+        )
+        break  # support one pre_filter source for now
 
     if not result.local_rows:
         logger.warning(

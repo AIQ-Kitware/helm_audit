@@ -22,6 +22,17 @@ sources:
 
   - kind: official_public_index
     fpath: /data/crfm-helm-audit-store/indexes/official_public_index.latest.csv
+    # Stage-1 eligibility filter: which public HELM runs we even consider for
+    # local reproduction (open-weight, runnable deployment, structurally
+    # complete, etc.). When attached here, the composer re-stamps the
+    # inventory's ``selection_status`` so a row is ``selected`` iff it both
+    # passed Stage-1 AND matches the manifest scope. The publication-side
+    # build_reports_summary uses the resulting inventory to render Sankey A
+    # (Universe -> Scope) with the manifest scope as the funnel's terminal
+    # gate.
+    pre_filter:
+      kind: helm_stage1
+      inventory_fpath: /data/crfm-helm-audit-store/analysis/filter_inventory.json
 
   - kind: external_eee
     components: []

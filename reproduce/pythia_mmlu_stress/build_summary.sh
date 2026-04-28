@@ -33,18 +33,25 @@ fi
 # canonical/publication/legacy locations and finds zero rows here, so
 # prioritized examples and breakdowns come up empty.
 #
-# --no-filter-inventory suppresses the Stage-1 filter funnel artifacts
-# (filter_selection_by_model, sankey_s02_filter_to_attempt,
-# sankey_s04_end_to_end, and the discovered/selected cardinality lines).
-# A virtual experiment is *already* a pre-filtered slice; the global
-# discover->select funnel doesn't describe its denominator and the
-# excluded-by-stage-1 visualization is misleading in this scope.
+# --filter-inventory-json: prefer the scoped inventory the composer wrote,
+# which carries Stage-1 eligibility decisions re-stamped with manifest
+# scope. That makes Sankey A (Universe -> Scope) render the manifest
+# scope as the terminal gate. If the manifest didn't declare a pre_filter
+# the file won't exist; fall back to --no-filter-inventory in that case
+# so the global Stage-1 inventory doesn't pollute the surface.
+SCOPED_FILTER_INVENTORY="$OUTPUT_ROOT/scoped_filter_inventory.json"
+if [[ -f "$SCOPED_FILTER_INVENTORY" ]]; then
+    INVENTORY_FLAGS=(--filter-inventory-json "$SCOPED_FILTER_INVENTORY")
+else
+    INVENTORY_FLAGS=(--no-filter-inventory)
+fi
+
 PYTHONPATH="$ROOT" "$PYTHON_BIN" -m helm_audit.workflows.build_reports_summary \
     --experiment-name "$EXPERIMENT_NAME" \
     --index-fpath "$INDEX_FPATH" \
     --summary-root "$SUMMARY_ROOT" \
     --analysis-root "$OUTPUT_ROOT" \
-    --no-filter-inventory \
+    "${INVENTORY_FLAGS[@]}" \
     "$@"
 
 echo

@@ -71,9 +71,34 @@ class AuditIndexSource:
 
 
 @dataclasses.dataclass
+class HelmStage1PreFilter:
+    """A reference to a pre-existing HELM Stage-1 filter inventory.
+
+    The inventory describes per-run eligibility decisions (structural
+    completeness, metadata resolution, open-weight gating, tag/modality,
+    deployment availability, size, and selection). When attached to an
+    ``official_public_index`` source, the virtual-experiment composer
+    re-stamps the inventory's ``selection_status`` so a row is
+    ``selected`` iff it both passed the original Stage-1 filter AND
+    matches the manifest scope. The resulting scope-aware inventory
+    drives Sankey A (Universe -> Scope) inside build_reports_summary.
+    """
+    kind: str
+    inventory_fpath: Path
+
+
+@dataclasses.dataclass
 class OfficialPublicIndexSource:
-    """A slice of the official public-HELM index, scope-filtered."""
+    """A slice of the official public-HELM index, scope-filtered.
+
+    Optional ``pre_filter`` references an upstream eligibility decision
+    (e.g. the HELM Stage-1 filter) that the composer re-stamps with
+    manifest scope so the publication's Stage-A sankey reflects the
+    full ``Universe -> source eligibility -> manifest scope -> selected``
+    chain.
+    """
     fpath: Path
+    pre_filter: HelmStage1PreFilter | None = None
 
 
 @dataclasses.dataclass
@@ -181,8 +206,26 @@ def _parse_sources(raw: Any) -> tuple[list[AuditIndexSource], list[OfficialPubli
                 include_experiments=_coerce_str_list(item.get("include_experiments"), f"sources[{i}].include_experiments"),
             ))
         elif kind == "official_public_index":
+            pre_filter_raw = item.get("pre_filter")
+            pre_filter: HelmStage1PreFilter | None = None
+            if pre_filter_raw is not None:
+                if not isinstance(pre_filter_raw, dict):
+                    raise ManifestError(f"sources[{i}].pre_filter must be a mapping")
+                pf_kind = _require(pre_filter_raw, "kind", f"sources[{i}].pre_filter")
+                if pf_kind != "helm_stage1":
+                    raise ManifestError(
+                        f"sources[{i}].pre_filter.kind={pf_kind!r} is not yet supported "
+                        "(supported: 'helm_stage1')"
+                    )
+                pre_filter = HelmStage1PreFilter(
+                    kind=str(pf_kind),
+                    inventory_fpath=Path(_require(
+                        pre_filter_raw, "inventory_fpath", f"sources[{i}].pre_filter"
+                    )).expanduser(),
+                )
             official.append(OfficialPublicIndexSource(
                 fpath=Path(_require(item, "fpath", f"sources[{i}]")).expanduser(),
+                pre_filter=pre_filter,
             ))
         elif kind == "external_eee":
             external.append(ExternalEeeSource(

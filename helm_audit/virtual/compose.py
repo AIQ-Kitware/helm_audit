@@ -14,11 +14,17 @@ The compose step:
   4. Records external_eee components in the provenance file but does not
      yet plumb them into the planner (a later pass will add an
      ``external`` source_kind alongside ``local``/``official``).
+  5. When an ``official_public_index`` source declares a ``pre_filter``,
+     re-stamps the upstream filter inventory with manifest-scope-aware
+     ``selection_status`` and writes a scoped inventory file the
+     publication-side ``build_reports_summary`` can use to render
+     Sankey A (Universe -> Scope) for this virtual experiment.
 """
 from __future__ import annotations
 
 import csv
 import dataclasses
+import json
 import re
 from pathlib import Path
 from typing import Any, Iterable
@@ -224,6 +230,59 @@ def _external_component_to_row(component: ExternalEeeComponent) -> dict[str, Any
         "display_name": component.display_name,
         "provenance": dict(component.provenance),
     }
+
+
+def build_scoped_filter_inventory(
+    *,
+    manifest: VirtualExperimentManifest,
+    pre_filter_inventory: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Re-stamp a Stage-1 filter inventory with manifest-scope-aware status.
+
+    A row is ``selected`` iff it both passed the upstream pre-filter AND
+    matches the manifest scope (``ScopeFilter`` MultiPattern over the
+    row's ``model`` / ``benchmark``). Rows that fail the manifest scope
+    keep their original ``failure_reasons`` augmented with
+    ``excluded-by-manifest-scope`` and have ``selection_status`` set to
+    something other than ``selected`` so Stage-A sankeys render the
+    manifest scope as the terminal gate of the funnel.
+
+    Output preserves the original schema so any downstream consumer
+    (notably ``build_reports_summary``) can read it as a drop-in
+    replacement.
+    """
+    out: list[dict[str, Any]] = []
+    for row in pre_filter_inventory:
+        new_row = dict(row)
+        original_status = new_row.get("selection_status")
+        in_scope = _scope_match(new_row, manifest.scope, source_kind="pre_filter")
+        if not in_scope:
+            # Augment failure_reasons rather than replace them — preserve
+            # the upstream gate signal so the sankey still shows "structural"
+            # / "deployment" / etc. exclusions for rows excluded earlier.
+            reasons = list(new_row.get("failure_reasons") or [])
+            if "excluded-by-manifest-scope" not in reasons:
+                reasons.append("excluded-by-manifest-scope")
+            new_row["failure_reasons"] = reasons
+            new_row["selection_status"] = "excluded"
+        else:
+            # In scope. ``selected`` only if the upstream filter also passed.
+            if original_status != "selected":
+                pass  # leave the upstream excluded status intact
+            else:
+                new_row["selection_status"] = "selected"
+        out.append(new_row)
+    return out
+
+
+def write_scoped_filter_inventory(
+    inventory: list[dict[str, Any]],
+    *,
+    out_fpath: Path,
+) -> Path:
+    out_fpath.parent.mkdir(parents=True, exist_ok=True)
+    out_fpath.write_text(json.dumps(inventory, indent=2) + "\n")
+    return out_fpath
 
 
 def provenance_payload(result: ComposeResult) -> dict[str, Any]:

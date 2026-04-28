@@ -249,6 +249,73 @@ def test_write_synthesized_indexes_round_trips(tmp_path):
     assert all(r["source_experiment_name"] == "e1" for r in rows_back)
 
 
+def test_pre_filter_helm_stage1_parsing_and_scoped_inventory():
+    """An ``official_public_index`` source can declare a ``helm_stage1``
+    pre_filter; the composer then re-stamps the upstream inventory so a
+    row is ``selected`` iff it both passed Stage-1 AND matches manifest
+    scope."""
+    from helm_audit.virtual.compose import build_scoped_filter_inventory
+    from helm_audit.virtual.manifest import HelmStage1PreFilter
+
+    parsed = parse_manifest({
+        "name": "x", "description": "",
+        "output": {"root": "/tmp/out"},
+        "scope": {"models": ["regex:eleutherai/pythia-.*"], "benchmarks": ["mmlu"]},
+        "sources": [
+            {
+                "kind": "official_public_index",
+                "fpath": "/tmp/official.csv",
+                "pre_filter": {
+                    "kind": "helm_stage1",
+                    "inventory_fpath": "/tmp/inv.json",
+                },
+            },
+        ],
+    })
+    assert len(parsed.official_sources) == 1
+    pf = parsed.official_sources[0].pre_filter
+    assert isinstance(pf, HelmStage1PreFilter)
+    assert pf.kind == "helm_stage1"
+    assert pf.inventory_fpath == Path("/tmp/inv.json")
+
+    # An inventory with three rows: one selected+in-scope, one
+    # selected+out-of-scope, one excluded+in-scope.
+    pre_inv = [
+        {
+            "run_spec_name": "mmlu:subject=foo,model=eleutherai_pythia-6.9b",
+            "model": "eleutherai/pythia-6.9b",
+            "benchmark": "mmlu",
+            "selection_status": "selected",
+            "failure_reasons": [],
+        },
+        {
+            "run_spec_name": "boolq:model=eleutherai_pythia-6.9b",
+            "model": "eleutherai/pythia-6.9b",
+            "benchmark": "boolq",
+            "selection_status": "selected",
+            "failure_reasons": [],
+        },
+        {
+            "run_spec_name": "mmlu:subject=foo,model=anthropic_claude",
+            "model": "anthropic/claude",
+            "benchmark": "mmlu",
+            "selection_status": "excluded",
+            "failure_reasons": ["not-open-access"],
+        },
+    ]
+    out = build_scoped_filter_inventory(manifest=parsed, pre_filter_inventory=pre_inv)
+    by_name = {r["run_spec_name"]: r for r in out}
+    # In scope (mmlu+pythia) AND originally selected -> still selected
+    assert by_name["mmlu:subject=foo,model=eleutherai_pythia-6.9b"]["selection_status"] == "selected"
+    # Originally selected but out of scope (wrong benchmark) -> excluded
+    assert by_name["boolq:model=eleutherai_pythia-6.9b"]["selection_status"] == "excluded"
+    assert "excluded-by-manifest-scope" in by_name["boolq:model=eleutherai_pythia-6.9b"]["failure_reasons"]
+    # Originally excluded for an upstream reason; in scope but stays excluded
+    out_of_scope_excluded = by_name["mmlu:subject=foo,model=anthropic_claude"]
+    # ``anthropic/claude`` doesn't match scope so it's also tagged.
+    assert out_of_scope_excluded["selection_status"] == "excluded"
+
+
 def test_provenance_payload_records_external_components_without_consuming_them():
     component = ExternalEeeComponent(
         id="inspectai-1",
