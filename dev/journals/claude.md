@@ -1009,3 +1009,139 @@ the HELM path's *primary* user-facing surfaces:
 
 Virtual experiments remain the one surface that doesn't have an
 EEE-only analogue. That's the natural next session.
+
+## 2026-04-29 14:25:00 -0000
+
+**Model:** claude-opus-4-7 (continued autonomous /loop session).
+
+**User intent.** "Do the EEE virtual experiment integration now."
+Background: virtual experiments were the one HELM-shaped surface
+without an EEE-only analogue. The composer's `external_eee` source
+kind already existed in the YAML schema but was provenance-only —
+recorded for posterity, not consumed by the planner.
+
+**What landed.**
+
+1. *New `eee_root` source kind.* Walks an EEE artifact tree the same
+   shape `eval-audit-from-eee` consumes
+   (`<root>/{official,local}/<benchmark>/<dev>/<model>/<uuid>.json`)
+   and synthesizes index rows from each artifact via the existing
+   `from_eee._build_*_index_row` helpers. Honors a `side` field
+   (`both` / `official` / `local`) to point a tree at one side only.
+   The `experiment_name` field optionally overrides the
+   subdir-derived experiment name on the local side; otherwise the
+   row builder uses the natural subdir-name and compose stamps the
+   virtual experiment's name on top, preserving the original in
+   `source_experiment_name` (mirroring how `audit_index` rows
+   work).
+
+2. *`external_eee` is now actually consumed.* Each component
+   becomes a row on the side it declares (`local` by default,
+   `official` opt-in). The component's `run_entry` from the manifest
+   pins the `logical_run_key` even if the EEE metadata would have
+   produced a different key — useful when a user wants to pin an
+   external artifact to a specific HELM-shaped comparison. The row
+   carries `external_eee_component_id` so it's identifiable in the
+   synthesized index. Resolves the long-standing TODO that was
+   surfaced by the warning "external_eee components are recorded for
+   provenance only."
+
+3. *Mixed manifests are first-class.* A single manifest can declare
+   `audit_index` (HELM local), `official_public_index` (HELM
+   official), `eee_root` (whole EEE tree), and `external_eee`
+   (cherry-picked EEE) all together. Compose applies the manifest's
+   scope filter uniformly across all source kinds, the synthesized
+   indexes interleave HELM and EEE rows, and the planner accepts the
+   mix via the `artifact_format=eee` path it already supports.
+
+4. *Example manifest + runbook.*
+   `configs/virtual-experiments/eee-only-demo.yaml` exercises
+   `eee_root` against the checked-in 3×3 demo fixture. Verified
+   end-to-end: `eval-audit-build-virtual-experiment` synthesizes
+   indexes (9 official + 10 local rows), runs analyze_experiment
+   (9 packets), and `eval-audit-build-summary` produces the same
+   bucket counts the EEE-only demo produces (6 exact / 2 low / 1
+   zero). The aggregate-summary requires `--analysis-root <output_root>`
+   (the virtual experiment root, not its `analysis/` subdir) — same
+   convention the existing pythia/open-helm runbooks use.
+
+5. *Slow-marked test.* `tests/test_virtual_experiment_eee.py` —
+   7 tests:
+   - synthesized indexes present
+   - every row carries `artifact_format=eee` + `eee_artifact_path`
+   - local rows stamped with virtual experiment's name; original
+     preserved
+   - provenance.json records per-`eee_root` source counts
+   - 9 per-packet reports built
+   - aggregate-summary buckets match the engineered drift map
+   - `external_eee` component materializes as a planner-visible row
+
+6. *Docs.*
+   - `docs/eee-vs-helm-metadata.md` — new "Virtual experiments
+     over EEE" subsection with YAML snippet + cross-references.
+     Tools-table updated: `eval-audit-build-virtual-experiment`
+     now lists EEE source kinds; `eval-audit-analyze-experiment`
+     row corrected (it accepts EEE rows composed by virtual
+     experiments).
+   - `docs/pipeline.md` — new "Virtual experiments over EEE"
+     section above the from-eee tutorial path.
+   - `README.md` — virtual-experiment CLI list entry expanded.
+   - `CLAUDE.md` — added pointer to the virtual-experiment EEE
+     path so future agents know.
+
+**Test status.** Default suite: 122 passed, 63 skipped in 12s.
+With `--run-slow` for the new test file: 7/7 passed in ~90s.
+Existing virtual-experiment tests still pass (15/15 in 0.5s),
+including the rewritten one that asserts external_eee is consumed
+not provenance-only.
+
+**Design insight #1.** The most important architectural property
+is that **EEE rows look like local/official rows once they're in
+the synthesized index**. The planner is artifact-format-agnostic;
+the row builders in `from_eee` produce shape-correct rows; the
+existing scope filter, experiment-name stamping, and HELM-driven
+analyze→summarize pipeline all work unchanged on EEE rows. The
+virtual-experiment integration was therefore *almost entirely
+about loading EEE artifacts into the same index shape* — most of
+the heavy lifting was already done in the EEE-only demo and
+compare-pair-eee work.
+
+**Design insight #2.** The compose step is the right place for
+the `experiment_name` stamping policy, not the row builder. When
+both did it the source_experiment_name lost its provenance value.
+Pulling stamping out of the row builder for the
+`virtual-experiment / eee_root` path and letting compose apply
+its uniform stamping (same way it does for `audit_index`) keeps
+the policy in one place and made the test pass cleanly.
+
+**Files touched this session.**
+- `eval_audit/virtual/manifest.py` — `EeeRootSource` dataclass +
+  `_parse_sources` extension + `ExternalEeeComponent.side` field.
+- `eval_audit/virtual/compose.py` — `_eee_rows_from_root`,
+  `_row_from_external_eee_component`, threaded into
+  `compose_virtual_experiment` + `provenance_payload`.
+- `eval_audit/virtual/__init__.py` — re-export `EeeRootSource`.
+- `eval_audit/cli/build_virtual_experiment.py` — drop the
+  "not consumed yet" warning.
+- `configs/virtual-experiments/eee-only-demo.yaml` (new).
+- `tests/test_virtual_experiment.py` — rewrote the
+  external-eee-not-consumed test as
+  external-eee-IS-consumed.
+- `tests/test_virtual_experiment_eee.py` (new, slow-marked).
+- `docs/eee-vs-helm-metadata.md`, `docs/pipeline.md`,
+  `README.md`, `CLAUDE.md` — virtual-experiment EEE references.
+- `dev/journals/claude.md` (this entry).
+
+**Next step.** EEE coverage is now structurally complete across
+every public surface: pair (`compare-pair-eee`), batch
+(`from-eee`), aggregate (`from-eee --build-aggregate-summary`),
+and slice (`build-virtual-experiment` with `eee_root` /
+`external_eee` source kinds). The HELM↔EEE field mapping and
+sidecar mechanism are documented and tested. Natural follow-ups
+would be: (a) extend the `coverage` funnel computation in
+`virtual/coverage.py` to surface EEE-specific stage transitions
+(currently `completed` is gated on `run_path` and reads as 0 for
+EEE-only; not wrong, just under-informative), or (b) propose the
+`comparison_metadata` block extension in the EEE schema
+(option 2 from the metadata doc) so EEE can carry the HELM-side
+facts in-band rather than as a sidecar.

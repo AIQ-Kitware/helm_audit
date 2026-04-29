@@ -46,6 +46,32 @@ Public HELM corpus              Local audit results
 No model is run; no benchmark is downloaded. The pipeline is read-only over
 the audit results that already exist on disk.
 
+### Virtual experiments over EEE
+
+If you want to *slice* across many EEE artifacts (multiple models
+benchmarks, multiple sources), use a virtual-experiment manifest:
+
+```yaml
+sources:
+  - kind: eee_root           # walk an official/+local/ EEE tree
+    root: /path/to/tree
+  - kind: external_eee       # cherry-pick individual artifacts
+    components:
+      - id: my-inspect-ai-run
+        eee_artifact_path: /path/to/uuid.json
+        run_entry: "mmlu:model=foo"
+        side: local
+```
+
+Then `eval-audit-build-virtual-experiment --manifest <yaml>` composes
+the slice (filtering by the manifest's `scope`), calls
+`analyze_experiment` over the synthesized indexes, and produces the
+same per-packet + aggregate-summary surface the HELM path produces.
+EEE sources can be mixed with HELM-driven `audit_index` /
+`official_public_index` sources in the same manifest. See
+[`configs/virtual-experiments/eee-only-demo.yaml`](../configs/virtual-experiments/eee-only-demo.yaml)
+for a worked example against the checked-in demo fixture.
+
 ### Tutorial path: `eval-audit-from-eee`
 
 If you already have *both* sides of the comparison in EEE format (one

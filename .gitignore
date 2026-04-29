@@ -39,3 +39,4 @@ in-progress-notes/
 # matched eval_audit/reports/ (the package subdir). The anchored ./reports/
 # at line 21 already covers the repo-level output dir.
 old-backup-reports/
+.cache

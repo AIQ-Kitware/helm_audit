@@ -85,10 +85,12 @@ def main(argv: list[str] | None = None) -> None:
         f"{len(result.external_components)} external_eee components"
     )
     if result.external_components:
-        logger.warning(
-            f"{len(result.external_components)} external_eee components are recorded "
-            "for provenance only; the planner does not yet consume them. They will be "
-            "wired in by a later pass."
+        materialized = result.external_eee_materialized_counts
+        logger.info(
+            f"{len(result.external_components)} external_eee components "
+            f"materialized: {materialized.get('local', 0)} local, "
+            f"{materialized.get('official', 0)} official, "
+            f"{materialized.get('discarded', 0)} discarded by manifest scope"
         )
 
     # Persist synthesized index slices + provenance.

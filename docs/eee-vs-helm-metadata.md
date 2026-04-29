@@ -156,8 +156,41 @@ asserts equivalence the data doesn't support.
 | `eval-audit-compare-pair` | full comparability | n/a (HELM-only) | n/a |
 | `eval-audit-compare-pair-eee` | n/a (EEE-only) | 4–5 facts `unknown` | full comparability |
 | `eval-audit-from-eee` | n/a (EEE-only) | 4–5 facts `unknown` | full comparability |
-| `eval-audit-analyze-experiment` | full comparability | not currently supported | not currently supported |
+| `eval-audit-build-virtual-experiment` | full comparability via `audit_index` + `official_public_index` | full pipeline via `eee_root` / `external_eee` source kinds (4–5 facts `unknown` per row without sidecar) | full comparability |
+| `eval-audit-analyze-experiment` | full comparability | accepts EEE rows (e.g. composed by a virtual experiment) and renders per-packet reports | full comparability |
 | `eval-audit-build-summary` | full comparability | aggregates the per-pair findings as-is; warnings flow into the summary | sidecar status flows through automatically |
+
+### Virtual experiments over EEE
+
+The virtual-experiment composer accepts two EEE-aware source kinds in
+addition to the HELM-driven `audit_index` and `official_public_index`:
+
+```yaml
+sources:
+  - kind: eee_root
+    root: /path/to/eee/tree   # contains official/ and local/ subdirs
+    side: both                 # "both" | "official" | "local"
+    experiment_name: optional  # defaults to subdir under local/
+
+  - kind: external_eee
+    components:
+      - id: my-component
+        eee_artifact_path: /path/to/<uuid>.json or its dir
+        run_entry: "<benchmark>:model=<model_id>"   # pins the planner key
+        side: local             # "local" (default) | "official"
+        display_name: "..."
+        provenance: {tool: inspect-ai, version: ...}
+```
+
+Both source kinds materialize into the synthesized indexes the same
+way HELM-driven sources do; the compose step applies the manifest's
+`scope` filter uniformly across all source kinds. Rows from EEE
+sources interleave with HELM rows in the synthesized indexes, and the
+planner accepts the mix via the `artifact_format=eee` path. See
+[`configs/virtual-experiments/eee-only-demo.yaml`](../configs/virtual-experiments/eee-only-demo.yaml)
+for a worked manifest against the checked-in fixture and
+[`tests/test_virtual_experiment_eee.py`](../tests/test_virtual_experiment_eee.py)
+for an end-to-end test.
 
 ## Test fixtures that exercise both modes
 
@@ -170,6 +203,13 @@ asserts equivalence the data doesn't support.
   — exercises `eval-audit-compare-pair-eee` against the same fixture
   in both modes (without a sidecar → 4 facts `unknown`; with a
   synthesized sidecar → all facts evaluable).
+
+- [`tests/test_virtual_experiment_eee.py`](../tests/test_virtual_experiment_eee.py)
+  — exercises the virtual-experiment composer + analyzer + aggregate
+  summary end-to-end against the same fixture. Asserts the engineered
+  agreement-bucket counts (6 exact / 2 low / 1 zero) come through the
+  `eee_root` source unchanged, and that an `external_eee` component
+  materializes into a planner-visible row.
 
 Run them with `pytest --run-slow` (slow-marked because they shell out
 to the analysis pipeline).

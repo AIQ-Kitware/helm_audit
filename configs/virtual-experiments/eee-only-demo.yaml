@@ -1,0 +1,33 @@
+schema_version: 1
+name: eee-only-demo-virtual
+description: >
+  Virtual experiment over the checked-in EEE-only demo fixture
+  (3 toy models × 3 toy benchmarks of synthetic every_eval_ever
+  artifacts). Demonstrates the eee_root source kind: walk an
+  <root>/{official,local}/... tree the same shape eval-audit-from-eee
+  consumes, synthesize index rows, and feed them through the existing
+  planner / report pipeline. No HELM run dirs, no run_spec.json, no
+  filter inventory.
+
+scope:
+  models:
+    - "regex:toy/m[0-9]+-.*"
+  benchmarks:
+    - "arc_easy"
+    - "imdb"
+    - "truthful_qa"
+
+sources:
+  - kind: eee_root
+    root: tests/fixtures/eee_only_demo/eee_artifacts
+    side: both
+    # When omitted, local rows derive their experiment name from the
+    # subdir directly under local/ (here: "primary" or "repeat"). The
+    # composer then re-stamps every local row with the virtual
+    # experiment's name so the planner --experiment-name filter still
+    # works as expected.
+
+output:
+  # Tutorial-scope virtual experiment. Override OUT_ROOT in the
+  # invocation to land elsewhere; the runbook does this.
+  root: /tmp/eee-only-demo-virtual

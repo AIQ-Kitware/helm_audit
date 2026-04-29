@@ -316,13 +316,26 @@ def test_pre_filter_helm_stage1_parsing_and_scoped_inventory():
     assert out_of_scope_excluded["selection_status"] == "excluded"
 
 
-def test_provenance_payload_records_external_components_without_consuming_them():
+def test_external_eee_components_materialize_into_local_rows():
+    """external_eee components are now consumed, not provenance-only.
+
+    Each component becomes a row in the synthesized index on its
+    declared side (default: local). The component's run_entry pins the
+    logical_run_key. Replaces an older test that asserted external_eee
+    components were inert.
+    """
+    fixture_root = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "eee_only_demo" / "eee_artifacts"
+    artifact_dir = fixture_root / "official" / "imdb" / "toy" / "m1-small"
+    if not artifact_dir.exists():
+        import pytest
+        pytest.skip(f"EEE demo fixture missing: {artifact_dir}")
     component = ExternalEeeComponent(
         id="inspectai-1",
-        eee_artifact_path=Path("/tmp/eee_output"),
-        run_entry="mmlu:model=foo",
-        display_name="inspectai",
+        eee_artifact_path=artifact_dir,
+        run_entry="imdb:model=toy/m1-small",
+        display_name="inspectai imdb m1",
         provenance={"tool": "inspect-ai"},
+        side="local",
     )
     manifest = VirtualExperimentManifest(
         name="virt", description="",
@@ -336,6 +349,13 @@ def test_provenance_payload_records_external_components_without_consuming_them()
     payload = provenance_payload(result)
     assert payload["totals"]["external_components"] == 1
     assert payload["external_eee_components"][0]["id"] == "inspectai-1"
-    # And the loud note about non-consumption is there so the user knows
-    # the components are recorded but inert in this iteration.
-    assert "external_eee components are recorded" in payload["notes"].lower()
+    # New: a row landed on the local side and carries the manifest's
+    # run_entry as its logical key.
+    assert len(result.local_rows) == 1
+    row = result.local_rows[0]
+    assert row["logical_run_key"] == "imdb:model=toy/m1-small"
+    assert row["artifact_format"] == "eee"
+    assert row["external_eee_component_id"] == "inspectai-1"
+    assert row["experiment_name"] == "virt"
+    # ... and the materialized counts are recorded.
+    assert payload["external_eee_materialized"] == {"local": 1, "official": 0, "discarded": 0}

@@ -144,7 +144,7 @@ dormant breakdown:
 
 **Active (exercised by the analysis runbooks):**
 
-- `eval-audit-build-virtual-experiment` — compose a virtual-experiment slice from a YAML manifest
+- `eval-audit-build-virtual-experiment` — compose a virtual-experiment slice from a YAML manifest. Source kinds: `audit_index`, `official_public_index` (HELM-driven), `eee_root` (walk an `every_eval_ever` tree), `external_eee` (cherry-pick individual EEE artifacts). All four can mix in one manifest; the planner accepts the synthesized index regardless of artifact format.
 - `eval-audit-build-summary` — build the publication surface (sankeys, prioritized examples, coverage matrix, README)
 - `eval-audit-analyze-experiment` — per-experiment analysis (delegates to packet planner + core metrics)
 - `eval-audit-analyze-many` — batched experiment analysis

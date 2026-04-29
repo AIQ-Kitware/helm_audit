@@ -105,26 +105,52 @@ class OfficialPublicIndexSource:
 class ExternalEeeComponent:
     """An externally-produced EEE artifact (e.g. Inspect AI output).
 
-    ``run_entry`` is the logical comparison key the planner already uses
-    to group rows; matching ``run_entry`` to existing local/official rows
-    is how the external component participates in a packet.
+    ``run_entry`` is the logical comparison key the planner uses to
+    group rows; matching ``run_entry`` to existing local/official rows
+    is how this component participates in a packet.
+
+    ``side`` (default ``"local"``) determines whether the synthesized
+    row lands in the audit-results index (the local side) or the
+    official-public index (the official side). Most external EEE
+    components are alternative *local* reproductions, but a user with
+    canonical official results in EEE format (and no upstream HELM run
+    dir) can opt into ``side="official"`` to make them the comparison
+    baseline.
     """
     id: str
     eee_artifact_path: Path
     run_entry: str
     display_name: str
     provenance: dict[str, Any] = dataclasses.field(default_factory=dict)
+    side: str = "local"
 
 
 @dataclasses.dataclass
 class ExternalEeeSource:
-    """Group of external EEE components.
-
-    The compose step records these in the provenance file but does not
-    yet plumb them into the planner. A future iteration will add an
-    ``external`` source_kind alongside ``local`` and ``official``.
+    """Group of external EEE components, materialized into the synthesized
+    indexes during compose.
     """
     components: list[ExternalEeeComponent] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass
+class EeeRootSource:
+    """Walk an EEE artifact tree and synthesize index rows from it.
+
+    The tree layout mirrors what ``eval-audit-from-eee`` consumes::
+
+        <root>/official/<benchmark>/<dev>/<model>/<uuid>.json
+        <root>/local/<experiment>/<benchmark>/<dev>/<model>/<uuid>.json
+
+    Each EEE artifact directory is converted into one row in the
+    synthesized indexes via the same helpers ``from_eee`` uses; the
+    manifest's ``scope`` then filters that row by model/benchmark like
+    any HELM-driven row. ``side`` lets the user opt one tree into a
+    single side (e.g. point at a tree of *only* local reproductions).
+    """
+    root: Path
+    side: str = "both"  # "both" | "official" | "local"
+    experiment_name: str | None = None
 
 
 @dataclasses.dataclass
@@ -137,6 +163,7 @@ class VirtualExperimentManifest:
     official_sources: list[OfficialPublicIndexSource]
     external_eee_sources: list[ExternalEeeSource]
     output_root: Path
+    eee_root_sources: list[EeeRootSource] = dataclasses.field(default_factory=list)
     schema_version: int = 1
 
 
@@ -178,24 +205,39 @@ def _parse_external_components(raw: Any) -> list[ExternalEeeComponent]:
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
             raise ManifestError(f"external_eee.components[{i}] must be a mapping")
+        side = str(item.get("side", "local")).strip()
+        if side not in {"local", "official"}:
+            raise ManifestError(
+                f"external_eee.components[{i}].side={side!r} must be one of "
+                "{'local', 'official'}"
+            )
         out.append(ExternalEeeComponent(
             id=str(_require(item, "id", f"external_eee.components[{i}]")),
             eee_artifact_path=Path(_require(item, "eee_artifact_path", f"external_eee.components[{i}]")).expanduser(),
             run_entry=str(_require(item, "run_entry", f"external_eee.components[{i}]")),
             display_name=str(_require(item, "display_name", f"external_eee.components[{i}]")),
             provenance=dict(item.get("provenance") or {}),
+            side=side,
         ))
     return out
 
 
-def _parse_sources(raw: Any) -> tuple[list[AuditIndexSource], list[OfficialPublicIndexSource], list[ExternalEeeSource]]:
+def _parse_sources(
+    raw: Any,
+) -> tuple[
+    list[AuditIndexSource],
+    list[OfficialPublicIndexSource],
+    list[ExternalEeeSource],
+    list[EeeRootSource],
+]:
     if raw is None:
-        return [], [], []
+        return [], [], [], []
     if not isinstance(raw, list):
         raise ManifestError(f"'sources' must be a list; got {type(raw).__name__}")
     audit: list[AuditIndexSource] = []
     official: list[OfficialPublicIndexSource] = []
     external: list[ExternalEeeSource] = []
+    eee_roots: list[EeeRootSource] = []
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
             raise ManifestError(f"sources[{i}] must be a mapping")
@@ -231,12 +273,25 @@ def _parse_sources(raw: Any) -> tuple[list[AuditIndexSource], list[OfficialPubli
             external.append(ExternalEeeSource(
                 components=_parse_external_components(item.get("components")),
             ))
+        elif kind == "eee_root":
+            side = str(item.get("side", "both")).strip()
+            if side not in {"both", "official", "local"}:
+                raise ManifestError(
+                    f"sources[{i}].side={side!r} must be one of "
+                    "{'both', 'official', 'local'}"
+                )
+            exp_override = item.get("experiment_name")
+            eee_roots.append(EeeRootSource(
+                root=Path(_require(item, "root", f"sources[{i}]")).expanduser(),
+                side=side,
+                experiment_name=str(exp_override) if exp_override is not None else None,
+            ))
         else:
             raise ManifestError(
                 f"sources[{i}].kind={kind!r} is not one of "
-                "{'audit_index', 'official_public_index', 'external_eee'}"
+                "{'audit_index', 'official_public_index', 'external_eee', 'eee_root'}"
             )
-    return audit, official, external
+    return audit, official, external, eee_roots
 
 
 def parse_manifest(data: dict[str, Any]) -> VirtualExperimentManifest:
@@ -253,7 +308,7 @@ def parse_manifest(data: dict[str, Any]) -> VirtualExperimentManifest:
         raise ManifestError("'output' must be a mapping")
     output_root = Path(_require(output, "root", "output")).expanduser()
     scope = _parse_scope(data.get("scope"))
-    audit_sources, official_sources, external_eee_sources = _parse_sources(data.get("sources"))
+    audit_sources, official_sources, external_eee_sources, eee_root_sources = _parse_sources(data.get("sources"))
     return VirtualExperimentManifest(
         schema_version=schema_version,
         name=name,
@@ -263,6 +318,7 @@ def parse_manifest(data: dict[str, Any]) -> VirtualExperimentManifest:
         official_sources=official_sources,
         external_eee_sources=external_eee_sources,
         output_root=output_root,
+        eee_root_sources=eee_root_sources,
     )
 
 

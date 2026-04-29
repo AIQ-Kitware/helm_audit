@@ -7,14 +7,18 @@ The compose step:
   2. Loads each ``official_public_index`` source, applies the same scope
      to the model + benchmark fields (parsed from the run_name when not
      directly populated on the row).
-  3. Stamps every retained local row with ``experiment_name = <virtual_name>``
+  3. Walks each ``eee_root`` source's tree (``official/`` + ``local/``
+     subdirs), synthesizes index rows from the EEE aggregate JSONs, and
+     applies the manifest scope. EEE rows interleave with HELM rows in
+     the synthesized indexes; the planner already accepts mixed
+     ``artifact_format=helm`` / ``artifact_format=eee`` rows.
+  4. Materializes each ``external_eee`` component into a row on the
+     side it declares (``local`` by default, or ``official``).
+  5. Stamps every retained local row with ``experiment_name = <virtual_name>``
      so the existing planner --experiment-name filter selects exactly the
      synthesized slice. The original experiment name is preserved in
      ``source_experiment_name`` for provenance.
-  4. Records external_eee components in the provenance file but does not
-     yet plumb them into the planner (a later pass will add an
-     ``external`` source_kind alongside ``local``/``official``).
-  5. When an ``official_public_index`` source declares a ``pre_filter``,
+  6. When an ``official_public_index`` source declares a ``pre_filter``,
      re-stamps the upstream filter inventory with manifest-scope-aware
      ``selection_status`` and writes a scoped inventory file the
      publication-side ``build_reports_summary`` can use to render
@@ -31,7 +35,15 @@ from typing import Any, Iterable
 
 import kwutil
 
+from eval_audit.cli.from_eee import (
+    _build_local_index_row,
+    _build_official_index_row,
+    _discover_eee_artifacts,
+    _extract_artifact_meta,
+    detect_helm_sidecars,
+)
 from eval_audit.virtual.manifest import (
+    EeeRootSource,
     ExternalEeeComponent,
     ScopeFilter,
     VirtualExperimentManifest,
@@ -114,6 +126,147 @@ class ComposeResult:
     discarded_official_count: int
     per_source_local_counts: list[dict[str, Any]]
     per_source_official_counts: list[dict[str, Any]]
+    per_source_eee_root_counts: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    external_eee_materialized_counts: dict[str, int] = dataclasses.field(default_factory=dict)
+
+
+def _eee_rows_from_root(
+    src: EeeRootSource,
+    *,
+    virtual_name: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+    """Walk an EEE tree and synthesize official + local index rows.
+
+    Honors ``side`` ("both" / "official" / "local") to skip half the
+    tree when the user wants to use the same root for only one side.
+    Each EEE artifact is run through the same row-builders
+    ``eval-audit-from-eee`` uses, so the resulting rows look exactly
+    like rows from a real EEE-only run; the planner already accepts
+    them via the ``artifact_format=eee`` path.
+
+    The caller is responsible for applying the manifest's ``scope``
+    filter; this function returns *raw* (pre-scope) rows so the per-
+    source bookkeeping in compose can record discard counts uniformly
+    with the HELM-driven sources.
+    """
+    official_rows: list[dict[str, Any]] = []
+    local_rows: list[dict[str, Any]] = []
+    counts = {"official_seen": 0, "local_seen": 0}
+
+    if src.side in {"both", "official"}:
+        official_root = src.root / "official"
+        for art in _discover_eee_artifacts(official_root):
+            meta = _extract_artifact_meta(art, root=official_root)
+            official_rows.append(_build_official_index_row(meta))
+            counts["official_seen"] += 1
+
+    if src.side in {"both", "local"}:
+        local_root = src.root / "local"
+        for art in _discover_eee_artifacts(local_root):
+            meta = _extract_artifact_meta(art, root=local_root)
+            # Build the row with its natural subdir-derived experiment name
+            # (or the per-source override if the manifest declares one).
+            # The compose loop will then re-stamp ``experiment_name`` to
+            # the virtual experiment's name and preserve the original in
+            # ``source_experiment_name``, exactly like ``audit_index``
+            # rows do — keeping the stamping policy in one place.
+            local_rows.append(
+                _build_local_index_row(meta, experiment_override=src.experiment_name)
+            )
+            counts["local_seen"] += 1
+
+    return official_rows, local_rows, counts
+
+
+def _row_from_external_eee_component(
+    component: ExternalEeeComponent,
+    *,
+    virtual_name: str,
+) -> dict[str, Any]:
+    """Synthesize an index row from a cherry-picked external EEE artifact.
+
+    Loads the EEE aggregate to extract ``model_id`` and ``benchmark``,
+    then builds a row in the same shape ``from_eee`` produces. The
+    component's ``run_entry`` from the manifest **overrides** the
+    derived ``logical_run_key`` so the user can pin an external
+    artifact to a specific comparison even when its EEE metadata would
+    have placed it elsewhere.
+    """
+    artifact_path = component.eee_artifact_path
+    if artifact_path.is_file():
+        json_path = artifact_path
+    elif artifact_path.is_dir():
+        candidates = sorted(
+            f for f in artifact_path.glob("*.json")
+            if f.name not in {"fixture_manifest.json", "provenance.json", "status.json", "run_spec.json"}
+        )
+        if not candidates:
+            raise ManifestComposeError(
+                f"external_eee.components[{component.id}]: no EEE aggregate JSON in {artifact_path}"
+            )
+        if len(candidates) > 1:
+            listing = ", ".join(c.name for c in candidates)
+            raise ManifestComposeError(
+                f"external_eee.components[{component.id}]: multiple EEE aggregates in {artifact_path}: {listing}"
+            )
+        json_path = candidates[0]
+    else:
+        raise ManifestComposeError(
+            f"external_eee.components[{component.id}]: path does not exist: {artifact_path}"
+        )
+
+    try:
+        data = json.loads(json_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ManifestComposeError(
+            f"external_eee.components[{component.id}]: cannot parse {json_path}: {exc}"
+        )
+    if not isinstance(data, dict) or "evaluation_results" not in data or "model_info" not in data:
+        raise ManifestComposeError(
+            f"external_eee.components[{component.id}]: {json_path} is not an EEE aggregate"
+        )
+    model_info = data.get("model_info") or {}
+    model_id = (model_info.get("id") or model_info.get("name") or "").strip()
+    eval_results = data.get("evaluation_results") or []
+    if eval_results:
+        first = eval_results[0]
+        source_data = first.get("source_data") or {}
+        benchmark = (
+            source_data.get("dataset_name")
+            or first.get("evaluation_name")
+            or "unknown"
+        )
+    else:
+        benchmark = "unknown"
+    sidecars = detect_helm_sidecars(json_path.parent)
+    meta = {
+        "artifact_dir": json_path.parent,
+        "json_path": json_path,
+        "model_id": model_id,
+        "benchmark": benchmark,
+        "experiment_name": None,
+        "evaluation_id": data.get("evaluation_id"),
+        "run_spec_fpath": sidecars["run_spec_fpath"],
+        "max_eval_instances": sidecars["max_eval_instances"],
+    }
+    if component.side == "official":
+        row = _build_official_index_row(meta)
+    else:
+        row = _build_local_index_row(meta, experiment_override=virtual_name)
+    # Pin the manifest's run_entry/logical_run_key so the planner groups
+    # this component the way the manifest declares, even if the EEE
+    # metadata would have produced a different key.
+    row["logical_run_key"] = component.run_entry
+    row["run_entry"] = component.run_entry
+    row["run_spec_name"] = component.run_entry
+    if component.side != "official":
+        row["display_name"] = component.display_name
+    row["external_eee_component_id"] = component.id
+    return row
+
+
+class ManifestComposeError(ValueError):
+    """Raised when an EEE source resolves to something the composer can't use."""
 
 
 def compose_virtual_experiment(manifest: VirtualExperimentManifest) -> ComposeResult:
@@ -174,6 +327,60 @@ def compose_virtual_experiment(manifest: VirtualExperimentManifest) -> ComposeRe
     for src in manifest.external_eee_sources:
         external_components.extend(src.components)
 
+    # eee_root sources: walk an EEE tree and synthesize official + local rows.
+    per_source_eee_root: list[dict[str, Any]] = []
+    for src in manifest.eee_root_sources:
+        raw_official, raw_local, counts = _eee_rows_from_root(
+            src, virtual_name=manifest.name
+        )
+        official_retained = 0
+        for row in raw_official:
+            if not _scope_match(row, manifest.scope, source_kind="official"):
+                discarded_official += 1
+                continue
+            stamped = dict(row)
+            stamped["source_index_fpath"] = f"eee_root:{src.root}"
+            official_rows.append(stamped)
+            official_retained += 1
+        local_retained = 0
+        for row in raw_local:
+            if not _scope_match(row, manifest.scope, source_kind="local"):
+                discarded_local += 1
+                continue
+            stamped = dict(row)
+            stamped["source_experiment_name"] = stamped.get("experiment_name")
+            stamped["source_index_fpath"] = f"eee_root:{src.root}"
+            stamped["experiment_name"] = manifest.name
+            local_rows.append(stamped)
+            local_retained += 1
+        per_source_eee_root.append({
+            "root": str(src.root),
+            "side": src.side,
+            "experiment_name": src.experiment_name,
+            "official_seen": counts["official_seen"],
+            "local_seen": counts["local_seen"],
+            "official_retained": official_retained,
+            "local_retained": local_retained,
+        })
+
+    # external_eee components: each becomes one row on the side it declares.
+    materialized_counts = {"local": 0, "official": 0, "discarded": 0}
+    for component in external_components:
+        row = _row_from_external_eee_component(component, virtual_name=manifest.name)
+        if not _scope_match(row, manifest.scope, source_kind=("official" if component.side == "official" else "local")):
+            materialized_counts["discarded"] += 1
+            continue
+        if component.side == "official":
+            row["source_index_fpath"] = f"external_eee:{component.id}"
+            official_rows.append(row)
+            materialized_counts["official"] += 1
+        else:
+            row["source_experiment_name"] = row.get("experiment_name")
+            row["source_index_fpath"] = f"external_eee:{component.id}"
+            row["experiment_name"] = manifest.name
+            local_rows.append(row)
+            materialized_counts["local"] += 1
+
     return ComposeResult(
         manifest=manifest,
         local_rows=local_rows,
@@ -183,6 +390,8 @@ def compose_virtual_experiment(manifest: VirtualExperimentManifest) -> ComposeRe
         discarded_official_count=discarded_official,
         per_source_local_counts=per_source_local,
         per_source_official_counts=per_source_official,
+        per_source_eee_root_counts=per_source_eee_root,
+        external_eee_materialized_counts=materialized_counts,
     )
 
 
@@ -299,9 +508,11 @@ def provenance_payload(result: ComposeResult) -> dict[str, Any]:
         "output_root": str(manifest.output_root),
         "audit_sources": result.per_source_local_counts,
         "official_sources": result.per_source_official_counts,
+        "eee_root_sources": result.per_source_eee_root_counts,
         "external_eee_components": [
             _external_component_to_row(c) for c in result.external_components
         ],
+        "external_eee_materialized": result.external_eee_materialized_counts,
         "totals": {
             "local_rows_retained": len(result.local_rows),
             "official_rows_retained": len(result.official_rows),
@@ -309,11 +520,4 @@ def provenance_payload(result: ComposeResult) -> dict[str, Any]:
             "official_rows_discarded": result.discarded_official_count,
             "external_components": len(result.external_components),
         },
-        "notes": (
-            "external_eee components are recorded for provenance only; "
-            "the planner does not yet consume them. The next iteration "
-            "will plumb them in as a third source_kind."
-            if result.external_components else
-            "no external_eee components declared in this manifest."
-        ),
     }

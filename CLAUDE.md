@@ -91,7 +91,14 @@ For a single-pair comparison (analogous to `eval-audit-compare-pair`
 but EEE-only), use
 [`eval-audit-compare-pair-eee`](eval_audit/cli/compare_pair_eee.py) —
 it produces the same `core_metric_report.latest.{txt,json,png}` shape
-the per-packet reports use. Comparability facts that the HELM-shaped
+the per-packet reports use. For a *slice* across many EEE artifacts
+(filtered by a YAML scope and optionally combined with HELM-driven
+sources), use
+[`eval-audit-build-virtual-experiment`](eval_audit/cli/build_virtual_experiment.py)
+with an `eee_root` and/or `external_eee` source — the composer
+materializes EEE rows into the synthesized indexes and the existing
+analyze→summarize pipeline runs unchanged. See
+[`configs/virtual-experiments/eee-only-demo.yaml`](configs/virtual-experiments/eee-only-demo.yaml). Comparability facts that the HELM-shaped
 pipeline derives from `run_spec.json` (scenario class, deployment,
 instructions, max_eval_instances, benchmark family) collapse to
 `status=unknown` for EEE-only inputs and surface as
