@@ -166,24 +166,6 @@ def _load_run_spec(path: Path | None) -> dict[str, Any] | None:
         return None
 
 
-def _short_alias_map(values: list[str], *, prefix: str = "v") -> dict[str, str]:
-    """Build a deterministic short alias for each long label.
-
-    Same shape as the ECDF-legend aliasing used in core_metrics: same
-    label always maps to the same alias; no two distinct labels collide.
-    Hash length auto-extends if the default 4 chars happens to collide.
-    """
-    unique = sorted(set(values))
-    if not unique:
-        return {}
-    for hash_len in range(4, 33):
-        candidate = {label: f"{prefix}{stable_hash36(label)[:hash_len]}" for label in unique}
-        if len(set(candidate.values())) == len(candidate):
-            return candidate
-    # Pathological fall-through (sha256 base36 collisions are astronomically rare).
-    return {label: f"{prefix}{stable_hash36(label)}_{i}" for i, label in enumerate(unique)}
-
-
 # ---------------------------------------------------------------------------
 # Data containers
 # ---------------------------------------------------------------------------

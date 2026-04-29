@@ -36,6 +36,7 @@ from eval_audit.normalized import (
 from eval_audit.normalized import compare as ncompare
 from eval_audit.normalized.helm_compat import helm_view
 from eval_audit.reports.paper_labels import load_paper_label_manager
+from eval_audit.utils.labels import emit_label_legend_artifacts, short_alias_map
 from eval_audit.reports.core_packet import load_packet_manifests
 from eval_audit.utils.numeric import quantile as _quantile
 
@@ -721,6 +722,13 @@ def _plot_per_metric_agreement(
     n_cols = min(3, len(metrics))
     n_rows = (len(metrics) + n_cols - 1) // n_cols
 
+    # Pair labels (legend hue) are full comparison ids, ~100+ chars; the
+    # legend overflows the axes when the labels are long. Alias each pair
+    # to a short slug for the legend; sidecar artifacts emitted below
+    # preserve the long labels.
+    pair_labels = sorted({row['pair'] for metric_rows in curves.values() for row in metric_rows})
+    alias_map = short_alias_map(pair_labels)
+
     fig, axes = plt.subplots(
         n_rows,
         n_cols,
@@ -742,6 +750,7 @@ def _plot_per_metric_agreement(
         metric_data = curves[metric]
         df = pd.DataFrame(metric_data)
         if not df.empty:
+            df = df.assign(pair=df['pair'].map(alias_map).fillna(df['pair']))
             sns.lineplot(
                 ax=ax,
                 data=df,
@@ -770,7 +779,8 @@ def _plot_per_metric_agreement(
 
     layout = plot_layout or PlotLayout()
     fig.suptitle(
-        'Per-Metric Agreement vs Absolute Tolerance',
+        'Per-Metric Agreement vs Absolute Tolerance\n'
+        'Legend uses short pair aliases; see the sidecar legend artifact for the full labels.',
         fontsize=14,
         y=layout.suptitle_y if layout.suptitle_y is not None else 0.995,
     )
@@ -778,6 +788,13 @@ def _plot_per_metric_agreement(
     fig_fpath = fig_dpath / f'core_metric_per_metric_agreement.latest.png'
     _atomic_savefig(fig, fig_fpath, dpi=180)
     plt.close(fig)
+    emit_label_legend_artifacts(
+        alias_map,
+        fig_dpath=fig_dpath,
+        out_name='core_metric_per_metric_agreement',
+        title='Per-Metric Agreement — short alias → full pair label',
+        stamp=stamp,
+    )
     return fig_fpath
 
 
@@ -840,11 +857,20 @@ def _plot_pair_metric_distributions(
     if not metrics:
         return None
     pair_order = [pair['label'] for pair in pairs]
+    # Pair labels are full comparison ids that splice the official component,
+    # the local component, attempt UUIDs, etc., and are routinely 100+ chars
+    # long — they crush the per-axis title. Alias each to a short slug for
+    # the title; emit the full mapping as a sidecar legend artifact below.
+    alias_map = short_alias_map(pair_order)
+    layout = plot_layout or PlotLayout()
+    # Pad the per-row height so 1-row × N-col grids leave room for a
+    # multi-line suptitle without colliding with the axis-level titles.
+    row_height = 4.2 + (1.6 if len(pair_order) == 1 else 0.0)
     fig, axes = plt.subplots(
         len(pair_order),
         len(metrics),
-        figsize=_scaled_figsize(5.2 * len(metrics), 4.2 * len(pair_order), plot_layout),
-        constrained_layout=True,
+        figsize=_scaled_figsize(5.2 * len(metrics), row_height * len(pair_order), plot_layout),
+        constrained_layout=False,
     )
     if len(pair_order) == 1 and len(metrics) == 1:
         axes = [[axes]]
@@ -869,114 +895,37 @@ def _plot_pair_metric_distributions(
                 bins=None if discrete else 20,
                 ax=ax,
             )
-            ax.set_title(f'{pair_label}\n{metric}')
+            ax.set_title(f'{alias_map[pair_label]}  {metric}', fontsize=10)
             ax.set_xlabel('Core metric value')
             ax.set_ylabel('Probability')
             legend = ax.get_legend()
             if legend is not None:
                 legend.set_title('')
-    _set_suptitle(
-        fig,
-        'Core Metric Score Distributions Within Each Comparison Pair\n'
-        f'Run Spec: {run_spec_name}\n'
-        'Each panel shows the per-instance score distribution for side A vs side B.',
-        fontsize=16,
-        plot_layout=plot_layout,
+    fig.suptitle(
+        'Core Metric Score Distributions Within Each Comparison Pair — '
+        f'{run_spec_name}  (per-axis titles: <pair-alias>  <metric>; '
+        'see sidecar legend for full pair labels)',
+        fontsize=12,
+        y=layout.suptitle_y if layout.suptitle_y is not None else 0.995,
     )
+    fig.subplots_adjust(**_subplot_adjust_kwargs(fig, layout, top=0.86))
     out_fpath = fig_dpath / f'core_metric_distributions.latest.png'
     _atomic_savefig(fig, out_fpath, dpi=180)
     plt.close(fig)
+    emit_label_legend_artifacts(
+        alias_map,
+        fig_dpath=fig_dpath,
+        out_name='core_metric_distributions',
+        title='Core Metric Distributions — short alias → full pair label',
+        stamp=stamp,
+    )
     return out_fpath
 
 
-def _short_label_alias_map(labels: list[str], *, prefix: str = 'c') -> dict[str, str]:
-    """Build a deterministic short-alias map for legend labels.
-
-    Long ``display_name`` strings (e.g. the full HELM run-spec name with model
-    and method qualifiers) destroy small plot legends. This helper turns each
-    unique long label into a short, unique alias. The mapping is deterministic
-    in the long label (same input → same output), and unique within the call
-    (no two distinct long labels share an alias).
-
-    The default alias is ``c<hash6>`` where ``hash6`` is the first 6 chars of
-    ``stable_hash36(label)``. If two distinct labels collide on the first 6
-    chars, the hash length is extended uniformly for every label until all
-    aliases are distinct, so the alias surface stays consistent within one
-    figure.
-
-    Why: the *key* property the user cares about is that the alias function
-    is a true map (no two long labels point at the same short alias).
-    Hashing gives that determinism without depending on label order or count.
-    """
-    unique = sorted(set(labels))
-    if not unique:
-        return {}
-    for hash_len in range(6, 33):
-        candidate = {label: f"{prefix}{stable_hash36(label)[:hash_len]}" for label in unique}
-        if len(set(candidate.values())) == len(candidate):
-            return candidate
-    # Pathological fall-through (sha256 base36 collisions are astronomically rare);
-    # disambiguate by appending the index of the offending label.
-    return {label: f"{prefix}{stable_hash36(label)}_{i}" for i, label in enumerate(unique)}
-
-
-def _emit_label_legend_artifacts(
-    alias_map: dict[str, str],
-    *,
-    fig_dpath: Path,
-    stamp: str,
-    out_name: str,
-    title: str,
-) -> tuple[Path | None, Path | None]:
-    """Render a sidecar legend mapping short aliases back to full labels.
-
-    Emits two artifacts next to the main plot:
-      - ``{out_name}_label_legend.latest.png`` — a text-only matplotlib figure
-        with one row per (alias, full label) pair, suitable for embedding next
-        to the main plot.
-      - ``{out_name}_label_legend.latest.txt`` — the same mapping in plain
-        text for easy grep/diff.
-
-    Returns ``(png_path, txt_path)``; either may be ``None`` if the alias map
-    is empty.
-    """
-    if not alias_map:
-        return None, None
-    items = sorted(alias_map.items(), key=lambda kv: kv[1])
-
-    txt_fpath = fig_dpath / f"{out_name}_label_legend.latest.txt"
-    txt_lines = [
-        f"{title}",
-        f"Generated: {stamp}",
-        "",
-        f"{'short':<12s}  full",
-        f"{'-' * 12}  {'-' * 60}",
-    ]
-    for long_label, short_alias in items:
-        txt_lines.append(f"{short_alias:<12s}  {long_label}")
-    write_text_atomic(txt_fpath, "\n".join(txt_lines) + "\n")
-
-    n_rows = len(items)
-    fig_h = max(1.6, 0.32 * n_rows + 1.2)
-    fig, ax = plt.subplots(figsize=(12, fig_h), constrained_layout=True)
-    ax.axis('off')
-    table_rows = [[short, long_label] for long_label, short in items]
-    table = ax.table(
-        cellText=table_rows,
-        colLabels=['short alias', 'full label'],
-        cellLoc='left',
-        colLoc='left',
-        loc='upper left',
-        colWidths=[0.10, 0.90],
-    )
-    table.auto_set_font_size(False)
-    table.set_fontsize(9)
-    table.scale(1.0, 1.25)
-    ax.set_title(title, fontsize=12, loc='left')
-    png_fpath = fig_dpath / f"{out_name}_label_legend.latest.png"
-    _atomic_savefig(fig, png_fpath, dpi=180)
-    plt.close(fig)
-    return png_fpath, txt_fpath
+# short_alias_map / emit_label_legend_artifacts live in
+# eval_audit.utils.labels so the same hash-and-sidecar pattern stays
+# consistent everywhere a long identifier would crush a plot legend or
+# axis title.
 
 
 def _plot_run_metric_distributions(
@@ -1011,7 +960,7 @@ def _plot_run_metric_distributions(
     # legend; the sidecar legend artifacts emitted below preserve the long
     # labels so readers can resolve the aliases.
     long_labels = sorted({label for _, label, _ in normalized_run_specs})
-    alias_map = _short_label_alias_map(long_labels)
+    alias_map = short_alias_map(long_labels)
     df = df.assign(run=df['run'].map(alias_map).fillna(df['run']))
     fig, axes = plt.subplots(
         len(metrics),
@@ -1071,12 +1020,12 @@ def _plot_run_metric_distributions(
     out_fpath = fig_dpath / f'{out_name}.latest.png'
     _atomic_savefig(fig, out_fpath, dpi=180)
     plt.close(fig)
-    legend_png_fpath, legend_txt_fpath = _emit_label_legend_artifacts(
+    legend_png_fpath, legend_txt_fpath = emit_label_legend_artifacts(
         alias_map,
         fig_dpath=fig_dpath,
-        stamp=stamp,
         out_name=out_name,
         title=f"{title} — short alias → full label",
+        stamp=stamp,
     )
     artifacts: dict[str, Path] = {'plot': out_fpath}
     if legend_png_fpath is not None:
