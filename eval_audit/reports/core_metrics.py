@@ -126,6 +126,17 @@ def _apply_matplotlib_style() -> None:
     sns.set_theme(style='whitegrid', context='talk')
 
 
+def _palette_color_map(labels: list[str]) -> dict[str, Any]:
+    """Map each unique label to its seaborn-palette color in plot order.
+
+    seaborn's ``hue`` semantic assigns colors from the active palette to
+    unique values in *sorted* order; this helper mirrors that so a sidecar
+    label legend can echo the matching color for each pair/run/etc."""
+    unique = sorted(set(labels))
+    palette = sns.color_palette(n_colors=max(len(unique), 1))
+    return {label: palette[i % len(palette)] for i, label in enumerate(unique)}
+
+
 def _apply_plot_layout(fig: plt.Figure, plot_layout: PlotLayout | None) -> PlotLayout:
     layout = plot_layout or PlotLayout()
     pad_kwargs = {
@@ -826,6 +837,7 @@ def _plot_per_metric_agreement(
         out_name='core_metric_per_metric_agreement',
         title='Per-Metric Agreement — short alias → full pair label',
         stamp=stamp,
+        color_map=_palette_color_map(pair_labels),
     )
     return fig_fpath
 
@@ -1060,6 +1072,7 @@ def _plot_run_metric_distributions(
         out_name=out_name,
         title=f"{title} — short alias → full label",
         stamp=stamp,
+        color_map=_palette_color_map(long_labels),
     )
     artifacts: dict[str, Path] = {'plot': out_fpath}
     if legend_png_fpath is not None:
@@ -1387,6 +1400,7 @@ def _plot_single_pair_summary(
         out_name='core_metric_report',
         title='Core Metric Report — short alias → full pair label',
         stamp=stamp,
+        color_map=_palette_color_map([pair['label']]),
     )
     return fig_fpath
 
@@ -2164,6 +2178,7 @@ def main(argv: list[str] | None = None) -> None:
             out_name='core_metric_report',
             title='Core Metric Report — short alias → full pair label',
             stamp=stamp,
+            color_map=_palette_color_map([p['label'] for p in all_pairs]),
         )
     else:
         fig_fpath = None
