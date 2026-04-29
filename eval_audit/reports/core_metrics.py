@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import statistics
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -58,21 +59,33 @@ def _wants_plot(plot_target: str, plot_name: str) -> bool:
 class PlotLayout:
     """Matplotlib layout knobs for crowded report figures."""
 
+    # Multiplicative scale applied to every Matplotlib figure size before
+    # layout. Increase this when labels/titles are too crowded for the canvas.
+    figure_scale: float = 1.5
     # Figure-coordinate y position for the figure-level title. Values near
     # 1.0 place the suptitle at the top edge; larger values move it upward.
     suptitle_y: float | None = 0.995
     # Minimum vertical padding around axes decorations, in inches, for
     # Matplotlib's constrained-layout engine.
-    constrained_h_pad: float | None = 0.80
+    constrained_h_pad: float | None = 0.02
     # Minimum vertical space between subplot groups, as a fraction of the
     # average subplot height, for constrained layout.
-    constrained_hspace: float | None = 0.82
+    constrained_hspace: float | None = 0.05
     # Minimum horizontal padding around axes decorations, in inches, for
     # Matplotlib's constrained-layout engine.
     constrained_w_pad: float | None = 0.08
     # Minimum horizontal space between subplot groups, as a fraction of the
     # average subplot width, for constrained layout.
     constrained_wspace: float | None = 0.05
+    # Manual subplot margin for grids that use fig.subplots_adjust. Values are
+    # figure fractions in Matplotlib's [0, 1] coordinate system.
+    subplot_left: float | None = None
+    # Manual subplot right edge for fig.subplots_adjust, as a figure fraction.
+    subplot_right: float | None = None
+    # Manual subplot bottom margin for fig.subplots_adjust, as a figure fraction.
+    subplot_bottom: float | None = None
+    # Manual subplot top edge for fig.subplots_adjust, as a figure fraction.
+    subplot_top: float | None = None
 
 
 def _coalesce(value: float | None, default: float | None) -> float | None:
@@ -82,12 +95,24 @@ def _coalesce(value: float | None, default: float | None) -> float | None:
 def _plot_layout_from_cli(args: argparse.Namespace) -> PlotLayout:
     default = PlotLayout()
     return PlotLayout(
+        figure_scale=_coalesce(args.plot_figure_scale, default.figure_scale),
         suptitle_y=_coalesce(args.plot_suptitle_y, default.suptitle_y),
         constrained_h_pad=_coalesce(args.plot_constrained_h_pad, default.constrained_h_pad),
         constrained_hspace=_coalesce(args.plot_constrained_hspace, default.constrained_hspace),
         constrained_w_pad=_coalesce(args.plot_constrained_w_pad, default.constrained_w_pad),
         constrained_wspace=_coalesce(args.plot_constrained_wspace, default.constrained_wspace),
+        subplot_left=_coalesce(args.plot_subplot_left, default.subplot_left),
+        subplot_right=_coalesce(args.plot_subplot_right, default.subplot_right),
+        subplot_bottom=_coalesce(args.plot_subplot_bottom, default.subplot_bottom),
+        subplot_top=_coalesce(args.plot_subplot_top, default.subplot_top),
     )
+
+
+def _scaled_figsize(width: float, height: float, plot_layout: PlotLayout | None = None) -> tuple[float, float]:
+    scale = (plot_layout or PlotLayout()).figure_scale
+    if scale <= 0:
+        scale = 1.0
+    return (width * scale, height * scale)
 
 
 def _apply_plot_layout(fig: plt.Figure, plot_layout: PlotLayout | None) -> PlotLayout:
@@ -107,7 +132,9 @@ def _apply_plot_layout(fig: plt.Figure, plot_layout: PlotLayout | None) -> PlotL
         if layout_engine is not None and hasattr(layout_engine, 'set'):
             layout_engine.set(**pad_kwargs)
         else:
-            fig.set_constrained_layout_pads(**pad_kwargs)
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', PendingDeprecationWarning)
+                fig.set_constrained_layout_pads(**pad_kwargs)
     return layout
 
 
@@ -133,15 +160,27 @@ def _subplot_adjust_kwargs(
 ) -> dict[str, float]:
     """Translate layout knobs into stable manual subplot spacing."""
     fig_w, fig_h = fig.get_size_inches()
-    kwargs = {'top': top}
+    kwargs = {'top': layout.subplot_top if layout.subplot_top is not None else top}
     if layout.constrained_h_pad is not None and fig_h > 0:
         vpad = min(0.20, max(0.0, layout.constrained_h_pad / fig_h))
-        kwargs['bottom'] = max(0.04, vpad)
-        kwargs['top'] = min(kwargs['top'], 1.0 - vpad)
+        if layout.subplot_bottom is None:
+            kwargs['bottom'] = max(0.04, vpad)
+        if layout.subplot_top is None:
+            kwargs['top'] = min(kwargs['top'], 1.0 - vpad)
     if layout.constrained_w_pad is not None and fig_w > 0:
         hpad = min(0.20, max(0.0, layout.constrained_w_pad / fig_w))
-        kwargs['left'] = max(0.04, hpad)
-        kwargs['right'] = min(0.98, 1.0 - hpad)
+        if layout.subplot_left is None:
+            kwargs['left'] = max(0.04, hpad)
+        if layout.subplot_right is None:
+            kwargs['right'] = min(0.98, 1.0 - hpad)
+    if layout.subplot_left is not None:
+        kwargs['left'] = layout.subplot_left
+    if layout.subplot_right is not None:
+        kwargs['right'] = layout.subplot_right
+    if layout.subplot_bottom is not None:
+        kwargs['bottom'] = layout.subplot_bottom
+    if layout.subplot_top is not None:
+        kwargs['top'] = layout.subplot_top
     if layout.constrained_hspace is not None:
         kwargs['hspace'] = layout.constrained_hspace
     if layout.constrained_wspace is not None:
@@ -685,7 +724,7 @@ def _plot_per_metric_agreement(
     fig, axes = plt.subplots(
         n_rows,
         n_cols,
-        figsize=(6.5 * n_cols, 4.8 * n_rows),
+        figsize=_scaled_figsize(6.5 * n_cols, 4.8 * n_rows, plot_layout),
         constrained_layout=False,
     )
     if len(metrics) == 1:
@@ -804,7 +843,7 @@ def _plot_pair_metric_distributions(
     fig, axes = plt.subplots(
         len(pair_order),
         len(metrics),
-        figsize=(5.2 * len(metrics), 4.2 * len(pair_order)),
+        figsize=_scaled_figsize(5.2 * len(metrics), 4.2 * len(pair_order), plot_layout),
         constrained_layout=True,
     )
     if len(pair_order) == 1 and len(metrics) == 1:
@@ -977,7 +1016,7 @@ def _plot_run_metric_distributions(
     fig, axes = plt.subplots(
         len(metrics),
         1,
-        figsize=(10, 3.2 * len(metrics)),
+        figsize=_scaled_figsize(10, 3.2 * len(metrics), plot_layout),
         constrained_layout=True,
     )
     if len(metrics) == 1:
@@ -1106,7 +1145,7 @@ def _plot_three_run_metric_distributions(
     fig, axes = plt.subplots(
         len(metrics),
         len(run_order),
-        figsize=(5.0 * len(run_order), 3.2 * len(metrics)),
+        figsize=_scaled_figsize(5.0 * len(run_order), 3.2 * len(metrics), plot_layout),
         constrained_layout=True,
     )
     if len(metrics) == 1 and len(run_order) == 1:
@@ -1314,7 +1353,13 @@ def _plot_single_pair_summary(
     plot_layout: PlotLayout | None = None,
 ) -> Path:
     sns.set_theme(style='whitegrid', context='talk')
-    fig, axes = plt.subplots(1, 2, figsize=(18, 7.5), constrained_layout=True)
+    layout = plot_layout or PlotLayout()
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=_scaled_figsize(18, 7.5, plot_layout),
+        constrained_layout=False,
+    )
     quantiles = pair['instance_level']['overall_quantiles']['abs_delta']
     labels = ['p50', 'p90', 'p95', 'p99', 'max']
     abs_delta_values = [quantiles[k] for k in labels]
@@ -1336,7 +1381,7 @@ def _plot_single_pair_summary(
         fontsize=15,
         plot_layout=plot_layout,
     )
-    print(f'plot_layout={plot_layout}')
+    fig.subplots_adjust(**_subplot_adjust_kwargs(fig, layout, top=0.78))
     fig_fpath = fig_dpath / f'core_metric_report.latest.png'
     _atomic_savefig(fig, fig_fpath, dpi=180)
     plt.close(fig)
@@ -1783,6 +1828,21 @@ def main(argv: list[str] | None = None) -> None:
         ),
     )
     parser.add_argument(
+        '--plot_figure_scale',
+        type=float,
+        default=None,
+        help=(
+            'Optional multiplicative scale for Matplotlib figure sizes. '
+            'Increase when labels or titles are too crowded for the canvas.'
+        ),
+    )
+    parser.add_argument(
+        '--plot-figure-scale',
+        dest='plot_figure_scale',
+        type=float,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         '--plot_target',
         choices=sorted(_PLOT_TARGETS),
         default='all',
@@ -1869,6 +1929,54 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         '--plot-constrained-wspace',
         dest='plot_constrained_wspace',
+        type=float,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        '--plot_subplot_left',
+        type=float,
+        default=None,
+        help='Optional manual left margin for fig.subplots_adjust, as a figure fraction.',
+    )
+    parser.add_argument(
+        '--plot-subplot-left',
+        dest='plot_subplot_left',
+        type=float,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        '--plot_subplot_right',
+        type=float,
+        default=None,
+        help='Optional manual right edge for fig.subplots_adjust, as a figure fraction.',
+    )
+    parser.add_argument(
+        '--plot-subplot-right',
+        dest='plot_subplot_right',
+        type=float,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        '--plot_subplot_bottom',
+        type=float,
+        default=None,
+        help='Optional manual bottom margin for fig.subplots_adjust, as a figure fraction.',
+    )
+    parser.add_argument(
+        '--plot-subplot-bottom',
+        dest='plot_subplot_bottom',
+        type=float,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        '--plot_subplot_top',
+        type=float,
+        default=None,
+        help='Optional manual top edge for fig.subplots_adjust, as a figure fraction.',
+    )
+    parser.add_argument(
+        '--plot-subplot-top',
+        dest='plot_subplot_top',
         type=float,
         help=argparse.SUPPRESS,
     )
@@ -1998,7 +2106,13 @@ def main(argv: list[str] | None = None) -> None:
             pair_line += f' + {extra_label}'
         pair_line = paper_labels.relabel_text(pair_line)
         sns.set_theme(style='whitegrid', context='talk')
-        fig, axes = plt.subplots(2, 2, figsize=(24, 14.5), constrained_layout=True)
+        layout = plot_layout or PlotLayout()
+        fig, axes = plt.subplots(
+            2,
+            2,
+            figsize=_scaled_figsize(24, 14.5, plot_layout),
+            constrained_layout=False,
+        )
         _plot_quantiles(
             axes[0, 0],
             local_repeat or official_vs_local,
@@ -2027,6 +2141,7 @@ def main(argv: list[str] | None = None) -> None:
             fontsize=15,
             plot_layout=plot_layout,
         )
+        fig.subplots_adjust(**_subplot_adjust_kwargs(fig, layout, top=0.82))
         _atomic_savefig(fig, fig_fpath, dpi=180)
         plt.close(fig)
     else:
