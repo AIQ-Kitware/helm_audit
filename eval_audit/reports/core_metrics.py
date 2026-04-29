@@ -798,7 +798,14 @@ def _plot_per_metric_agreement(
         fontsize=14,
         y=layout.suptitle_y if layout.suptitle_y is not None else 0.995,
     )
-    fig.subplots_adjust(**_subplot_adjust_kwargs(fig, layout, top=0.92))
+    # Multi-row grid: each row has its own xlabel + tick labels, which were
+    # overlapping the row-below title at the layout default hspace=0.05.
+    # Bump hspace / wspace to give every facet breathing room, and a touch
+    # of bottom margin so the bottom row's xlabel doesn't clip.
+    adjust_kwargs = _subplot_adjust_kwargs(fig, layout, top=0.92, bottom=0.07)
+    adjust_kwargs['hspace'] = max(adjust_kwargs.get('hspace', 0.40), 0.40)
+    adjust_kwargs['wspace'] = max(adjust_kwargs.get('wspace', 0.18), 0.18)
+    fig.subplots_adjust(**adjust_kwargs)
     fig_fpath = fig_dpath / f'core_metric_per_metric_agreement.latest.png'
     _atomic_savefig(fig, fig_fpath, dpi=180)
     plt.close(fig)
