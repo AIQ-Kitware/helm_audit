@@ -158,14 +158,25 @@ def _subplot_adjust_kwargs(
     layout: PlotLayout,
     *,
     top: float = 0.92,
+    bottom: float = 0.04,
 ) -> dict[str, float]:
-    """Translate layout knobs into stable manual subplot spacing."""
+    """Translate layout knobs into stable manual subplot spacing.
+
+    ``top`` and ``bottom`` are per-plot defaults (not layout-level) for the
+    fraction of the figure used by axes; pass a more generous ``bottom``
+    when the plot has a labelled x-axis that would otherwise clip on
+    short figures. ``layout.subplot_top`` / ``layout.subplot_bottom``
+    explicitly override these per-plot defaults when provided.
+    """
     fig_w, fig_h = fig.get_size_inches()
-    kwargs = {'top': layout.subplot_top if layout.subplot_top is not None else top}
+    kwargs = {
+        'top': layout.subplot_top if layout.subplot_top is not None else top,
+        'bottom': layout.subplot_bottom if layout.subplot_bottom is not None else bottom,
+    }
     if layout.constrained_h_pad is not None and fig_h > 0:
         vpad = min(0.20, max(0.0, layout.constrained_h_pad / fig_h))
         if layout.subplot_bottom is None:
-            kwargs['bottom'] = max(0.04, vpad)
+            kwargs['bottom'] = max(kwargs['bottom'], vpad)
         if layout.subplot_top is None:
             kwargs['top'] = min(kwargs['top'], 1.0 - vpad)
     if layout.constrained_w_pad is not None and fig_w > 0:
@@ -178,10 +189,6 @@ def _subplot_adjust_kwargs(
         kwargs['left'] = layout.subplot_left
     if layout.subplot_right is not None:
         kwargs['right'] = layout.subplot_right
-    if layout.subplot_bottom is not None:
-        kwargs['bottom'] = layout.subplot_bottom
-    if layout.subplot_top is not None:
-        kwargs['top'] = layout.subplot_top
     if layout.constrained_hspace is not None:
         kwargs['hspace'] = layout.constrained_hspace
     if layout.constrained_wspace is not None:
@@ -908,7 +915,7 @@ def _plot_pair_metric_distributions(
         fontsize=12,
         y=layout.suptitle_y if layout.suptitle_y is not None else 0.995,
     )
-    fig.subplots_adjust(**_subplot_adjust_kwargs(fig, layout, top=0.86))
+    fig.subplots_adjust(**_subplot_adjust_kwargs(fig, layout, top=0.86, bottom=0.13))
     out_fpath = fig_dpath / f'core_metric_distributions.latest.png'
     _atomic_savefig(fig, out_fpath, dpi=180)
     plt.close(fig)
