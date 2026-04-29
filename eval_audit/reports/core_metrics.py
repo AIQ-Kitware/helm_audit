@@ -650,12 +650,19 @@ def _agreement_curve_rows(*pairs: dict[str, Any], level_key: str) -> list[dict[s
     return rows
 
 
-def _plot_distribution(ax, *pairs: dict[str, Any], level_key: str) -> None:
+def _plot_distribution(
+    ax,
+    *pairs: dict[str, Any],
+    level_key: str,
+    alias_map: dict[str, str] | None = None,
+) -> None:
     rows = pd.DataFrame(_agreement_curve_rows(*pairs, level_key=level_key))
     if rows.empty or 'abs_tol' not in rows.columns or 'agree_ratio' not in rows.columns:
         ax.text(0.5, 0.5, 'No comparable core-metric rows', ha='center', va='center', transform=ax.transAxes)
         ax.set_axis_off()
         return
+    if alias_map:
+        rows = rows.assign(pair=rows['pair'].map(alias_map).fillna(rows['pair']))
     sns.lineplot(
         ax=ax,
         data=rows,
@@ -1310,6 +1317,11 @@ def _plot_single_pair_summary(
 ) -> Path:
     sns.set_theme(style='whitegrid', context='talk')
     layout = plot_layout or PlotLayout()
+    # The full pair label (a spliced comparison id; ~150-200 chars on real
+    # packets) crushes the suptitle and the right-pane legend. Alias it for
+    # display; emit the alias->full mapping as a sidecar.
+    alias_map = short_alias_map([pair['label']])
+    pair_alias = alias_map[pair['label']]
     fig, axes = plt.subplots(
         1,
         2,
@@ -1326,21 +1338,35 @@ def _plot_single_pair_summary(
     axes[0].set_title('Official vs Local Instance-Level Delta Quantiles')
     axes[0].set_xlabel('Quantile')
     axes[0].set_ylabel('Absolute Difference in Core Metric Value')
-    _plot_distribution(axes[1], pair, level_key='instance_level')
+    _plot_distribution(axes[1], pair, level_key='instance_level', alias_map=alias_map)
     axes[1].set_title('Official vs Local Agreement vs Tolerance')
     _set_suptitle(
         fig,
         'Core Metric Agreement and Difference Summary\n'
         f'Run Spec: {run_spec_name}\n'
-        f'Pair: {pair["label"]}\n'
+        f'Pair: {pair_alias}  (full label in sidecar legend artifact)\n'
         f'Instance-level N: {pair["instance_level"]["n_rows"]}',
         fontsize=15,
         plot_layout=plot_layout,
     )
-    fig.subplots_adjust(**_subplot_adjust_kwargs(fig, layout, top=0.78))
+    # Roomier left/right margins so y-axis labels and the right-edge ticks
+    # don't clip; wider wspace so the two panes don't crowd each other.
+    adjust_kwargs = _subplot_adjust_kwargs(fig, layout, top=0.78, bottom=0.10)
+    adjust_kwargs.setdefault('left', 0.06)
+    adjust_kwargs['left'] = max(adjust_kwargs.get('left', 0.06), 0.06)
+    adjust_kwargs['right'] = min(adjust_kwargs.get('right', 0.97), 0.97)
+    adjust_kwargs['wspace'] = max(adjust_kwargs.get('wspace', 0.25), 0.25)
+    fig.subplots_adjust(**adjust_kwargs)
     fig_fpath = fig_dpath / f'core_metric_report.latest.png'
     _atomic_savefig(fig, fig_fpath, dpi=180)
     plt.close(fig)
+    emit_label_legend_artifacts(
+        alias_map,
+        fig_dpath=fig_dpath,
+        out_name='core_metric_report',
+        title='Core Metric Report — short alias → full pair label',
+        stamp=stamp,
+    )
     return fig_fpath
 
 
@@ -2056,10 +2082,17 @@ def main(argv: list[str] | None = None) -> None:
         fig_fpath = history_dpath / f'core_metric_report.latest.png'
         extra_pair = _load_optional_cross_machine_pair(report_dpath)
         paper_labels = load_paper_label_manager(style='paper_short')
-        extra_label = extra_pair['label'] if extra_pair is not None else None
-        pair_line = 'Pairs: ' + ' vs '.join(pair['comparison_id'] for pair in pairs)
-        if extra_label is not None:
-            pair_line += f' + {extra_label}'
+        all_pairs = pairs + ([extra_pair] if extra_pair is not None else [])
+        # Alias every pair label so the legend in the bottom row stays
+        # readable; emit the alias->full mapping as a sidecar artifact.
+        pair_alias_map = short_alias_map([p['label'] for p in all_pairs])
+        pair_line = 'Pairs: ' + ' vs '.join(
+            pair_alias_map.get(pair['label'], pair_alias_map.get(pair.get('comparison_id', ''), pair.get('comparison_id', '')))
+            for pair in pairs
+        )
+        if extra_pair is not None:
+            pair_line += f' + {pair_alias_map[extra_pair["label"]]}'
+        pair_line += '  (full labels in sidecar legend artifact)'
         pair_line = paper_labels.relabel_text(pair_line)
         sns.set_theme(style='whitegrid', context='talk')
         layout = plot_layout or PlotLayout()
@@ -2083,9 +2116,9 @@ def main(argv: list[str] | None = None) -> None:
             'instance_level',
             'Instance-Level Delta Quantiles'
         )
-        _plot_distribution(axes[1, 0], *(pairs + ([extra_pair] if extra_pair is not None else [])), level_key='run_level')
+        _plot_distribution(axes[1, 0], *all_pairs, level_key='run_level', alias_map=pair_alias_map)
         axes[1, 0].set_title('Run-Level Agreement vs Tolerance', fontsize=11)
-        _plot_distribution(axes[1, 1], *(pairs + ([extra_pair] if extra_pair is not None else [])), level_key='instance_level')
+        _plot_distribution(axes[1, 1], *all_pairs, level_key='instance_level', alias_map=pair_alias_map)
         axes[1, 1].set_title('Instance-Level Agreement vs Tolerance', fontsize=11)
         axes[0, 0].title.set_fontsize(11)
         axes[0, 1].title.set_fontsize(11)
@@ -2097,9 +2130,20 @@ def main(argv: list[str] | None = None) -> None:
             fontsize=15,
             plot_layout=plot_layout,
         )
-        fig.subplots_adjust(**_subplot_adjust_kwargs(fig, layout, top=0.82))
+        adjust_kwargs = _subplot_adjust_kwargs(fig, layout, top=0.82, bottom=0.07)
+        adjust_kwargs['left'] = max(adjust_kwargs.get('left', 0.06), 0.06)
+        adjust_kwargs['right'] = min(adjust_kwargs.get('right', 0.98), 0.98)
+        adjust_kwargs['wspace'] = max(adjust_kwargs.get('wspace', 0.22), 0.22)
+        fig.subplots_adjust(**adjust_kwargs)
         _atomic_savefig(fig, fig_fpath, dpi=180)
         plt.close(fig)
+        emit_label_legend_artifacts(
+            pair_alias_map,
+            fig_dpath=report_dpath,
+            out_name='core_metric_report',
+            title='Core Metric Report — short alias → full pair label',
+            stamp=stamp,
+        )
     else:
         fig_fpath = None
 
