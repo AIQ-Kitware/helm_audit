@@ -12,8 +12,13 @@ ENV_FPATH="${LITELLM_ENV_FPATH:-/data/service/service-repo/vllm/generated/.env}"
 LITELLM_BASE_URL="${LITELLM_BASE_URL:-http://localhost:14000}"
 
 if [[ -f "$ENV_FPATH" ]]; then
+  # ``set -a`` so plain ``KEY=value`` lines in vllm_service's
+  # generated/.env (no ``export`` prefix) make it into env for the
+  # curl invocations below.
+  set -a
   # shellcheck disable=SC1090
   source "$ENV_FPATH"
+  set +a
 fi
 if [[ -z "${LITELLM_MASTER_KEY:-}" ]]; then
   echo "WARN: LITELLM_MASTER_KEY not set; the unauthenticated check below may fail." >&2
