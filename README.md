@@ -121,6 +121,7 @@ update its README before claiming it's still good.
 | `reproduce/pythia12b_mmlu_smoke/` | pythia-12b-v0 × abstract_algebra via HF transformers + kwdagger | **WORKING** (2026-04-28) |
 | `reproduce/pythia_mmlu_stress/` | analysis-only pythia × MMLU slice | **WORKING** (analysis) |
 | `reproduce/open_helm_models_reproducibility/` | analysis-only open-weight × benchmark slice | **WORKING** (analysis) |
+| `reproduce/eee_only_demo/` | tutorial: pure-EEE comparison via `eval-audit-from-eee` against checked-in 3×3 fixture | **WORKING** (2026-04-29) |
 | `reproduce/smoke/` | minimal end-to-end sanity run | **UNSURE** |
 | `reproduce/apples/` | apples-to-apples reproduction control | **UNSURE** |
 | `reproduce/historic_grid/` | regenerate a historic public-run manifest grid | **UNSURE** |
@@ -154,6 +155,14 @@ dormant breakdown:
 - `eval-audit-index` — build the audit-results index
 - `eval-audit-portfolio-status` — multi-experiment status snapshot
 - `eval-audit-prepare-eee` — prepare EEE artifacts for downstream analysis
+- `eval-audit-from-eee` — **EEE-only tutorial path.** Walks an
+  ``official/`` + ``local/`` tree of `every_eval_ever` artifacts, runs the
+  planner, renders per-packet core-metric reports, and (with
+  ``--build-aggregate-summary``) produces a cross-packet aggregate
+  report. Skips Stage-1 filter discovery and the HELM execution chain —
+  the inputs *are* the scope. See
+  [`reproduce/eee_only_demo/README.md`](reproduce/eee_only_demo/README.md)
+  for a worked tutorial against a checked-in 3×3 fixture.
 
 **Execution path (verified 2026-04-28 by `pythia12b_mmlu_smoke`):**
 

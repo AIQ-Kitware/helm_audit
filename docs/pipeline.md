@@ -46,6 +46,31 @@ Public HELM corpus              Local audit results
 No model is run; no benchmark is downloaded. The pipeline is read-only over
 the audit results that already exist on disk.
 
+### Tutorial path: `eval-audit-from-eee`
+
+If you already have *both* sides of the comparison in EEE format (one
+directory of "official" EEE artifacts and one directory of "local" EEE
+artifacts that you'd like to compare against them), you can skip Stages 1
+and 2 entirely and run
+
+```
+eval-audit-from-eee \
+    --eee-root <root>/{official,local}/... \
+    --out-dpath <out> \
+    --build-aggregate-summary
+```
+
+This walks the artifact tree, synthesizes the same in-memory index rows
+the official and local indexes would have produced, runs the planner +
+core-metrics + aggregate summary, and writes per-packet reports +
+cross-packet summary under `<out>/`. See
+[`reproduce/eee_only_demo/README.md`](../reproduce/eee_only_demo/README.md)
+for a worked tutorial against a checked-in 3×3 fixture, including the
+expected agreement-bucket counts. Comparability facts that the
+HELM-shaped pipeline derives from `run_spec.json` (scenario class,
+deployment, instructions, max_eval_instances) collapse to `unknown` for
+EEE-only inputs and surface as `comparability_unknown:*` warnings.
+
 ## Stage 1 — EEE conversion
 
 The canonical comparison input is the EEE artifact format (`every_eval_ever`,

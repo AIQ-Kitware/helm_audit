@@ -9,9 +9,15 @@
 #     official_public_index.latest.csv
 #     audit_results_index.latest.csv
 #     planning/
-#     core-reports/<packet>/core_metric_report.latest.{txt,json,png}
+#     <experiment_name>/core-reports/<packet>/core_metric_report.latest.{txt,json,png}
+#     aggregate-summary/all-results/                 (with --build-aggregate-summary)
+#       README.latest.txt
+#       agreement_curve.latest.{html,jpg}
+#       reproducibility_buckets.latest.{html,jpg}
+#       sankey_*.html, prioritized_examples.latest/, ...
 #
-# Override OUT_DPATH to write somewhere else.
+# Override OUT_DPATH to write somewhere else, or BUILD_AGGREGATE=0 to skip the
+# cross-packet roll-up (per-packet reports always render).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -26,13 +32,26 @@ if [ ! -d "$EEE_ROOT" ]; then
   exit 1
 fi
 
+BUILD_AGGREGATE="${BUILD_AGGREGATE:-1}"
+extra_args=()
+if [ "$BUILD_AGGREGATE" != "0" ]; then
+  extra_args+=("--build-aggregate-summary")
+fi
+
 eval-audit-from-eee \
   --eee-root "$EEE_ROOT" \
   --out-dpath "$OUT_DPATH" \
-  --clean
+  --clean \
+  "${extra_args[@]}"
 
 echo
 echo "Per-packet reports:"
-ls -1 "$OUT_DPATH/core-reports/" | sed 's|^|  |'
+find "$OUT_DPATH" -mindepth 3 -maxdepth 3 -type d -path '*/core-reports/*' -printf '  %p\n' | sort
+if [ "$BUILD_AGGREGATE" != "0" ]; then
+  echo
+  echo "Aggregate summary:"
+  echo "  $OUT_DPATH/aggregate-summary/all-results/README.latest.txt"
+fi
 echo
-echo "Quick read: $OUT_DPATH/core-reports/<packet>/core_metric_report.latest.txt"
+echo "Quick read (per-packet):"
+echo "  $OUT_DPATH/<experiment>/core-reports/<packet>/core_metric_report.latest.txt"

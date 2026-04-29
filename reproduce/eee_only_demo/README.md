@@ -70,9 +70,31 @@ regenerate it from scratch (e.g., after editing `build_fixture.py`). The
 output is uuid5-deterministic so regenerated artifacts collide bit-for-bit
 with the checked-in copy.
 
-`10_run_analysis.sh` runs `eval-audit-from-eee` against the fixture and
-writes per-packet reports under `/tmp/eee_only_demo_out/core-reports/`.
+`10_run_analysis.sh` runs `eval-audit-from-eee` against the fixture and writes:
+
+- per-packet reports under
+  `/tmp/eee_only_demo_out/<experiment_name>/core-reports/<packet>/core_metric_report.latest.{txt,json,png}`
+- an aggregate cross-packet summary under
+  `/tmp/eee_only_demo_out/aggregate-summary/all-results/` with the README,
+  agreement-curve plot, reproducibility-buckets bar chart, sankeys, and
+  drill-down tables (set `BUILD_AGGREGATE=0` to skip).
+
 Override the output dir with `OUT_DPATH=...`.
+
+The aggregate-summary numbers should match the engineered drift map exactly:
+
+```
+total_jobs: 10                 # 9 single-attempt + 1 repeat
+completed_and_analyzed: 9      # 9 packets
+analyzed reproducibility buckets:
+  * exact_or_near_exact: 6     # all arc_easy + imdb m3 + truthful_qa m2/m3
+  * low_agreement_0.00+: 2     # imdb m2 + truthful_qa m1 (1-of-4 instance flips)
+  * zero_agreement: 1          # imdb m1 (full divergence)
+```
+
+If those numbers ever drift, either the fixture changed or the planner /
+core-metrics / aggregate-summary pipeline regressed; both are worth
+investigating before treating the report as trustworthy.
 
 ## Adapting it for your own EEE-format evals
 
@@ -95,13 +117,22 @@ Override the output dir with `OUT_DPATH=...`.
    ```bash
    eval-audit-from-eee \
      --eee-root <my-eee-root> \
-     --out-dpath <my-output-dir>
+     --out-dpath <my-output-dir> \
+     --build-aggregate-summary
    ```
 
-3. Inspect `<my-output-dir>/core-reports/<packet>/core_metric_report.latest.txt`
+3. Inspect
+   `<my-output-dir>/<experiment_name>/core-reports/<packet>/core_metric_report.latest.txt`
    for the per-pair agreement curves and comparability facts. The
    `redraw_plots.latest.sh` sibling lets you iterate on plot styling
-   without re-running the analysis.
+   without re-running the analysis. Drop `--build-aggregate-summary` if
+   you only want the per-packet reports.
+
+4. Inspect `<my-output-dir>/aggregate-summary/all-results/README.latest.txt`
+   for the cross-packet roll-up: agreement-bucket counts, per-metric
+   curves, drill-down tables by model/benchmark/experiment, and a
+   prioritized-examples tree that links straight to the per-packet
+   reports for the worst/median/best comparisons.
 
 ## Why the "unknown" comparability facts matter
 
@@ -124,6 +155,10 @@ facts flip to `yes`/`no` and the warnings disappear.
 - No `eval-audit-make-manifest`, `eval-audit-run`, `eval-audit-index`. The
   EEE-only path skips the discovery+execution stages because the EEE
   artifacts already encode "what was run on what."
-- No aggregate summary builder. The EEE-only path produces per-packet
-  reports today; the aggregate cross-packet roll-up still assumes a
-  HELM-shaped index. (See the journal for the planned fix.)
+- No Stage-1 filter sankey. The EEE-only path bypasses HELM run-spec
+  discovery and the eligibility-filter funnel — the artifacts you provide
+  already define the scope. The aggregate summary skips the filter
+  inventory automatically (`--no-filter-inventory`) and excludes the host
+  machine's pre-existing experiment store from the scan
+  (`--no-canonical-scan`), so the report describes only the EEE artifacts
+  you passed in.

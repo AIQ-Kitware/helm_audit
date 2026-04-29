@@ -232,9 +232,17 @@ def _render_packet(
     The packet manifests are pre-written next to the output dir; this just
     invokes core_metrics so the per-pair plots + comparability facts are
     rendered.
+
+    Output layout mirrors the canonical
+    ``<root>/<experiment_name>/core-reports/<packet>/...`` shape so that
+    ``eval-audit-build-summary --analysis-root <out_root>`` can pick the
+    reports up via its standard glob without bespoke wiring.
     """
     packet_id = packet["packet_id"]
-    report_dpath = out_root / "core-reports" / packet_id
+    experiment_name = (
+        packet["components_manifest"].get("experiment_name") or "eee_only"
+    )
+    report_dpath = out_root / experiment_name / "core-reports" / packet_id
     report_dpath.mkdir(parents=True, exist_ok=True)
 
     (report_dpath / "components_manifest.latest.json").write_text(
@@ -377,6 +385,19 @@ def main(argv: list[str] | None = None) -> None:
         default=False,
         help="Remove --out-dpath before building.",
     )
+    parser.add_argument(
+        "--build-aggregate-summary",
+        action="store_true",
+        default=False,
+        help=(
+            "After per-packet reports finish, run eval-audit-build-summary "
+            "against the per-experiment subtrees produced under --out-dpath "
+            "to generate a cross-packet aggregate report (agreement curves, "
+            "per-metric breakdowns, README). The Stage-1 filter inventory is "
+            "skipped automatically since EEE-only inputs have no Stage-1 "
+            "filter sankey to fold in."
+        ),
+    )
     args, plot_layout_args = parser.parse_known_args(argv)
 
     eee_root = Path(args.eee_root).expanduser().resolve()
@@ -424,7 +445,25 @@ def main(argv: list[str] | None = None) -> None:
         rendered.append(report_dpath)
         print(f"  rendered: {report_dpath}")
 
-    print(f"\nDONE: {len(rendered)} per-pair core-metric reports under {out_dir}/core-reports/")
+    print(f"\nDONE: {len(rendered)} per-pair core-metric reports under {out_dir}/<experiment>/core-reports/")
+
+    if args.build_aggregate_summary:
+        summary_root = out_dir / "aggregate-summary"
+        summary_cmd = [
+            sys.executable, "-m", "eval_audit.workflows.build_reports_summary",
+            "--no-filter-inventory",
+            "--no-canonical-scan",
+            "--analysis-root", str(out_dir),
+            "--index-fpath", str(local_index_fpath),
+            "--summary-root", str(summary_root),
+        ]
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2]) + (
+            os.pathsep + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else ""
+        )
+        print(f"\nBuilding aggregate summary under {summary_root}/ ...")
+        subprocess.run(summary_cmd, check=True, env=env)
+        print(f"DONE: aggregate summary at {summary_root}/all-results/")
 
 
 if __name__ == "__main__":

@@ -113,7 +113,13 @@ def _existing_report_packet(
     if not components:
         return None
     for component in components:
-        if _existing_run_path(component.get("run_path")) is None:
+        # The cached packet is reusable as long as *some* artifact source is
+        # still on disk for every component. EEE-only components carry no
+        # ``run_path`` (HELM run dir); their backing storage is
+        # ``eee_artifact_path``. Treat either as a valid anchor.
+        if _existing_run_path(component.get("run_path")) is None and (
+            _existing_run_path(component.get("eee_artifact_path")) is None
+        ):
             return None
     return {
         "packet_id": components_manifest.get("packet_id"),

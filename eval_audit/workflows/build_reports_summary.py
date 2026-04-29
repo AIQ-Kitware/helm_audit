@@ -1025,7 +1025,11 @@ def _fd_count() -> int | None:
         return None
 
 
-def _load_all_repro_rows(extra_analysis_roots: list[Path] | None = None) -> list[dict[str, Any]]:
+def _load_all_repro_rows(
+    extra_analysis_roots: list[Path] | None = None,
+    *,
+    skip_canonical_scan: bool = False,
+) -> list[dict[str, Any]]:
     # Scan the canonical store location plus the publication-side and
     # legacy-repo symlink trees so experiments that haven't been re-run
     # since either layout migration are still found.
@@ -1035,14 +1039,25 @@ def _load_all_repro_rows(extra_analysis_roots: list[Path] | None = None) -> list
     # shape — virtual experiments, in particular, hold their per-packet
     # reports under their own ``output.root`` and would otherwise be
     # invisible to the aggregate summary.
-    canonical_root = experiments_analysis_root()
-    publication_root_link_dir = publication_experiments_root()
-    legacy_repo_root = legacy_repo_publication_root()
+    #
+    # ``skip_canonical_scan`` is used by standalone callers (e.g. the
+    # ``eval-audit-from-eee`` tutorial) that want the summary scoped to
+    # just their own analysis dir; otherwise the system's pre-existing
+    # experiment store would bleed into a tutorial-scope report.
     extra_roots = [Path(p).expanduser().resolve() for p in (extra_analysis_roots or [])]
+    if skip_canonical_scan:
+        canonical_paths: list[Path] = []
+    else:
+        canonical_root = experiments_analysis_root()
+        publication_root_link_dir = publication_experiments_root()
+        legacy_repo_root = legacy_repo_publication_root()
+        canonical_paths = (
+            list(canonical_root.glob("*/core-reports/*/core_metric_report.latest.json"))
+            + list(publication_root_link_dir.glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json"))
+            + list(legacy_repo_root.glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json"))
+        )
     report_jsons = sorted(
-        list(canonical_root.glob("*/core-reports/*/core_metric_report.latest.json"))
-        + list(publication_root_link_dir.glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json"))
-        + list(legacy_repo_root.glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json"))
+        canonical_paths
         + [
             p
             for root in extra_roots
@@ -5071,6 +5086,18 @@ def main(argv: list[str] | None = None) -> None:
         ),
     )
     parser.add_argument(
+        "--no-canonical-scan",
+        action="store_true",
+        help=(
+            "Skip the default scan of canonical/publication/legacy "
+            "experiment-analysis roots and use only the directories passed "
+            "via --analysis-root. Useful when running the summary against a "
+            "standalone analysis tree (e.g. eval-audit-from-eee) and you "
+            "don't want pre-existing experiments on the host to bleed into "
+            "the report."
+        ),
+    )
+    parser.add_argument(
         "--breakdown-dims",
         nargs="*",
         default=DEFAULT_BREAKDOWN_DIMS,
@@ -5109,7 +5136,10 @@ def main(argv: list[str] | None = None) -> None:
     )
     _raise_fd_limit()  # Note: this probably is not necessary, as fd limits are usually due to a VM issue.
     configure_plotly_chrome()
-    all_repro_rows = _load_all_repro_rows(extra_analysis_roots=args.analysis_root)
+    all_repro_rows = _load_all_repro_rows(
+        extra_analysis_roots=args.analysis_root,
+        skip_canonical_scan=args.no_canonical_scan,
+    )
 
     if args.experiment_name:
         scope_kind = "experiment_name"

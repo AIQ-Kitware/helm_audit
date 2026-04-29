@@ -789,3 +789,105 @@ assumes HELM-shaped index rows. The EEE-only demo currently produces
 per-packet reports but no cross-packet roll-up. Next session candidate:
 extend the summary builder to walk the EEE-aware index columns and
 produce an aggregate sankey + agreement-curve panel from EEE-only inputs.
+
+## 2026-04-29 04:45:00 -0000
+
+**Model:** claude-opus-4-7 (continued from earlier session, same conversation
+with /loop autonomous mode).
+
+**User intent.** Continue the EEE-only push. Three follow-ups: (a) make
+``eval-audit-from-eee`` produce an aggregate cross-packet summary,
+because per-packet reports alone aren't enough for a tutorial that
+claims to mirror what the HELM-driven path produces; (b) make sure the
+docs reflect the new path; (c) audit the rest of the codebase for HELM
+coupling that would silently break EEE-only flows.
+
+**What landed.**
+
+1. *Aggregate summary on EEE-only inputs.* Restructured the from_eee
+   output layout from ``<out>/core-reports/<packet>/`` to
+   ``<out>/<experiment_name>/core-reports/<packet>/`` so the
+   ``--analysis-root <out>`` glob in ``build_reports_summary`` matches.
+   Added ``--build-aggregate-summary`` to ``eval-audit-from-eee`` which
+   then runs ``build_reports_summary`` with the right flags (no filter
+   inventory, no canonical scan, the synthesized local index).
+
+2. *New ``--no-canonical-scan`` flag on ``build_reports_summary``.* The
+   default behavior of ``_load_all_repro_rows`` is to glob the canonical
+   experiments-analysis store + publication-link tree + legacy-repo
+   tree, which is correct when running over the host's full audit
+   universe but bleeds into a tutorial-scope from_eee run (the demo's
+   summary picked up 168 unrelated reports from the host store before
+   the fix). The new flag lets callers scope the scan to the
+   ``--analysis-root`` arg only. ``eval-audit-from-eee`` passes it.
+
+3. *Cached-packet bug in rebuild_core_report.* The summary builder
+   re-runs ``rebuild_core_report`` on each prioritized example to make
+   sure required artifacts are present. ``_existing_report_packet``
+   was rejecting the cached packet whenever any component had a
+   missing ``run_path``, forcing a planner re-run with default index
+   paths that don't know about the from_eee tree. Fix: accept either
+   ``run_path`` or ``eee_artifact_path`` as a valid on-disk anchor.
+
+4. *Docs sweep.* Added a short ``Tutorial path: eval-audit-from-eee``
+   section to ``docs/pipeline.md`` right under the mental-model
+   diagram, explaining how the EEE-only path skips Stages 1–2 entirely.
+   Added the CLI to the ``Active`` block and the runbook to the
+   ``Execution runbooks`` table in ``README.md``. Updated
+   ``reproduce/eee_only_demo/README.md`` to document the new layout,
+   the engineered drift-bucket counts (``6 exact / 2 low / 1 zero``),
+   and the ``--no-canonical-scan`` constraint that keeps tutorial
+   reports from leaking the host's experiment store.
+
+5. *Tests.* Added two slow-marked tests:
+   - ``test_aggregate_summary_buckets_match_fixture_drift`` asserts the
+     bucket counts (``6 / 2 / 1``) match the engineered DRIFT map.
+   - ``test_aggregate_summary_no_canonical_leak`` reads the aggregate
+     ``reproducibility_rows.latest.csv`` and asserts every
+     ``report_dir`` lives inside the demo output dir. If
+     ``--no-canonical-scan`` regresses, this catches it.
+
+**Coupling audit results.** Surveyed
+``cli/{summarize_experiment_failures, index_historic_helm_runs}``,
+``workflows/{compare_batch, analyze_experiment, index_results}``,
+``reports/pair_report``. Conclusion: each of these is the *HELM-driven*
+side of the pipeline by design. They consume HELM run dirs as primary
+input, not the comparison core. Forcing them onto an EEE-only seam
+would dilute their purpose; the EEE-only entry is ``from_eee`` which
+already routes through the same planner + core_metrics + aggregate
+summary as the HELM path. Decision: don't touch them.
+
+**Design insight.** The aggregate-summary builder was structurally
+ready for EEE-only inputs — the per-packet core reports it consumes
+already carry ``artifact_format`` and ``eee_artifact_path`` on every
+component (Stage-5 work). What was missing was the *non-coupling*
+plumbing: the cached-packet check rejecting EEE-only components, and
+the canonical scan blowing the demo's denominator out by 16×. Both
+are 1–3 line fixes once you can see them, but neither is obvious
+without driving the pipeline EEE-only end-to-end. The demo paid
+back its construction cost the moment we ran it through the full
+analyze→summarize chain.
+
+**Test status.** Default suite: 122 passed, 50 skipped in 13s.
+With ``--run-slow`` for the EEE-only demo: 11/11 in ~140s. Planner +
+rebuild + normalized-compare with ``--run-slow``: 25/25 in 25s.
+
+**Files touched this session.**
+- ``eval_audit/cli/from_eee.py`` — output layout + ``--build-aggregate-summary``
+- ``eval_audit/workflows/build_reports_summary.py`` — ``--no-canonical-scan``
+- ``eval_audit/workflows/rebuild_core_report.py`` — cached-packet EEE acceptance
+- ``docs/pipeline.md`` — tutorial-path section
+- ``README.md`` — CLI list + runbook table
+- ``reproduce/eee_only_demo/{README.md,10_run_analysis.sh}``
+- ``tests/test_eee_only_demo.py`` — +2 slow tests, layout updates
+- ``dev/journals/claude.md`` — this entry
+
+**Next step.** The from_eee path is now complete enough to point a user
+at as a self-contained tutorial: per-packet reports + aggregate summary
++ slow-marked test that pins the engineered drift patterns. The HELM
+side keeps its existing coupling on purpose. If a future agent wants
+more autonomy on the EEE-only side, the natural extension is virtual
+experiments — ``configs/virtual-experiments/<name>.yaml`` currently
+assumes HELM-driven sources, and an ``eee_only`` source kind would let
+a user define a slice over their own EEE tree the same way they
+currently slice over the audit store.
