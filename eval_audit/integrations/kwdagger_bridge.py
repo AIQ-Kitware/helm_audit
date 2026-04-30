@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,41 @@ from typing import Any
 from eval_audit.infra.api import audit_root
 from eval_audit.infra.yaml_io import dump_yaml, load_manifest
 from eval_audit.infra.paths import experiment_result_dpath
+
+
+def _detect_virtualenv_cmd() -> str | None:
+    """Return a shell command that activates the venv eval-audit-run is
+    running in, or ``None`` if no venv is detected.
+
+    Why this matters: kwdagger spawns each job in a fresh shell (tmux
+    pane, slurm job, or serial subprocess). The shell loads the user's
+    rc files and then runs the command. Whether ``.venv`` is activated
+    in that shell depends on whether the user's dotfiles auto-activate
+    it — most don't. Without an explicit activation step, the job's
+    ``python`` may resolve to a pyenv shim, ``/usr/bin/python3``, or a
+    different uv-managed interpreter than the one running this CLI.
+    The symptoms range from silent "wrong package version" mismatches
+    to outright ``ModuleNotFoundError``.
+
+    We use the venv's ``bin/activate`` script when available since it
+    sets ``VIRTUAL_ENV`` and prepends the right PATH the same way an
+    interactive ``source .venv/bin/activate`` does. Fall back to
+    ``None`` when nothing looks like a venv — better to inherit the
+    parent's environment than to inject a broken activation command.
+    """
+    venv = os.environ.get("VIRTUAL_ENV")
+    if not venv:
+        # Not running under an activated venv. Try to derive from
+        # ``sys.prefix`` — uv-run / pipx style invocations don't set
+        # VIRTUAL_ENV but ``sys.prefix`` still points at the env root.
+        if sys.prefix != sys.base_prefix:
+            venv = sys.prefix
+    if not venv:
+        return None
+    activate = Path(venv) / "bin" / "activate"
+    if not activate.is_file():
+        return None
+    return f"source {shlex.quote(str(activate))}"
 
 
 @dataclass(frozen=True)
@@ -116,7 +153,7 @@ def prepare_schedule_request(
 def kwdagger_schedule_argv(request: KWDaggerScheduleRequest) -> list[str]:
     # FIXME(kwdagger): kwdagger currently makes this integration awkward because
     # --params may be either inline YAML text or a YAML file path.
-    return [
+    argv = [
         "kwdagger",
         "schedule",
         f"--queue_name={request.runtime.queue_name}",
@@ -134,6 +171,14 @@ def kwdagger_schedule_argv(request: KWDaggerScheduleRequest) -> list[str]:
         "--log=True",
         "--monitor=tmux",
     ]
+    # Auto-activate the running venv inside each spawned job. See
+    # _detect_virtualenv_cmd for rationale. This is purely additive —
+    # if no venv is detected, the spawned jobs inherit the parent's
+    # environment as before.
+    venv_cmd = _detect_virtualenv_cmd()
+    if venv_cmd:
+        argv.append(f"--virtualenv_cmd={venv_cmd}")
+    return argv
 
 
 def kwdagger_schedule_command_text(request: KWDaggerScheduleRequest) -> str:
