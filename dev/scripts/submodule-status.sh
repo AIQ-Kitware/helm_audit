@@ -23,12 +23,15 @@ if [ ${#SUBMODULES[@]} -eq 0 ]; then
   exit 0
 fi
 
-printf "%-30s %-25s %-12s %s\n" "submodule" "branch" "ahead/behind" "dirty"
-printf "%-30s %-25s %-12s %s\n" "---------" "------" "------------" "-----"
+printf "%-30s %-40s %-12s %-5s %s\n" \
+  "submodule" "branch" "ahead/behind" "dirty" "origin (resolved)"
+printf "%-30s %-40s %-12s %-5s %s\n" \
+  "---------" "------" "------------" "-----" "-----------------"
 
 for sm in "${SUBMODULES[@]}"; do
   if [ ! -d "$sm/.git" ] && [ ! -f "$sm/.git" ]; then
-    printf "%-30s %-25s %-12s %s\n" "$sm" "(not initialized)" "-" "-"
+    printf "%-30s %-40s %-12s %-5s %s\n" \
+      "$sm" "(not initialized)" "-" "-" "-"
     continue
   fi
 
@@ -54,5 +57,14 @@ for sm in "${SUBMODULES[@]}"; do
     dirty="no"
   fi
 
-  printf "%-30s %-25s %-12s %s\n" "$sm" "$branch" "$ab" "$dirty"
+  # Resolved origin URL — uses ``ls-remote --get-url`` so any
+  # ``insteadOf`` / ``pushInsteadOf`` rewrites visible to this clone's
+  # git are applied. That's the URL ``git fetch`` would actually
+  # contact, which is the question users care about when triaging
+  # auth or wrong-server issues.
+  origin_url=$(git -C "$sm" ls-remote --get-url origin 2>/dev/null \
+    || echo "(no origin)")
+
+  printf "%-30s %-40s %-12s %-5s %s\n" \
+    "$sm" "$branch" "$ab" "$dirty" "$origin_url"
 done
