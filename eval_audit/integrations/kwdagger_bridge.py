@@ -127,6 +127,7 @@ def kwdagger_schedule_argv(request: KWDaggerScheduleRequest) -> list[str]:
         f"--backend={request.runtime.backend}",
         f"--skip_existing={1 if request.runtime.skip_existing else 0}",
         f"--run={1 if request.runtime.run else 0}",
+        "--monitor=tmux",
     ]
 
 
