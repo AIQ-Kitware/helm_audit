@@ -23,6 +23,7 @@ cd "$ROOT"
 
 python3 - "$STORE_ROOT" "$OUT_TREE" <<'PYEOF'
 """Build the official/local EEE symlink tree for the reproducibility heatmap."""
+import json
 import sys
 import os
 from pathlib import Path
@@ -125,20 +126,39 @@ VERSION_ROOTS = {"v0.2.4": OFFICIAL_V24, "v0.3.0": OFFICIAL_V30}
 
 
 def _find_eee_jsons(directory: Path, slug_filter: str = "") -> list[Path]:
-    """Return sorted list of EEE aggregate JSONs under directory/eee_output/."""
+    """Return EEE aggregate JSONs under directory/eee_output/, **newest first**.
+
+    Key detail: the same physical run directory frequently contains
+    multiple ``<uuid>.json`` aggregates from successive re-conversions
+    (e.g., the public CRFM EEE store has a mix of old-format files
+    where ``evaluation_result_id`` is None and newer-format files
+    where each metric gets its own per-sample record). The sort key
+    is the aggregate's ``retrieved_timestamp`` (descending) so the
+    caller picking ``[0]`` always gets the most recent — and therefore
+    most-likely-newest-schema — conversion. Sorting alphabetically by
+    UUID would pick a random one and silently drop the join when an
+    old-format file happened to sort first.
+    """
     eee_out = directory / "eee_output"
     if not eee_out.is_dir():
         return []
-    results = []
+    results: list[tuple[float, Path]] = []
     for p in eee_out.rglob("*.json"):
         if p.name in {"status.json", "provenance.json"}:
             continue
         if p.name.endswith("_samples.jsonl"):
             continue
-        results.append(p)
+        try:
+            ts_raw = json.loads(p.read_text()).get("retrieved_timestamp")
+            ts = float(ts_raw) if ts_raw is not None else 0.0
+        except (OSError, ValueError, json.JSONDecodeError):
+            ts = 0.0
+        results.append((ts, p))
     if slug_filter:
-        results = [p for p in results if slug_filter in str(p)]
-    return sorted(results)
+        results = [(t, p) for (t, p) in results if slug_filter in str(p)]
+    # Sort by timestamp descending; ties broken by path for determinism.
+    results.sort(key=lambda tp: (-tp[0], str(tp[1])))
+    return [p for (_t, p) in results]
 
 
 def _symlink_force(src: Path, dst: Path) -> None:
