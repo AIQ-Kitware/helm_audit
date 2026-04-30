@@ -5,43 +5,55 @@
 #   git pull --ff-only
 #   make pull-submodules
 #
-# Behavior depends on whether the submodule has a ``branch =`` entry
-# in .gitmodules (set up via ``make configure-submodule-branches``):
+# The script does three things in order, per submodule:
 #
-#   - branch-pinned submodule: ``git submodule update --init --remote
-#     --merge`` is used. This fetches the configured upstream branch
-#     and merges its tip into the submodule's currently-checked-out
-#     branch. Local commits are preserved (merge-on-pull semantics).
-#     If the local branch matches the configured branch, this is a
-#     fast-forward in the common case.
+#   1. ``git submodule update --init`` — populate any missing working
+#      trees. Idempotent. May leave HEAD detached on the gitlink
+#      commit; that's normal and we fix it in step 2.
 #
-#   - submodule with no branch entry: ``git submodule update --init``
-#     is used (legacy behavior). Will check out the parent's gitlink
-#     commit, possibly leaving a detached HEAD.
+#   2. **Attach detached HEADs to the pinned branch.** When a clone
+#      starts cold, ``git submodule update --init`` checks out the
+#      gitlink SHA in detached state — even when ``branch =`` is set
+#      in .gitmodules. We re-attach HEAD to that branch so day-to-day
+#      development works naturally. The local branch is created from
+#      ``origin/<branch>`` if it doesn't exist yet.
 #
-# Why two behaviors? The ``branch`` entry is the user's signal that
-# they want to develop in the submodule on a real branch and have
-# pulls fast-forward, not snap to a frozen commit. We honor that
-# signal where present and stay out of the way otherwise.
+#   3. ``git submodule update --remote --merge`` — fetch the upstream
+#      tip and merge it into the now-attached branch. Local commits
+#      are preserved (merge-on-pull semantics). This is what makes
+#      "pinned to a branch" actually mean "follows the branch tip"
+#      instead of "frozen at one commit".
 #
-# After running, the submodule status table is printed so any merge
-# conflicts, detached HEADs, or no-upstream branches are easy to spot.
+# Submodules without a ``branch =`` entry skip steps 2 and 3 — they
+# stay on the gitlink commit (legacy behavior).
+#
+# Submodules currently checked out on a *different* branch than the
+# pin are left alone with a warning. We don't force-switch — that
+# could orphan work-in-progress.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-# First-time clones need the working trees populated before --remote
-# can do anything useful. ``--init`` is idempotent.
+# 0. Propagate any ``.gitmodules`` URL changes into both the parent
+#    ``.git/config submodule.<path>.url`` and each submodule's own
+#    ``remote.origin.url``. Without this, a URL change committed
+#    upstream (e.g., switching ``every_eval_ever`` from ``evaleval``
+#    to ``Erotemic``) reaches the file but each clone keeps fetching
+#    from its old origin until ``submodule sync`` runs. The symptom
+#    is fetch failures like "Unable to find current origin/<branch>
+#    revision" because the branch only exists on the *new* remote.
+echo "Syncing submodule URLs from .gitmodules ..."
+git submodule sync --recursive
+
+# 1. First-time / missing working-tree initialization.
+echo
 echo "Initializing missing submodules ..."
 git submodule update --init
 
-# Pin-aware update: --remote follows the configured branch; --merge
-# preserves local commits in the submodule's checked-out branch.
-# Submodules without a ``branch =`` entry are silently no-ops for
-# --remote (git logs a warning that we suppress to keep output clean).
+# 2. + 3. Per-submodule branch attach + remote merge.
 echo
-echo "Updating branch-pinned submodules to upstream tips ..."
+echo "Attaching pinned submodules to their branch and merging upstream ..."
 mapfile -t PINNED < <(
   git config --file .gitmodules --get-regexp 'submodule\..*\.branch' \
     | awk '{print $1}' \
@@ -55,15 +67,40 @@ if [ ${#PINNED[@]} -eq 0 ]; then
 else
   for sm in "${PINNED[@]}"; do
     branch=$(git config --file .gitmodules --get "submodule.$sm.branch")
-    echo "  $sm: tracking '$branch'"
-    # Fetch + merge for this submodule. We go submodule-by-submodule
-    # rather than ``git submodule update --remote --merge`` in bulk
-    # so an error in one doesn't abort the rest, and so the per-
-    # submodule output is attributable.
+
+    current=$(git -C "$sm" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "")
+
+    if [ -z "$current" ]; then
+      # Detached HEAD. Attach to the pinned branch.
+      if git -C "$sm" rev-parse --verify --quiet "$branch" >/dev/null 2>&1; then
+        # Local branch exists already; just check it out.
+        git -C "$sm" switch "$branch"
+        echo "  $sm: attached to local '$branch'"
+      else
+        # Local branch doesn't exist; create it tracking origin/<branch>.
+        # Fetch first so the remote-tracking ref exists.
+        git -C "$sm" fetch origin "$branch" --quiet \
+          || echo "  WARN: $sm: could not fetch '$branch' from origin"
+        if git -C "$sm" rev-parse --verify --quiet "origin/$branch" >/dev/null 2>&1; then
+          git -C "$sm" switch -c "$branch" --track "origin/$branch"
+          echo "  $sm: created local '$branch' tracking 'origin/$branch'"
+        else
+          echo "  WARN: $sm: 'origin/$branch' does not exist on the remote;"
+          echo "        leaving submodule in detached HEAD."
+          continue
+        fi
+      fi
+      current="$branch"
+    elif [ "$current" != "$branch" ]; then
+      echo "  $sm: on '$current', not the pinned '$branch' — leaving alone"
+      continue
+    fi
+
+    # Branch is attached and matches the pin. Fetch + merge upstream tip.
+    echo "  $sm: tracking '$branch' — merging upstream"
     if ! git submodule update --remote --merge "$sm"; then
       echo "  WARN: failed to update $sm (see message above);"
-      echo "        usually a merge conflict in the submodule —"
-      echo "        resolve inside that working tree and re-run."
+      echo "        usually a fetch problem (auth) or a merge conflict."
     fi
   done
 fi
