@@ -58,7 +58,11 @@ from loguru import logger
 
 from eval_audit.infra.logging import setup_cli_logging
 from eval_audit.infra.api import repo_run_details_fpath, repo_run_specs_fpath
-from eval_audit.helm.run_entries import parse_run_entry_description, parse_run_name_to_kv
+from eval_audit.helm.run_entries import (
+    parse_run_entry_description,
+    parse_run_name_to_kv,
+    reconstruct_run_entry_from_run_spec,
+)
 from eval_audit.indexing.schema import (
     KNOWN_STRUCTURAL_JUNK_NAMES,
     OFFICIAL_COMPONENT_COLUMNS,
@@ -521,25 +525,40 @@ def build_run_table(
             run_spec = run.json.run_spec()
             scenario_class = run_spec['scenario_spec']['class_name']
             model = run_spec['adapter_spec']['model']
-            run_spec_name = run_spec['name']
+            display_name = run_spec['name']
         else:
             run_spec = run.msgspec.run_spec()
             scenario_class = run_spec.scenario_spec.class_name
             model = run_spec.adapter_spec.model
-            run_spec_name = run_spec.name
+            display_name = run_spec.name
 
-        if run.path.name != run_spec_name.replace('/', '_'):
+        if run.path.name != display_name.replace('/', '_'):
             mismatches.append({
                 'run.path.parent': run.path.parent,
                 'run.path.name': run.path.name,
-                'run_spec_name': run_spec_name,
+                'run_spec_name': display_name,
             })
 
-        # Hack: run spec names sometimes don't correctly encode the model
-        FIX_RUN_SPEC_NAME = True
-        if FIX_RUN_SPEC_NAME:
+        # HELM's `run_spec.json.name` is a display string and is NOT a
+        # valid `helm-run --run-entries` argument across the board (mixed
+        # separators, display-vs-kwarg renames, leaked metadata fields).
+        # Reconstruct from the structural fields so the audit list we
+        # emit round-trips through helm-run cleanly. Falls back to the
+        # display name if the registry lookup or signature introspection
+        # fails — the legacy "fix the model slash" hack is preserved as
+        # the fallback path.
+        run_spec_name, dropped_kwargs = reconstruct_run_entry_from_run_spec(run_spec)
+        if dropped_kwargs:
+            logger.debug(
+                'Dropped non-arg kwargs while reconstructing run_entry for {}: {}',
+                run.path.name, dropped_kwargs,
+            )
+        if run_spec_name == display_name:
+            # Reconstruction declined to rewrite — apply the legacy
+            # underscore-to-slash fixup so the model field is still
+            # canonical when fed back into helm-run.
             normalized_model = model.replace('/', '_')
-            run_spec_name = run_spec_name.replace(normalized_model, model)
+            run_spec_name = display_name.replace(normalized_model, model)
 
         rows.append({
             # "benchmark_output_dir": str(Path(outputs.root_dir)),

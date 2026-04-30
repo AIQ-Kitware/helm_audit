@@ -893,14 +893,27 @@ def _build_end_to_end_funnel_root() -> tuple[sankey_builder.Root, list[str], dic
 
 
 def _read_log_tail(job_dpath: Path, max_chars: int = 40000) -> str:
-    log_fpath = job_dpath / "helm-run.log"
-    if not log_fpath.exists():
+    """Concatenate the tails of ``helm-run.log`` and the wrapped command's
+    stderr/stdout so the failure classifier sees errors raised both inside
+    HELM (logged) and outside HELM (caught only by the parent shell — e.g.
+    TypeError from ``run_spec_function(**args)`` before HELM's logger is up).
+    """
+    parts: list[str] = []
+    for name in ("helm-run.log", "cmd_stderr.txt", "cmd_stdout.txt"):
+        fpath = job_dpath / name
+        if not fpath.exists():
+            continue
+        try:
+            text = fpath.read_text(errors="ignore")
+        except Exception:
+            continue
+        if not text:
+            continue
+        parts.append(text[-max_chars:])
+    if not parts:
         return ""
-    try:
-        text = log_fpath.read_text(errors="ignore")
-    except Exception:
-        return ""
-    return text[-max_chars:]
+    combined = "\n".join(parts)
+    return combined[-max_chars:]
 
 
 def _classify_failure(job_dpath: Path, row: dict[str, Any]) -> dict[str, Any]:
@@ -909,6 +922,35 @@ def _classify_failure(job_dpath: Path, row: dict[str, Any]) -> dict[str, Any]:
     status = _normalize_text(row.get("status"))
 
     checks: list[tuple[str, str, list[str]]] = [
+        (
+            # Deliberate policy decision: by default we do not opt into
+            # arbitrary code execution from third-party HuggingFace dataset
+            # repositories. A future opt-in mechanism (per-scenario allow-list,
+            # an ``--allow-arbitrary-code-execution`` knob, or similar) could
+            # promote this from "blocked" to "permitted for X". For now,
+            # surface as a known/expected blocker rather than an unknown
+            # failure. Affected example: ``ought/raft``.
+            "trust_remote_code_required",
+            "dataset requires arbitrary code execution (trust_remote_code=True); blocked by current policy",
+            [
+                "contains custom code which must be executed",
+                "trust_remote_code=true",
+                "pass the argument `trust_remote_code=true`",
+            ],
+        ),
+        (
+            # Caught by the parent-shell stderr capture (cmd_stderr.txt)
+            # because the TypeError fires before helm-run's own logger is up.
+            # Reconstruction in eval_audit/helm/run_entries.py prevents new
+            # occurrences; this rule classifies any historical failures.
+            "malformed_run_entry",
+            "run_entry passed kwargs the run_spec_function does not accept",
+            [
+                "got an unexpected keyword argument",
+                "did you mean",
+                "unknown run spec name",
+            ],
+        ),
         (
             "missing_openai_annotation_credentials",
             "run depends on OpenAI-backed annotation but no API key was configured",
@@ -3401,6 +3443,8 @@ _FAILURE_CATEGORIES: dict[str, tuple[str, str]] = {
     "missing_dataset_or_cached_artifact": ("data_access", "Data Access Barrier"),
     "missing_math_dataset": ("missing_infrastructure", "Missing Special Infrastructure"),
     "missing_openai_annotation_credentials": ("missing_infrastructure", "Missing Special Infrastructure"),
+    "trust_remote_code_required": ("policy_blocked", "Policy Blocked (opt-in)"),
+    "malformed_run_entry": ("recipe_error", "Recipe / Configuration Error"),
     "missing_runtime_log": ("unknown", "Unknown / Other"),
     "unknown_failure": ("unknown", "Unknown / Other"),
 }
@@ -3408,12 +3452,16 @@ _FAILURE_CATEGORY_ORDER = [
     "hardware_timeout",
     "data_access",
     "missing_infrastructure",
+    "policy_blocked",
+    "recipe_error",
     "unknown",
 ]
 _FAILURE_CATEGORY_LABELS = {
     "hardware_timeout": "Hardware / Compute Timeout",
     "data_access": "Data Access Barrier",
     "missing_infrastructure": "Missing Special Infrastructure",
+    "policy_blocked": "Policy Blocked (opt-in)",
+    "recipe_error": "Recipe / Configuration Error",
     "unknown": "Unknown / Other",
 }
 

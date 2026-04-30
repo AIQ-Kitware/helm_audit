@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import re
+from functools import lru_cache
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator
 
 
 def parse_run_entry_description(desc: str) -> tuple[str, dict[str, object]]:
@@ -90,6 +92,162 @@ def run_dir_matches_requested(run_dir_name: str, requested_desc: str) -> bool:
         if cand_kv[k] != v:
             return False
     return True
+
+
+@lru_cache(maxsize=1)
+def _registered_run_spec_function_names() -> tuple[str, ...]:
+    """Return all run-spec-function names registered with HELM (cached)."""
+    from helm.benchmark.run_spec import (
+        _REGISTERED_RUN_SPEC_FUNCTIONS,
+        discover_run_spec_functions,
+    )
+    discover_run_spec_functions()
+    return tuple(_REGISTERED_RUN_SPEC_FUNCTIONS.keys())
+
+
+@lru_cache(maxsize=1)
+def _registered_run_expander_names() -> frozenset[str]:
+    """Return all HELM RunExpander ``name`` tags (cached).
+
+    RunExpanders are meta-kwargs the run-entry parser intercepts *before*
+    calling the run-spec-function (e.g. ``data_augmentation``, ``eval_split``,
+    ``temperature``). They are valid run-entry kwargs even though they don't
+    appear in any run-spec-function signature — preserve them during
+    reconstruction.
+    """
+    from helm.benchmark.run_expander import RUN_EXPANDERS
+    return frozenset(RUN_EXPANDERS.keys())
+
+
+# kwargs HELM appends to a run_spec.name as pure display decoration *after*
+# the run_spec is constructed. They are never valid as run-entry kwargs;
+# always drop them silently when reconstructing.
+_DISPLAY_ONLY_DECORATIONS: frozenset[str] = frozenset({"groups"})
+
+
+def _resolve_registry_name_from_display(display_name: str) -> str | None:
+    """Find the run-spec-function registry name that prefixes a display name.
+
+    HELM uses ``:``, ``,``, and ``_`` inconsistently as the separator between
+    the scenario name and its first kwarg in the *display* string (the
+    ``run_spec.json`` ``name`` field). Returns the longest registered name
+    ``N`` such that ``display_name == N`` or
+    ``display_name[len(N)] in {':', ',', '_'}``. ``None`` if no registered
+    name matches.
+    """
+    if not display_name:
+        return None
+    candidates = [
+        n for n in _registered_run_spec_function_names()
+        if display_name == n
+        or (
+            display_name.startswith(n)
+            and len(display_name) > len(n)
+            and display_name[len(n)] in (':', ',', '_')
+        )
+    ]
+    return max(candidates, key=len) if candidates else None
+
+
+def _extract_display_kwargs(display_name: str, registry_name: str) -> dict[str, str]:
+    """Best-effort parse of ``key=value`` tokens from the display-name suffix.
+
+    Splits on ``,`` and ``:`` only — never on ``_`` (HELM display names
+    contain underscores inside legitimate kwarg names like
+    ``use_chain_of_thought``). Leading separator characters on each token
+    are stripped so the ``dyck_language_np=3`` shape ("kwarg glued to the
+    scenario name with ``_``") still parses cleanly.
+    """
+    rest = display_name[len(registry_name):]
+    kv: dict[str, str] = {}
+    for tok in re.split(r'[,:]', rest):
+        tok = re.sub(r'^[_,:]+', '', tok).strip()
+        if '=' in tok:
+            k, _, v = tok.partition('=')
+            kv[k.strip()] = v.strip()
+    return kv
+
+
+def reconstruct_run_entry_from_run_spec(run_spec: dict[str, Any]) -> tuple[str, list[str]]:
+    """Build a valid ``helm-run --run-entries`` argument from a ``run_spec.json`` dict.
+
+    HELM's ``run_spec['name']`` is a *display* string used as a directory
+    and log identifier. It does not round-trip through ``helm-run``'s
+    parser in several known cases:
+
+    - mixed separators (``dyck_language_np=3``, ``legal_support,method=...``)
+    - display-vs-kwarg renames (``mmlu_pro: subset`` vs kwarg ``subject``)
+    - non-constructor metadata leaked into the name
+      (``...,eval_split=test,groups=mmlu_<subject>`` for ``mmlu``)
+
+    Reconstruct from the structural fields HELM stores explicitly:
+
+    1. registry name — longest run-spec-function name that prefixes the
+       display name with one of ``{':', ',', '_'}`` after it.
+    2. scenario kwargs — :attr:`scenario_spec.args` is authoritative and
+       wins over anything parsed from the display name.
+    3. ``method`` — pulled from :attr:`adapter_spec.method` when the
+       run-spec-function accepts it.
+    4. additional kwargs — display-name tokens whose names appear in the
+       function signature and aren't already provided by (2) or (3).
+    5. ``model`` — always taken from :attr:`adapter_spec.model` (HELM's
+       run-entry convention).
+
+    Kwargs that don't match the run-spec-function signature are dropped
+    and reported in the second return value, so the caller can log a
+    warning. If the registry lookup fails or the function can't be
+    introspected, returns ``(display_name, ['unresolved_registry_name'])``
+    so the caller can fall back.
+    """
+    import inspect
+
+    display_name = (run_spec.get('name') or '').strip()
+    scenario_spec = run_spec.get('scenario_spec') or {}
+    scenario_args = dict(scenario_spec.get('args') or {})
+    adapter_spec = run_spec.get('adapter_spec') or {}
+    model = adapter_spec.get('model')
+    method = adapter_spec.get('method')
+
+    registry_name = _resolve_registry_name_from_display(display_name)
+    if registry_name is None:
+        return display_name, ['unresolved_registry_name']
+
+    try:
+        from helm.benchmark.run_spec import get_run_spec_function
+        fn = get_run_spec_function(registry_name)
+        sig_params = set(inspect.signature(fn).parameters.keys())
+    except Exception:
+        return display_name, [f'introspection_failed:{registry_name}']
+
+    kwargs: dict[str, str] = {}
+    dropped: list[str] = []
+
+    for k, v in scenario_args.items():
+        if k in sig_params:
+            kwargs[k] = str(v)
+        else:
+            dropped.append(f'scenario_args.{k}')
+
+    if 'method' in sig_params and method:
+        kwargs.setdefault('method', str(method))
+
+    expander_names = _registered_run_expander_names()
+    for k, v in _extract_display_kwargs(display_name, registry_name).items():
+        if k == 'model':
+            continue  # canonical model comes from adapter_spec.model
+        if k in _DISPLAY_ONLY_DECORATIONS:
+            continue  # never valid as a run-entry kwarg
+        if k in sig_params or k in expander_names:
+            kwargs.setdefault(k, str(v))
+        else:
+            dropped.append(f'display.{k}')
+
+    if model:
+        kwargs['model'] = str(model)
+
+    parts = [f'{k}={v}' for k, v in kwargs.items()]
+    run_entry = f'{registry_name}:{",".join(parts)}' if parts else registry_name
+    return run_entry, dropped
 
 
 def discover_benchmark_output_dirs(
