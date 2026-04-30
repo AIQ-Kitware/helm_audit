@@ -236,14 +236,16 @@ def _prefilter_index_rows(
 def _resolve_artifact_format(row: dict[str, Any]) -> tuple[str, str | None, bool]:
     """Determine ``(artifact_format, eee_artifact_path)`` for an index row.
 
-    Index rows that explicitly set ``artifact_format`` win. Otherwise, we
-    look for an ``eee_artifact_path`` (or ``eee_path``) column to mark the
-    row as ``eee``-shape. The fallback is the historical ``helm`` format
-    backed by raw HELM JSON files at ``run_path``.
+    Index rows that explicitly set a *non-default* ``artifact_format`` win.
+    The local audit indexer hardcodes ``artifact_format='helm'`` as a
+    placeholder default, so we treat that value as non-explicit — otherwise
+    every local row would short-circuit out of the EEE resolver and force a
+    re-conversion via :class:`HelmRawLoader`. Only formats other than
+    ``helm`` are taken as user intent.
     """
     explicit = _clean_optional_text(row.get("artifact_format"))
     eee_path = _clean_optional_text(row.get("eee_artifact_path") or row.get("eee_path"))
-    if explicit:
+    if explicit and explicit != "helm":
         return explicit, eee_path, True
     if eee_path:
         return "eee", eee_path, False
