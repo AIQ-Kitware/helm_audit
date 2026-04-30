@@ -127,6 +127,11 @@ def kwdagger_schedule_argv(request: KWDaggerScheduleRequest) -> list[str]:
         f"--backend={request.runtime.backend}",
         f"--skip_existing={1 if request.runtime.skip_existing else 0}",
         f"--run={1 if request.runtime.run else 0}",
+        # Tee per-node stdout/stderr to info_dpath/status/<pathid>.logs so
+        # cmd_queue's failure surfacing has content to display when a job
+        # crashes before helm-run starts (i.e. before
+        # materialize_helm.run_helm captures cmd_stdout.txt/cmd_stderr.txt).
+        "--log=True",
         "--monitor=tmux",
     ]
 

@@ -241,17 +241,24 @@ PRESET_CONFIGS: dict[str, dict[str, Any]] = {
                 # 02_warmup_data.sh once credentials are in place.
                 # "gpqa:subset=gpqa_main,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
                 "mmlu_pro:subject=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
-                "omni_math:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
-                "wildbench:subset=v2,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
-                # ── gpt-oss 20B: missing safety/v1.14.0 entries
-                # NOTE: these scenarios may require a HELM upgrade to
-                # the v1.14.0+ safety track on aiq-gpu before they will
-                # resolve; verify with ``helm-run --help`` listing
-                # before running 50_run_full.sh.
-                "anthropic_red_team:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
-                "harm_bench:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
-                "simple_safety_tests:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
-                "xstest:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
+                # Disabled 2026-04-30: external-validator scenarios.
+                # These benchmarks ship HELM annotators that hardcode
+                # third-party graders (openai/gpt-4o, together/llama-...)
+                # via ``Annotator.auto_client.make_request(...)``. The
+                # graders pull credentials from HELM's
+                # ``prod_env/credentials.conf`` (or ``$HELM_CREDENTIALS``)
+                # — *not* from our bundle's ``model_deployments.yaml``.
+                # Since this is a *local* reproducibility audit, we don't
+                # send queries to external paid APIs. Re-enable by
+                # uncommenting and either dropping a ``credentials.conf``
+                # at the helm-run base-path or exporting
+                # ``HELM_CREDENTIALS='openaiApiKey: "sk-..."'``.
+                # "omni_math:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",  # OmniMATHAnnotator (LLM-as-jury)
+                # "wildbench:subset=v2,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",  # WildBenchAnnotator → openai/gpt-4o + together/llama-3.1-405b
+                # "anthropic_red_team:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",  # AnthropicRedTeamAnnotator
+                # "harm_bench:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",  # HarmBenchAnnotator (LLM-as-jury)
+                # "simple_safety_tests:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",  # SimpleSafetyTestsAnnotator
+                # "xstest:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",  # XSTestAnnotator
             ],
             "suite": "audit-finish-qwen25-gptoss",
             "max_eval_instances": 1000,
