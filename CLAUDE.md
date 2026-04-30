@@ -187,6 +187,13 @@ python -m py_compile eval_audit/workflows/build_reports_summary.py
 - Want to recover disk on this VM if it gets in the way?
   `uv cache prune` reclaims ~10 GB. Don't wipe HF — it's small and
   the user may need cached weights.
+- **`OSError: [Errno 24] Too many open files` / `ln: Too many open files`
+  on this VM is an environment problem, not a code bug.** It can hit
+  even simple operations (a single `ln -sf`, `import pandas`) and is
+  not reproducible in an interactive shell. Do not attempt to work
+  around it (rewriting bash with `readarray`, switching to Python,
+  closing FDs, etc.) — stop and ask the user to recycle the
+  environment. The user has confirmed this is a known VM issue.
 
 ## Summary
 

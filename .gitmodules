@@ -14,3 +14,6 @@
 [submodule "submodules/every_eval_ever"]
 	path = submodules/every_eval_ever
 	url = https://github.com/evaleval/every_eval_ever.git
+[submodule "submodules/cmd_queue"]
+	path = submodules/cmd_queue
+	url = git@gitlab.kitware.com:computer-vision/cmd_queue.git
