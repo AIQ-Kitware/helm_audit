@@ -8,6 +8,7 @@ keeping raw HELM paths as provenance.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shlex
@@ -19,9 +20,18 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import safer
+
 from eval_audit.helm.hashers import stable_hash36
 from eval_audit.infra.paths import audit_store_root, repo_root
 from eval_audit.normalized.loaders import _eee_converter_name, _eee_converter_version
+
+
+def _atomic_write_text(fpath: Path, content: str) -> None:
+    """Atomic write via :mod:`safer` so concurrent readers never see a partial file."""
+    fpath.parent.mkdir(parents=True, exist_ok=True)
+    with safer.open(str(fpath), "w") as fh:
+        fh.write(content)
 
 
 def default_official_eee_root() -> Path:
@@ -32,6 +42,151 @@ def default_official_eee_root() -> Path:
 def default_local_eee_root() -> Path:
     """Default root for local HELM->EEE conversions generated on demand."""
     return audit_store_root() / "eee" / "local"
+
+
+def default_helm_raw_cache_root() -> Path:
+    """Default root for the content-addressed HELM->EEE cache used by ``HelmRawLoader``.
+
+    Keyed by ``sha256(resolved_run_path)`` so any caller that hands a HELM
+    run directory to the loader hits the same cache regardless of which
+    experiment / planner identity it traces back to. The planner's
+    experiment-keyed cache (:func:`local_eee_parent_for_row`) and this
+    content-addressed cache live side by side; either can satisfy a load.
+    """
+    return audit_store_root() / "eee" / "by-run-path"
+
+
+def helm_raw_cache_parent(run_path: str | Path) -> Path:
+    """Deterministic cache parent for one HELM run directory."""
+    resolved = str(Path(run_path).expanduser().resolve())
+    digest = hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:16]
+    return default_helm_raw_cache_root() / digest
+
+
+def convert_helm_run_to_cached_eee(
+    run_path: str | Path,
+    *,
+    source_kind: str = "local",
+    source_organization_name: str = "eval_audit_helm_raw",
+    eval_library_name: str = "HELM",
+    eval_library_version: str = "unknown",
+    evaluator_relationship: str = "third_party",
+) -> EeeArtifactResolution:
+    """Convert a HELM run directory to EEE under the content-addressed cache.
+
+    Atomic on a per-file basis via :func:`_atomic_write_text`, and idempotent:
+    if another process has already populated the cache the existing artifact
+    is returned without re-running the converter.
+    """
+    run_path = Path(run_path).expanduser().resolve()
+    if not run_path.is_dir():
+        return EeeArtifactResolution(
+            artifact_path=None,
+            status="missing_run_path",
+            source="helm_raw_cached_conversion",
+            message=f"run path does not exist: {run_path}",
+        )
+
+    parent = helm_raw_cache_parent(run_path)
+    artifact_path = parent / "eee_output"
+    status_path = parent / "status.json"
+    provenance_path = parent / "provenance.json"
+    if _artifact_has_aggregate(artifact_path):
+        return EeeArtifactResolution(
+            artifact_path=artifact_path.resolve(),
+            status="found",
+            source="helm_raw_cached_conversion",
+            status_path=status_path.resolve() if status_path.exists() else None,
+            provenance_path=provenance_path.resolve() if provenance_path.exists() else None,
+        )
+    parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    eval_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, str(run_path)))
+    metadata_args = {
+        "source_organization_name": source_organization_name,
+        "evaluator_relationship": evaluator_relationship,
+        "eval_library_name": eval_library_name,
+        "eval_library_version": eval_library_version,
+        "parent_eval_output_dir": str(artifact_path),
+        "file_uuid": eval_uuid,
+    }
+    status: dict[str, Any] = {
+        "source_kind": source_kind,
+        "status": "started",
+        "timestamp": timestamp,
+        "run_path": str(run_path),
+        "out_dir": str(parent),
+        "eee_artifact_path": str(artifact_path),
+        "converter_name": _eee_converter_name(),
+        "converter_version": _eee_converter_version(),
+    }
+
+    try:
+        from every_eval_ever.converters.helm.adapter import HELMAdapter
+
+        adapter = HELMAdapter()
+        logs = adapter.transform_from_directory(
+            str(run_path),
+            output_path=str(artifact_path / "helm_output"),
+            metadata_args=metadata_args,
+        )
+        aggregate_paths: list[str] = []
+        for log in logs:
+            aggregate_path = _aggregate_path_for_log(log, artifact_path, eval_uuid)
+            _atomic_write_text(
+                aggregate_path,
+                log.model_dump_json(exclude_none=True, indent=2) + "\n",
+            )
+            aggregate_paths.append(str(aggregate_path))
+        status.update(
+            {
+                "status": "ok",
+                "returncode": 0,
+                "n_evaluation_logs": len(logs),
+                "aggregate_paths": aggregate_paths,
+            }
+        )
+        _atomic_write_text(provenance_path, json.dumps({**status}, indent=2, default=str) + "\n")
+        _atomic_write_text(status_path, json.dumps(status, indent=2, default=str) + "\n")
+        if not _artifact_has_aggregate(artifact_path):
+            return EeeArtifactResolution(
+                artifact_path=None,
+                status="conversion_empty",
+                source="helm_raw_cached_conversion",
+                status_path=status_path.resolve(),
+                provenance_path=provenance_path.resolve(),
+                message="converter completed but wrote no aggregate JSON",
+                generated=True,
+            )
+        return EeeArtifactResolution(
+            artifact_path=artifact_path.resolve(),
+            status="generated",
+            source="helm_raw_cached_conversion",
+            status_path=status_path.resolve(),
+            provenance_path=provenance_path.resolve(),
+            generated=True,
+        )
+    except Exception as exc:
+        status.update(
+            {
+                "status": "fail",
+                "exception_class": type(exc).__name__,
+                "failure_snippet": traceback.format_exc()[-4000:],
+                "returncode": -1,
+            }
+        )
+        _atomic_write_text(status_path, json.dumps(status, indent=2, default=str) + "\n")
+        return EeeArtifactResolution(
+            artifact_path=None,
+            status="conversion_failed",
+            source="helm_raw_cached_conversion",
+            status_path=status_path.resolve(),
+            provenance_path=provenance_path.resolve() if provenance_path.exists() else None,
+            message=f"{type(exc).__name__}: {exc}",
+            generated=True,
+        )
 
 
 def _clean_optional_text(value: Any) -> str | None:
@@ -319,7 +474,7 @@ def _write_local_reproduce_script(parent: Path, run_path: Path, artifact_path: P
         f"cd {shlex.quote(str(repo_root()))}",
         "PYTHONPATH=\"${PYTHONPATH:-$PWD}\" " + " ".join(shlex.quote(part) for part in cmd),
     ]
-    script_fpath.write_text("\n".join(lines) + "\n")
+    _atomic_write_text(script_fpath, "\n".join(lines) + "\n")
     script_fpath.chmod(0o755)
     return script_fpath
 
@@ -412,8 +567,10 @@ def convert_local_helm_run_to_eee(
         aggregate_paths: list[str] = []
         for log in logs:
             aggregate_path = _aggregate_path_for_log(log, artifact_path, eval_uuid)
-            aggregate_path.parent.mkdir(parents=True, exist_ok=True)
-            aggregate_path.write_text(log.model_dump_json(exclude_none=True, indent=2) + "\n")
+            _atomic_write_text(
+                aggregate_path,
+                log.model_dump_json(exclude_none=True, indent=2) + "\n",
+            )
             aggregate_paths.append(str(aggregate_path))
         status.update(
             {
@@ -428,8 +585,8 @@ def convert_local_helm_run_to_eee(
             "index_row": dict(row),
             "reproduce_script": str(_write_local_reproduce_script(parent, run_path, artifact_path)),
         }
-        provenance_path.write_text(json.dumps(provenance, indent=2, default=str) + "\n")
-        status_path.write_text(json.dumps(status, indent=2, default=str) + "\n")
+        _atomic_write_text(provenance_path, json.dumps(provenance, indent=2, default=str) + "\n")
+        _atomic_write_text(status_path, json.dumps(status, indent=2, default=str) + "\n")
         if not _artifact_has_aggregate(artifact_path):
             return EeeArtifactResolution(
                 artifact_path=None,
@@ -457,7 +614,7 @@ def convert_local_helm_run_to_eee(
                 "returncode": -1,
             }
         )
-        status_path.write_text(json.dumps(status, indent=2, default=str) + "\n")
+        _atomic_write_text(status_path, json.dumps(status, indent=2, default=str) + "\n")
         return EeeArtifactResolution(
             artifact_path=None,
             status="conversion_failed",
@@ -471,9 +628,12 @@ def convert_local_helm_run_to_eee(
 
 __all__ = [
     "EeeArtifactResolution",
+    "convert_helm_run_to_cached_eee",
     "convert_local_helm_run_to_eee",
+    "default_helm_raw_cache_root",
     "default_local_eee_root",
     "default_official_eee_root",
+    "helm_raw_cache_parent",
     "local_eee_parent_for_row",
     "resolve_local_eee_artifact",
     "resolve_official_eee_artifact",

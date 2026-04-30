@@ -21,7 +21,6 @@ from __future__ import annotations
 import abc
 import importlib.metadata
 import json
-import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
@@ -259,73 +258,74 @@ class HelmRawLoader(Loader):
                 f"HELM run {run_path} is missing required files: {missing}"
             )
 
-        try:
-            from every_eval_ever.converters.helm.adapter import HELMAdapter
-        except ImportError as exc:
-            raise LoaderError(
-                "every_eval_ever.converters.helm requires crfm-helm to be installed"
-            ) from exc
-
-        metadata_args = {
-            "source_organization_name": ref.extra.get("source_organization_name", "unknown"),
-            "evaluator_relationship": ref.extra.get(
-                "evaluator_relationship", "third_party"
-            ),
-            "eval_library_name": ref.extra.get("eval_library_name", "HELM"),
-            "eval_library_version": ref.extra.get("eval_library_version", "unknown"),
-            "source_organization_url": ref.extra.get("source_organization_url"),
-            "source_organization_logo_url": ref.extra.get("source_organization_logo_url"),
-        }
-
-        adapter = HELMAdapter()
-        # The HELM EEE adapter currently writes per-instance JSONLs to disk
-        # under ``parent_eval_output_dir`` as a side effect of
-        # ``transform_from_directory``. Direct it at a temporary directory we
-        # then discard — we build our own per-instance records below from
-        # the raw HELM artifacts so we can preserve per-(instance, metric)
-        # granularity that the EEE converter currently collapses.
-        with tempfile.TemporaryDirectory(prefix="eval-audit-eee-load-") as tmp:
-            metadata_args = dict(metadata_args)
-            metadata_args.setdefault("parent_eval_output_dir", tmp)
-            aggregates = adapter.transform_from_directory(
-                str(run_path),
-                output_path=str(Path(tmp) / "ignored.jsonl"),
-                metadata_args=metadata_args,
-            )
-        if not aggregates:
-            raise LoaderError(f"HELMAdapter produced no EvaluationLog from {run_path}")
-        evaluation_log = aggregates[0]
-
-        # Build per-instance records straight from the HELM artifacts. We
-        # avoid the converter's instance-level adapter so we can preserve
-        # per-(instance, metric) granularity that the canonical EEE
-        # converter currently collapses.
-        instances = _instances_from_raw_helm(run_path, evaluation_log)
-
-        # Cache the raw HELM JSONs on the run for any legacy callers still
-        # in flight during migration.
-        raw_helm = _read_raw_helm_jsons(run_path)
-
-        new_origin = Origin(
-            helm_run_path=run_path,
-            eee_artifact_path=None,
-            converter_name=_eee_converter_name(),
-            converter_version=_eee_converter_version(),
+        # Delegate to the content-addressed cache. On hit, read directly via
+        # :class:`EeeArtifactLoader`; on miss, run the HELM->EEE conversion
+        # once into the cache (atomic per file via :mod:`safer`) and load the
+        # cached artifact. This replaces the historical "convert into a
+        # /tmp dir and discard" pattern that re-ran the converter on every
+        # call.
+        from eval_audit.normalized.eee_artifacts import (
+            _artifact_has_aggregate,
+            convert_helm_run_to_cached_eee,
+            helm_raw_cache_parent,
         )
-        new_ref = NormalizedRunRef(
+
+        cache_parent = helm_raw_cache_parent(run_path)
+        cache_artifact = cache_parent / "eee_output"
+        if not _artifact_has_aggregate(cache_artifact):
+            resolution = convert_helm_run_to_cached_eee(
+                run_path,
+                source_kind=ref.source_kind.value if hasattr(ref.source_kind, "value") else str(ref.source_kind),
+                source_organization_name=ref.extra.get("source_organization_name", "eval_audit_helm_raw"),
+                eval_library_name=ref.extra.get("eval_library_name", "HELM"),
+                eval_library_version=ref.extra.get("eval_library_version", "unknown"),
+                evaluator_relationship=ref.extra.get("evaluator_relationship", "third_party"),
+            )
+            if resolution.artifact_path is None:
+                raise LoaderError(
+                    f"HELM->EEE conversion failed for {run_path}: "
+                    f"status={resolution.status} message={resolution.message}"
+                )
+            cache_artifact = resolution.artifact_path
+
+        eee_ref = NormalizedRunRef(
             source_kind=ref.source_kind,
-            artifact_format=ref.artifact_format,
-            artifact_path=ref.artifact_path,
-            origin=new_origin,
+            artifact_format=ArtifactFormat.EEE,
+            artifact_path=cache_artifact,
+            origin=Origin(
+                helm_run_path=run_path,
+                eee_artifact_path=cache_artifact,
+                converter_name=_eee_converter_name(),
+                converter_version=_eee_converter_version(),
+            ),
             component_id=ref.component_id,
             logical_run_key=ref.logical_run_key,
             display_name=ref.display_name,
             extra=ref.extra,
         )
+        run = get_loader(ArtifactFormat.EEE).load(eee_ref)
+        # Preserve the original ref's HELM artifact path / format so callers
+        # that introspect ``run.ref`` see the same identity they passed in.
+        new_ref = NormalizedRunRef(
+            source_kind=ref.source_kind,
+            artifact_format=ref.artifact_format,
+            artifact_path=ref.artifact_path,
+            origin=Origin(
+                helm_run_path=run_path,
+                eee_artifact_path=cache_artifact,
+                converter_name=run.ref.origin.converter_name,
+                converter_version=run.ref.origin.converter_version,
+            ),
+            component_id=ref.component_id,
+            logical_run_key=ref.logical_run_key,
+            display_name=ref.display_name,
+            extra=ref.extra,
+        )
+        raw_helm = _read_raw_helm_jsons(run_path)
         return NormalizedRun(
             ref=new_ref,
-            evaluation_log=evaluation_log,
-            instances=instances,
+            evaluation_log=run.evaluation_log,
+            instances=run.instances,
             raw_helm=raw_helm,
         )
 
