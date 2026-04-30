@@ -70,11 +70,29 @@ def normalize_run_entry_for_historic_lookup(run_entry: str) -> str:
     return format_run_name_from_kv(bench, kv)
 
 
-def canonicalize_kv(kv: dict[str, object]) -> dict[str, object]:
+# HELM display-name kwarg aliases keyed by benchmark family. Some HELM
+# run-spec functions accept one kwarg name but write a *different* token
+# into the run_spec.name display string — e.g. ``mmlu_pro`` accepts
+# ``subject`` but emits ``subset=...``. Mirrors the table in
+# ``aiq-magnet/.../materialize_helm_run.py``; keep them in sync.
+_BENCHMARK_KWARG_ALIASES: dict[str, dict[str, str]] = {
+    "mmlu_pro": {"subject": "subset"},
+}
+
+
+def canonicalize_kv(kv: dict[str, object], benchmark: str | None = None) -> dict[str, object]:
     kv = dict(kv)
-    model = kv.get("model", None)
-    if isinstance(model, str):
-        kv["model"] = model.replace("/", "_")
+    # HELM run dirs replace ``/`` with ``_`` in model and model_deployment
+    # tokens. Mirror that here so requested-vs-candidate matches survive
+    # the round-trip.
+    for key in ("model", "model_deployment"):
+        value = kv.get(key, None)
+        if isinstance(value, str):
+            kv[key] = value.replace("/", "_")
+    aliases = _BENCHMARK_KWARG_ALIASES.get(benchmark or "", {})
+    for src, dst in aliases.items():
+        if src in kv and dst not in kv:
+            kv[dst] = kv.pop(src)
     return kv
 
 
@@ -84,8 +102,8 @@ def run_dir_matches_requested(run_dir_name: str, requested_desc: str) -> bool:
     if req_bench != cand_bench:
         return False
 
-    req_kv = canonicalize_kv(req_kv)
-    cand_kv = canonicalize_kv(cand_kv)
+    req_kv = canonicalize_kv(req_kv, benchmark=req_bench)
+    cand_kv = canonicalize_kv(cand_kv, benchmark=cand_bench)
     for k, v in req_kv.items():
         if k not in cand_kv:
             return False

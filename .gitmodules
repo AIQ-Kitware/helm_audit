@@ -5,15 +5,20 @@
 [submodule "submodules/aiq-magnet"]
 	path = submodules/aiq-magnet
 	url = https://github.com/AIQ-Kitware/aiq-magnet.git
+	branch = fix/materialize-model-deployment-match
 [submodule "submodules/helm"]
 	path = submodules/helm
 	url = https://github.com/AIQ-Kitware/helm.git
+	branch = main
 [submodule "submodules/kwdagger"]
 	path = submodules/kwdagger
 	url = https://github.com/AIQ-Kitware/kwdagger.git
+	branch = dev/0.2.4
 [submodule "submodules/every_eval_ever"]
 	path = submodules/every_eval_ever
-	url = https://github.com/evaleval/every_eval_ever.git
+	url = https://github.com/Erotemic/every_eval_ever.git
+	branch = tmp-branch
 [submodule "submodules/cmd_queue"]
 	path = submodules/cmd_queue
 	url = https://gitlab.kitware.com/computer-vision/cmd_queue.git
+	branch = dev/better_tmux_running
