@@ -29,7 +29,12 @@ DATASETS=(
   # finish_qwen25_gptoss preset because the dataset is not reliably
   # reachable from aiq-gpu today. Re-add this line and the 7 math
   # run_entries in adapter.py if access is restored.
-  natural_questions               # natural_qa:* run_entries
+  # ``natural_questions`` (HELM ``natural_qa:*`` run_entries) is
+  # disabled: HELM fetches NQ from a Google Storage URL that returns
+  # HTTP 403 from aiq-gpu (observed 2026-04-30 against
+  # qwen/qwen2.5-7b-instruct-turbo). Re-add this line and the 2
+  # natural_qa run_entries in adapter.py if the access path is fixed.
+  # (was: natural_questions)
   google/IFEval                   # ifeval (gpt-oss smoke)
   Idavidrein/gpqa                 # gpqa
   TIGER-Lab/MMLU-Pro              # mmlu_pro

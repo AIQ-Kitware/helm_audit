@@ -177,29 +177,34 @@ PRESET_CONFIGS: dict[str, dict[str, Any]] = {
                 "Closes the Qwen 2.5 + gpt-oss gaps in the open-weight "
                 "HELM audit (Case Study 3). Qwen rows replay the "
                 "execution-spec-drifted public run_specs (with the "
-                "matching adapter_spec.instructions prefix) plus the 2 "
-                "missing natural_qa entries (MATH disabled — see notes); "
-                "gpt-oss rows cover the 8 capabilities/safety entries "
-                "from suite v1.12.0 / v1.14.0 with no local repro yet."
+                "matching adapter_spec.instructions prefix); MATH and "
+                "natural_qa are disabled (data-access blockers — see "
+                "notes); gpt-oss rows cover the 8 capabilities/safety "
+                "entries from suite v1.12.0 / v1.14.0 with no local "
+                "repro yet."
             ),
             "run_entries": [
                 # ── Qwen 2.5 7B: missing benchmarks (no local repro yet)
                 #
-                # ``math:`` × 7 subjects (algebra, counting_and_probability,
-                # geometry, intermediate_algebra, number_theory,
-                # prealgebra, precalculus) at level=1, CoT=True is
-                # **disabled**. HELM's math scenario loads the
-                # ``hendrycks/competition_math`` HuggingFace dataset at
-                # run time and the local crfm-helm install on aiq-gpu
-                # cannot reach (or pre-cache) it cleanly today. Adding
-                # the 7 entries back is a one-line revert once the
-                # dataset is reachable; meanwhile the 2 natural_qa
-                # entries below are the only "missing-no-local-repro"
-                # contribution from Qwen in this batch.
+                # Two benchmark families are **disabled** in this preset
+                # because their underlying datasets aren't reachable
+                # cleanly from aiq-gpu today:
+                #
+                # 1. ``math:`` × 7 subjects (algebra,
+                #    counting_and_probability, geometry,
+                #    intermediate_algebra, number_theory, prealgebra,
+                #    precalculus) at level=1, CoT=True. Loads the
+                #    ``hendrycks/competition_math`` HuggingFace dataset.
+                # 2. ``natural_qa:`` × 2 modes (closedbook,
+                #    openbook_longans). HELM fetches the natural_questions
+                #    dataset from a Google Storage URL that returns
+                #    HTTP 403 from aiq-gpu (gated / pulled / blocked
+                #    egress — observed 2026-04-30).
+                #
+                # Re-enable each by un-commenting its run_entries below
+                # AND restoring the matching dataset name in
+                # ``02_warmup_data.sh``.
 
-                # natural_qa × 2 modes
-                "natural_qa:mode=closedbook,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
-                "natural_qa:mode=openbook_longans,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
                 # ── Qwen 2.5 7B: rerun execution-spec-drifted families
                 # The local audit previously ran these without the
                 # public adapter_spec.instructions prefix that the

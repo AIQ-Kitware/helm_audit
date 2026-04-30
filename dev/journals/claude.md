@@ -1279,3 +1279,107 @@ The body paragraph is Section "Case Study 3: HELM Instance-level
 Evals" (~line 501); the appendix is Section E starting at the
 end of the document, with TOC entry already wired into the
 appendix's tcolorbox at line 566.
+
+## 2026-04-30 21:00:00 -0000
+
+**Model:** claude-opus-4-7 (continued autonomous /loop session).
+
+**Subject:** Dataset / model-deployment pairs that failed during the
+``finish_qwen25_gptoss`` smoke run on aiq-gpu (2026-04-29 → 2026-04-30).
+Logged here so future agents and the EEE Case Study 3 paper appendix
+have a single source of truth for which targets we couldn't close
+locally and why.
+
+**Setup.** vllm_service profile ``pythia-qwen25-gptoss-mixed-4x96``
+serving four models on aiq-gpu (4×96GB GPUs):
+gpt-oss-20b on GPU 0 (completions + chat_compat), qwen2.5-7b-instruct
+on GPU 1 (chat), pythia-6.9b on GPU 2, pythia-2.8b-v0 on GPU 3.
+LiteLLM proxy at :14000, master_key sourced from
+``submodules/vllm_service/generated/.env``.
+
+**Failures encountered, by (benchmark, model):**
+
+1. ``math:subject={algebra,counting_and_probability,geometry,intermediate_algebra,number_theory,prealgebra,precalculus},level=1,use_official_examples=False,use_chain_of_thought=True``
+   × ``qwen/qwen2.5-7b-instruct-turbo`` — 7 entries.
+
+   * Dataset: ``hendrycks/competition_math`` (HuggingFace).
+   * Failure: ``FileNotFoundError: Couldn't find a dataset script at
+     .../hendrycks/competition_math/competition_math.py`` — HELM tried
+     to load_dataset and the local cache had nothing; ``aiq-gpu``
+     could not reach the Hub for the script.
+   * Resolution: disabled in the preset on 2026-04-29. Re-enable by
+     restoring the 7 entries in ``adapter.py`` and adding
+     ``hendrycks/competition_math`` back to ``02_warmup_data.sh``;
+     the warmup script will huggingface-cli download the dataset
+     into the local cache.
+
+2. ``natural_qa:mode={closedbook,openbook_longans}``
+   × ``qwen/qwen2.5-7b-instruct-turbo`` — 2 entries.
+
+   * Dataset: ``natural_questions`` (HELM fetches the JSONL files
+     directly from a Google Cloud Storage URL — not via HuggingFace
+     ``datasets``).
+   * Failure: ``HTTP Error 403: Forbidden``. Egress from aiq-gpu to
+     the GCS URL is blocked / the bucket is gated.
+   * Resolution: disabled in the preset on 2026-04-30. The
+     ``huggingface-cli download`` warmup path doesn't help here
+     because HELM bypasses HF for NQ; would need a network /
+     access-list change on aiq-gpu, or a mirror.
+
+**Failure types (not dataset-pair specific) hit during bring-up:**
+
+* ifeval × ``openai/gpt-oss-20b`` initially crashed with
+  ``AttributeError: 'NoneType' object has no attribute 'strip'`` —
+  HELM's ifeval scorer reads ``completions[0].text``, which gpt-oss's
+  Harmony chat format leaves None when the model emits only reasoning
+  tokens (in ``message.reasoning_content``). Fixed by switching the
+  gpt-oss service in the profile to ``protocol_mode: completions``
+  with a ``chat_compat: { strategy: flat_messages }`` shim. Same
+  pattern as the standalone ``gpt-oss-20b-completions`` audit profile.
+
+* LiteLLM 401 ``Virtual Key expected ... start with 'sk-'`` — the
+  proxy validates virtual-key prefixes and ours wasn't sk-. Initial
+  diagnosis suggested a sk- prefix requirement, but the actual issue
+  was the bundle had a stale default key (not what was in current
+  .env). Hardened ``05_write_bundle.sh`` to ``unset`` stale shell
+  vars before sourcing the .env so the file is the only auth source,
+  and added 16_curl_test_bundle.sh that curls each bundle entry with
+  the embedded key so this kind of drift is visible at bundle-write
+  time.
+
+* 16_curl_test_bundle.sh initially returned 400 "Invalid model name
+  passed in model=vllm/qwen2-5-7b-instruct-turbo-local". The script
+  was sending the HELM deployment name instead of the OpenAI
+  model_name (i.e. the alias LiteLLM advertises,
+  ``qwen/qwen2.5-7b-instruct-turbo``). Pulled
+  ``client_spec.args.openai_model_name`` from the bundle.
+
+**What's actually working as of 2026-04-30:**
+
+The 6 Qwen recipe-drifted family rerun entries
+(``mmlu:us_foreign_policy``, ``legalbench:abercrombie``,
+``commonsense:openbookqa``, ``gsm``, ``med_qa``, ``narrative_qa``,
+``wmt_14:fr-en``) and the gpt-oss capabilities entries that don't
+require ``safety/v1.14.0`` are running. Smoke result reported by the
+user: 3 / 5 entries passed in the validation curl phase
+(``commonsense:dataset=openbookqa,...`` confirmed end-to-end).
+
+**Net effect on the EEE Case Study 3 numbers if this batch lands:**
+
+Qwen 2.5 7B Instruct moves from 2 / 38 recipe-clean to potentially
+8 / 38 (the 6 reruns succeed under the matching adapter_spec
+prefix), which is the structurally important fix even if the 9
+truly-missing rows can't all be recovered. gpt-oss 20B picks up
+the capabilities entries that aren't gated on a HELM upgrade to
+suite v1.14.0. Both updates are honest (data-access blockers
+documented) and don't pretend the disabled families were
+reproducible.
+
+**Next steps for the user:**
+- Re-run ``50_run_full.sh`` after the natural_qa removal lands.
+- Verify the gpt-oss safety entries (``safety/v1.14.0``); if HELM
+  doesn't recognize them on aiq-gpu, document the HELM-version
+  blocker the same way and disable until the upgrade lands.
+- After rsync back to the analysis host, regenerate Case Study 3
+  numbers via
+  ``./reproduce/open_helm_models_reproducibility/{compose,build_summary}.sh``.

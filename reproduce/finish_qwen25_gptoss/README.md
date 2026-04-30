@@ -10,7 +10,9 @@ gaps surfaced by Case Study 3 (the EEE NeurIPS paper appendix and
   pulls the public run_specs (with the prefix intact) and re-executes
   them against the local vLLM service. This runbook also covers the 9
   unique `lite/v1.9.0` Qwen run_entries that have no local repro at
-  all (natural_qa × 2; the 7 math entries are disabled — see Caveats).
+  all (the 9 truly-missing entries — 7 math + 2 natural_qa — are all
+  disabled today, see Caveats; the surviving Qwen rows in this
+  runbook are the 6 recipe-drifted family reruns).
 - **gpt-oss 20B** is currently 0 / 2 recipe-clean. This runbook covers
   the 8 missing `capabilities/v1.12.0` and `safety/v1.14.0` entries.
 
@@ -34,7 +36,7 @@ this runbook supports today.
 
 ```bash
 ./00_check_env.sh         # eval-audit-check-env + verify GPU layout
-./02_warmup_data.sh       # pre-cache the HF datasets HELM needs (natural_qa, gpqa, ifeval, ...)
+./02_warmup_data.sh       # pre-cache the HF datasets HELM needs (gpqa, ifeval, mmlu_pro, ...)
 ./05_write_bundle.sh      # write the eval-audit benchmark bundle
 ./10_start_service.sh     # vllm_service: switch to the new profile
 ./15_validate_server.sh   # smoke-test the LiteLLM router with $LITELLM_MASTER_KEY from env
@@ -81,23 +83,29 @@ $AUDIT_STORE_ROOT/indexes/audit_results_index.csv       # refreshed by 60_index_
 
 ## Caveats
 
-- **MATH benchmark is disabled** in this preset.
-  HELM's `math:` runs load `hendrycks/competition_math` from
-  HuggingFace at run time, and that dataset is not reliably reachable
-  from `aiq-gpu` today. The 7 math run_entries (algebra,
-  counting_and_probability, geometry, intermediate_algebra,
-  number_theory, prealgebra, precalculus — all level=1, CoT=True) are
-  commented out of the `finish_qwen25_gptoss` preset's full manifest,
-  and the smoke manifest's Qwen entry uses `mmlu:us_foreign_policy`
-  instead. To re-enable, restore the 7 entries in
-  `eval_audit/integrations/vllm_service/adapter.py` and add
-  `hendrycks/competition_math` back to the warmup list in
-  `02_warmup_data.sh`.
+- **Two Qwen benchmark families are disabled** in this preset because
+  their underlying datasets are not reachable cleanly from `aiq-gpu`
+  today. Both are commented out in the `finish_qwen25_gptoss` preset's
+  full manifest with inline notes pointing at the re-enable knobs.
 
-  The same Hub-cache workaround applies if any other HF-backed
-  benchmark (`gpqa`, `mmlu_pro`, `omni_math`, etc.) starts failing
-  for the same reason: pre-cache with
-  `huggingface-cli download <repo> --repo-type dataset`.
+  | family | dataset | failure | observed |
+  |---|---|---|---|
+  | `math:` × 7 subjects (level=1, CoT=True) | `hendrycks/competition_math` (HF) | dataset script not findable in cache; HF Hub fetch fails | 2026-04-29 |
+  | `natural_qa:` × 2 modes (closedbook, openbook_longans) | `natural_questions` (HELM fetches via Google Storage URL) | HTTP 403 Forbidden from aiq-gpu egress | 2026-04-30 |
+
+  The smoke manifest's Qwen entry uses `mmlu:us_foreign_policy`
+  instead so the smoke run doesn't depend on either disabled dataset.
+  To re-enable, restore the run_entries in
+  `eval_audit/integrations/vllm_service/adapter.py` and add the
+  matching dataset name to `02_warmup_data.sh`.
+
+  The same workaround applies if any other HF-backed benchmark
+  (`gpqa`, `mmlu_pro`, `omni_math`, etc.) starts failing for similar
+  reasons: pre-cache with
+  `huggingface-cli download <repo> --repo-type dataset`. For
+  Google-Storage-backed datasets (NQ), there's no equivalent
+  pre-cache; the resolution is to either fix the egress / get an
+  unblocked mirror, or drop the affected entries.
 
 - **HELM-version requirement for the safety entries**:
   `anthropic_red_team`, `harm_bench`, `simple_safety_tests`, and
