@@ -37,7 +37,8 @@ this runbook supports today.
 ./02_warmup_data.sh       # pre-cache the HF datasets HELM needs (natural_qa, gpqa, ifeval, ...)
 ./05_write_bundle.sh      # write the eval-audit benchmark bundle
 ./10_start_service.sh     # vllm_service: switch to the new profile
-./15_validate_server.sh   # smoke-test the LiteLLM router for all 4 models
+./15_validate_server.sh   # smoke-test the LiteLLM router with $LITELLM_MASTER_KEY from env
+./16_curl_test_bundle.sh  # smoke-test using the *exact* api_key/base_url HELM will use (reads bundle's model_deployments.yaml)
 ./20_preview_smoke.sh     # eval-audit-run --run=0 (dry-run) on the smoke manifest
 ./30_run_smoke.sh         # eval-audit-run --run=1 on the smoke manifest (~5 instances per model)
 ./40_preview_full.sh      # dry-run the full 24-entry manifest
