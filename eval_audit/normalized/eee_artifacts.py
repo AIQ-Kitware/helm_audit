@@ -235,7 +235,14 @@ def local_eee_parent_for_row(
     """Return the deterministic parent dir for one local converted artifact."""
 
     root = Path(local_eee_root or default_local_eee_root()).expanduser().resolve()
-    experiment = _slugify(_clean_optional_text(row.get("experiment_name")) or "unknown-experiment")
+    # Prefer ``source_experiment_name`` when present so virtual-experiment
+    # composes (which restamp ``experiment_name`` to the virtual name) hit
+    # the same cache key as the original audit run that produced the data.
+    experiment = _slugify(
+        _clean_optional_text(row.get("source_experiment_name"))
+        or _clean_optional_text(row.get("experiment_name"))
+        or "unknown-experiment"
+    )
     job_id = _slugify(_clean_optional_text(row.get("job_id")) or "unknown-job")
     run_name = (
         _clean_optional_text(row.get("run_name"))
