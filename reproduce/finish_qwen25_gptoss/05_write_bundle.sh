@@ -4,6 +4,7 @@
 # the run_details.yaml that pins the LiteLLM router URL + per-model
 # deployment names.
 set -euo pipefail
+set -x
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
