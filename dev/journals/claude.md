@@ -1383,3 +1383,89 @@ reproducible.
 - After rsync back to the analysis host, regenerate Case Study 3
   numbers via
   ``./reproduce/open_helm_models_reproducibility/{compose,build_summary}.sh``.
+
+## 2026-04-30 01:30:00 -0500
+
+**Intent.** User dumped a probably-bad InspectAI MMLU result for
+`eleutherai/pythia-6.9b` (full MMLU, score 0.0, no `run_spec.json`)
+into `/data/crfm-helm-audit-store/inspectai-eee-results/MMLU-Inspect-EEE`
+and asked: build a reproduce/ folder that mixes (a) the public HELM
+EEE conversion of pythia-6.9b on `mmlu:us_foreign_policy`, (b) two
+local audit reproductions of the same scenario, (c) the InspectAI
+artifact, then run the EEE-only analysis against the bundle. Meta-
+question: how does the system today decide two evals are
+comparable, and is there enough info in EEE alone to do it?
+
+**Model / harness.** Claude (Opus 4.7), `claude-opus-4-7`, Claude
+Code in VSCode.
+
+**Result.** New runbook at
+[`reproduce/inspectai_helm_eee_compare/`](../../reproduce/inspectai_helm_eee_compare/)
+with `00_check_artifacts.sh`, `10_link_tree.sh`, `20_run.sh`,
+`30_inspect.sh`, plus a README that documents the comparability
+story end-to-end.
+
+The pipeline ran to completion after fixing one bug:
+`eval_audit/normalized/loaders.py:149` did `int(retrieved_timestamp or 0)`
+which crashes when the timestamp is a float string like
+`'1777497047.279126'` (the InspectAI artifact emits floats; HELM
+EEE conversions emit ints). Switched to `float(...)`. This is a
+minimal fix — it just stops the crash. A more aggressive change
+would normalize the field at parse time.
+
+**The comparability story (what the README captures).** The planner
+pairs by logical run key (here, `mmlu:model=eleutherai/pythia-6.9b`)
+and then derives seven facts from `run_spec.json`. On this bundle:
+
+- Official vs. local r1/r2: all facts `yes`, no warnings,
+  instance-level `agree@0 = 0.94` (real reproducibility signal,
+  matches what we expect for the audit reruns). Run-level is 0.0
+  because public emits `prefix_exact_match` and local emits
+  `quasi_prefix_exact_match` — a known HELM schema-rename drift,
+  not a model behavior difference.
+- Official vs. InspectAI: facts come back `yes` for most fields
+  *only because the InspectAI side has no value to disagree with*
+  (single-element-set rule). The planner does flag the gap: it
+  emits `comparability_unknown:same_deployment`,
+  `missing_run_spec:<inspectai_component>`, and
+  `missing_scenario_class:<...>` warnings, and `agree@0` is `None`
+  because the metric vocabularies don't overlap. So today's planner
+  *does* signal cross-harness incomparability — but only via
+  warnings + a silent None, not via a hard "facts disagree" verdict.
+
+**What EEE-native fields the planner currently ignores.** The
+InspectAI artifact carries plenty of signal the planner could
+consult but doesn't:
+
+- `source_data.samples_number` (111 us_foreign_policy subset vs.
+  13937 full MMLU)
+- `metric_config.evaluation_description` (`prefix_exact_match`
+  vs. `accuracy`)
+- `eval_library.name` (`HELM` vs. `inspect`)
+- `source_data.dataset_name` (matches by name only — hides the
+  scope mismatch above)
+- `generation_config.additional_details` (5-shot config, prompt
+  template, …)
+
+**Design insight.** Comparability today is a HELM-shape concept
+implemented against `run_spec.json`. EEE-only inputs hit two
+correct-but-quiet failure modes: (a) `missing_run_spec` /
+`comparability_unknown:*` warnings, and (b) a `None` agreement
+number when metric vocabularies don't overlap. Constructive next
+step (not done here): lift EEE-native fields into first-class
+comparability facts (e.g. `same_dataset_scope`, `same_metric_family`,
+`same_eval_library`) so cross-harness bundles fail the check
+loudly instead of producing silent Nones. The README spells this
+out as the user-facing recommendation.
+
+**Bug context.** The float-timestamp issue is the kind of thing
+that only shows up when EEE artifacts come from a non-HELM source
+— HELM's converter happens to emit integer timestamps; InspectAI's
+doesn't. Worth keeping in mind: parsing assumptions calibrated to
+the HELM converter will break on cross-harness inputs in subtle
+ways. The schema is permissive (the field is a string), so
+defensive parsing is the right call.
+
+**Next steps.** None blocking. If we want to make the cross-harness
+gap visible without `30_inspect.sh`-style ad-hoc inspection, the
+followup is the planner extension above (EEE-native facts).

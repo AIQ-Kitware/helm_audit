@@ -146,7 +146,7 @@ class EeeArtifactLoader(Loader):
 
         # Pick the newest by retrieved_timestamp when multiple candidates remain.
         candidates.sort(
-            key=lambda lp: int(lp[0].retrieved_timestamp or 0),
+            key=lambda lp: float(lp[0].retrieved_timestamp or 0),
             reverse=True,
         )
         chosen_log, chosen_path = candidates[0]
