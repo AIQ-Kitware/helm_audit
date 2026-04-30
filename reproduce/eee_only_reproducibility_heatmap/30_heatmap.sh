@@ -12,11 +12,28 @@ ABS_TOL="${ABS_TOL:-1e-9}"
 
 cd "$ROOT"
 
-if ! find "$FROM_EEE_OUT" -name "core_metric_report.json" 2>/dev/null | grep -q .; then
-  echo "FAIL: no core_metric_report.json files under '$FROM_EEE_OUT'." >&2
-  echo "      Run ./20_run.sh first." >&2
+# Count packets the heatmap can read. Use ``wc -l`` instead of
+# ``grep -q .`` so the count is visible and so a ``set -o pipefail``
+# interaction can't squelch a working find.
+n_reports=$(find "$FROM_EEE_OUT" -name "core_metric_report.json" 2>/dev/null | wc -l)
+if [ "$n_reports" -eq 0 ]; then
+  echo "FAIL: no core_metric_report.json files under" >&2
+  echo "      $FROM_EEE_OUT" >&2
+  echo >&2
+  if [ -d "$FROM_EEE_OUT" ]; then
+    echo "      Path exists. Top-level entries:" >&2
+    ls "$FROM_EEE_OUT" 2>&1 | sed 's/^/        /' >&2
+    echo >&2
+    echo "      Looking one level deeper for any *.json (in case the layout changed):" >&2
+    find "$FROM_EEE_OUT" -maxdepth 4 -name '*.json' -printf '        %p\n' 2>&1 \
+      | head -10 >&2
+  else
+    echo "      Path does not exist. Run ./20_run.sh first or set FROM_EEE_OUT" >&2
+    echo "      to override (current: \$FROM_EEE_OUT=\"$FROM_EEE_OUT\")." >&2
+  fi
   exit 1
 fi
+echo "Found $n_reports core_metric_report.json files."
 
 echo "Generating reproducibility heatmap ..."
 echo "  analysis root: $FROM_EEE_OUT"
