@@ -125,14 +125,33 @@ def _collect_cells(
     Returns a dict mapping ``(model_id, benchmark_family)`` to::
 
         {
-            "matched": int,   # instances agreeing within abs_tol
-            "count": int,     # total paired instances
+            "matched": int,            # instances agreeing within abs_tol
+            "count": int,               # total paired instances
             "agree_ratio": float | None,
-            "n_pairs": int,   # number of official_vs_local pairs contributing
+            "n_pairs_with_data": int,   # official_vs_local pairs whose
+                                        # instance_level.n_rows > 0
+            "n_pairs_total": int,       # all official_vs_local pairs we saw,
+                                        # including ones with 0 instance rows
+            "n_packets": int,           # number of distinct packet json files
+                                        # that targeted this (model, bench)
+            "status": str,              # "present" / "join_failed" / "missing"
+                                        # (missing == cell absent from result)
         }
+
+    The three statuses are the heatmap's main job: distinguishing cells
+    where we just don't have artifacts (``missing``) from cells where we
+    do but the instance-level join produced no rows (``join_failed`` —
+    investigate the converter / instance-id scheme), from cells with
+    real numbers (``present``).
     """
     cells: dict[tuple[str, str], dict[str, Any]] = defaultdict(
-        lambda: {"matched": 0, "count": 0, "n_pairs": 0}
+        lambda: {
+            "matched": 0,
+            "count": 0,
+            "n_pairs_with_data": 0,
+            "n_pairs_total": 0,
+            "n_packets": 0,
+        }
     )
 
     report_paths = sorted(analysis_root.rglob("core_metric_report.json"))
@@ -165,14 +184,20 @@ def _collect_cells(
             continue
 
         key = (model_id, benchmark)
+        # Track that a packet for this cell exists, regardless of
+        # whether its pairs produced any instance-level rows.
+        cells[key]["n_packets"] += 1
 
         # Accumulate instance-level agreement from official_vs_local pairs
         for pair in (report.get("pairs") or []):
             if pair.get("comparison_kind") != "official_vs_local":
                 continue
+            cells[key]["n_pairs_total"] += 1
+
             il = pair.get("instance_level") or {}
             avs = il.get("agreement_vs_abs_tol") or []
             if not avs:
+                # Pair was disabled or never executed — no rows.
                 continue
 
             # Find the row matching our target abs_tol (exact or nearest)
@@ -180,25 +205,36 @@ def _collect_cells(
             if best_row is None:
                 continue
             if best_row.get("count", 0) == 0:
+                # Pair ran but the official↔local instance join produced
+                # zero overlapping records. This is the "join_failed"
+                # signal; we count the pair but don't accumulate matches.
                 continue
 
             cells[key]["matched"] += best_row["matched"]
             cells[key]["count"] += best_row["count"]
-            cells[key]["n_pairs"] += 1
+            cells[key]["n_pairs_with_data"] += 1
 
-    # Compute final agree_ratio
+    # Compute final agree_ratio + status
     result: dict[tuple[str, str], dict[str, Any]] = {}
     for key, cell in cells.items():
-        ratio = (
-            cell["matched"] / cell["count"]
-            if cell["count"] > 0
-            else None
-        )
+        if cell["count"] > 0:
+            ratio: float | None = cell["matched"] / cell["count"]
+            status = "present"
+        else:
+            ratio = None
+            # We saw a packet for this cell but the join produced no
+            # instance-level rows. That's join_failed (distinct from
+            # the cell being absent entirely, which we represent as
+            # missing-from-the-result-dict).
+            status = "join_failed"
         result[key] = {
             "matched": cell["matched"],
             "count": cell["count"],
             "agree_ratio": ratio,
-            "n_pairs": cell["n_pairs"],
+            "n_pairs_with_data": cell["n_pairs_with_data"],
+            "n_pairs_total": cell["n_pairs_total"],
+            "n_packets": cell["n_packets"],
+            "status": status,
         }
     return result
 
@@ -234,9 +270,23 @@ def _render_text_table(
     benchmarks: list[str],
     abs_tol: float,
 ) -> str:
+    """Render a fixed-width table with three cell states::
+
+        0.987    -> present (number is the agree_ratio at abs_tol)
+        join0/3  -> join_failed: 0 of 3 official_vs_local pairs joined
+                    (data exists on both sides but instance-id join
+                    produced 0 overlapping rows; investigate the
+                    converter / id scheme)
+        --       -> missing: no packet exists for this (model, bench)
+    """
     lines: list[str] = [
         f"Reproducibility heatmap (abs_tol={abs_tol})",
         f"Instance-level agree_ratio: fraction of pairs within ±{abs_tol}",
+        "",
+        "Cell legend:",
+        "  0.987    instance-level agree_ratio at the chosen abs_tol",
+        "  join0/N  packet exists; 0 of N official_vs_local pairs joined",
+        "  --       no packet for this (model, benchmark)",
         "",
     ]
     col_w = 14
@@ -250,11 +300,25 @@ def _render_text_table(
         row = f"{_BENCHMARK_DISPLAY.get(bench, bench):<{bench_w}}"
         for m in models:
             cell = cells.get((m, bench))
-            if cell and cell["agree_ratio"] is not None:
+            if cell is None:
+                row += f"{'--':>{col_w}}"
+            elif cell.get("status") == "present":
                 row += f"{cell['agree_ratio']:>{col_w}.3f}"
             else:
-                row += f"{'N/A':>{col_w}}"
+                # join_failed
+                marker = f"join0/{cell.get('n_pairs_total', 0)}"
+                row += f"{marker:>{col_w}}"
         lines.append(row)
+    lines.append("")
+    # Coverage summary: how many cells in each state.
+    n_present = sum(1 for c in cells.values() if c.get("status") == "present")
+    n_join_failed = sum(1 for c in cells.values() if c.get("status") == "join_failed")
+    n_total = len(models) * len(benchmarks)
+    n_missing = n_total - n_present - n_join_failed
+    lines.append(
+        f"Coverage: {n_present} present / {n_join_failed} join_failed / "
+        f"{n_missing} missing  (of {n_total} cells)"
+    )
     lines.append("")
     return "\n".join(lines)
 
@@ -281,58 +345,79 @@ def _render_heatmap(
     n_bench = len(benchmarks)
     n_models = len(models)
 
-    # Build value matrix (NaN = missing)
-    data = np.full((n_bench, n_models), float("nan"))
-    for i, bench in enumerate(benchmarks):
-        for j, model in enumerate(models):
-            cell = cells.get((model, bench))
-            if cell and cell["agree_ratio"] is not None:
-                data[i, j] = cell["agree_ratio"]
-
     fig_w = max(6.0, 2.2 * n_models + 2.0)
     fig_h = max(5.0, 0.5 * n_bench + 1.5)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
     # Colormap: RdYlGn for agreement (red=0, green=1)
     cmap = plt.get_cmap("RdYlGn")
-    cmap_masked = plt.cm.ScalarMappable(
-        norm=mcolors.Normalize(vmin=0.0, vmax=1.0), cmap=cmap
-    )
+    cmap_norm = mcolors.Normalize(vmin=0.0, vmax=1.0)
+    cmap_scalar = plt.cm.ScalarMappable(norm=cmap_norm, cmap=cmap)
 
-    # Gray background for NaN cells
-    ax.set_facecolor("#d0d0d0")
+    # Background defaults to the "missing" color so any cell we don't
+    # explicitly draw shows as missing.
+    _MISSING_COLOR = "#bdbdbd"
+    _JOIN_FAILED_COLOR = "#fff4d6"  # light amber — not red (it's not bad
+                                     # data, just unavailable for analysis
+                                     # until the converter mismatch is fixed)
+    ax.set_facecolor(_MISSING_COLOR)
 
-    # Draw colored cells
-    for i in range(n_bench):
-        for j in range(n_models):
-            val = data[i, j]
-            if not math.isnan(val):
-                color = cmap(val)
+    # Draw each cell explicitly so the three statuses get distinct visuals.
+    for i, bench in enumerate(benchmarks):
+        for j, model in enumerate(models):
+            cell = cells.get((model, bench))
+            if cell is not None and cell.get("status") == "present":
+                # Real value: colored by agree_ratio
+                val = cell["agree_ratio"]
                 rect = plt.Rectangle(
                     (j - 0.5, i - 0.5), 1, 1,
-                    facecolor=color, edgecolor="white", linewidth=0.5,
+                    facecolor=cmap(cmap_norm(val)),
+                    edgecolor="white", linewidth=0.5,
                 )
                 ax.add_patch(rect)
-                # Cell text
-                text_color = "black" if 0.3 < val < 0.8 else "white" if val <= 0.3 else "black"
+                text_color = (
+                    "black" if 0.3 < val < 0.8
+                    else "white" if val <= 0.3
+                    else "black"
+                )
                 ax.text(
                     j, i,
                     f"{val:.3f}",
                     ha="center", va="center",
-                    fontsize=8, color=text_color,
-                    fontweight="bold",
+                    fontsize=8, color=text_color, fontweight="bold",
                 )
-            else:
-                # N/A cell
+            elif cell is not None and cell.get("status") == "join_failed":
+                # Light amber + diagonal hatching → "data exists but no
+                # join". Distinct from missing (solid gray) so a quick
+                # glance tells you which gap is fixable.
                 rect = plt.Rectangle(
                     (j - 0.5, i - 0.5), 1, 1,
-                    facecolor="#c0c0c0", edgecolor="white", linewidth=0.5,
+                    facecolor=_JOIN_FAILED_COLOR,
+                    edgecolor="white", linewidth=0.5,
+                    hatch="////",
+                )
+                ax.add_patch(rect)
+                n_total = cell.get("n_pairs_total", 0)
+                ax.text(
+                    j, i,
+                    f"join 0/{n_total}",
+                    ha="center", va="center",
+                    fontsize=7, color="#7a4f00", fontweight="bold",
+                )
+            else:
+                # Missing: solid darker gray + dash. Drawn explicitly so
+                # the cell border visually delimits it from the
+                # background of the same color.
+                rect = plt.Rectangle(
+                    (j - 0.5, i - 0.5), 1, 1,
+                    facecolor=_MISSING_COLOR,
+                    edgecolor="white", linewidth=0.5,
                 )
                 ax.add_patch(rect)
                 ax.text(
-                    j, i, "N/A",
+                    j, i, "—",
                     ha="center", va="center",
-                    fontsize=7, color="#606060",
+                    fontsize=10, color="#606060",
                 )
 
     # Axis labels
@@ -350,15 +435,30 @@ def _render_heatmap(
     ax.set_ylim(-0.5, n_bench - 0.5)
     ax.invert_yaxis()
 
-    # Colorbar
-    cbar = fig.colorbar(cmap_masked, ax=ax, fraction=0.03, pad=0.02)
+    # Colorbar for the present-status colormap
+    cbar = fig.colorbar(cmap_scalar, ax=ax, fraction=0.03, pad=0.02)
     cbar.set_label("agree_ratio", fontsize=8)
     cbar.ax.tick_params(labelsize=7)
 
+    # Three-state legend just below the title.
+    from matplotlib.patches import Patch
+    legend_handles = [
+        Patch(facecolor=cmap(cmap_norm(0.5)), edgecolor="white",
+              label="present (agree_ratio shown)"),
+        Patch(facecolor=_JOIN_FAILED_COLOR, edgecolor="white",
+              hatch="////", label="join_failed (data, but 0 instances joined)"),
+        Patch(facecolor=_MISSING_COLOR, edgecolor="white",
+              label="missing (no packet for this cell)"),
+    ]
+    ax.legend(
+        handles=legend_handles,
+        loc="upper center", bbox_to_anchor=(0.5, -0.08),
+        ncol=3, fontsize=7, frameon=False,
+    )
+
     ax.set_title(
         f"{title}\n"
-        f"instance-level agree_ratio at abs_tol={abs_tol}  "
-        f"(gray = no data)",
+        f"instance-level agree_ratio at abs_tol={abs_tol}",
         fontsize=9, pad=8,
     )
 
@@ -386,17 +486,36 @@ def _save_cell_data(
     for bench in benchmarks:
         for model in models:
             cell = cells.get((model, bench))
-            rows.append(
-                {
-                    "model": model,
-                    "benchmark": bench,
-                    "abs_tol": abs_tol,
-                    "agree_ratio": cell["agree_ratio"] if cell else None,
-                    "matched": cell["matched"] if cell else None,
-                    "count": cell["count"] if cell else None,
-                    "n_pairs": cell["n_pairs"] if cell else 0,
-                }
-            )
+            if cell is None:
+                rows.append(
+                    {
+                        "model": model,
+                        "benchmark": bench,
+                        "abs_tol": abs_tol,
+                        "status": "missing",
+                        "agree_ratio": None,
+                        "matched": None,
+                        "count": None,
+                        "n_pairs_with_data": 0,
+                        "n_pairs_total": 0,
+                        "n_packets": 0,
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "model": model,
+                        "benchmark": bench,
+                        "abs_tol": abs_tol,
+                        "status": cell.get("status", "unknown"),
+                        "agree_ratio": cell["agree_ratio"],
+                        "matched": cell["matched"],
+                        "count": cell["count"],
+                        "n_pairs_with_data": cell.get("n_pairs_with_data", 0),
+                        "n_pairs_total": cell.get("n_pairs_total", 0),
+                        "n_packets": cell.get("n_packets", 0),
+                    }
+                )
     out_path = out_dir / "cell_data.json"
     out_path.write_text(json.dumps({"abs_tol": abs_tol, "cells": rows}, indent=2) + "\n")
     print(f"Cell data saved: {out_path}")
