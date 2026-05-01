@@ -19,9 +19,17 @@ STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 OUT_ROOT="${OUT_ROOT:-$STORE_ROOT/eee-only-reproducibility-heatmap}"
 OUT_TREE="${OUT_TREE:-$OUT_ROOT/eee_artifacts}"
 
+# ``open-helm-models-reproducibility`` is a composite EEE folder that pools
+# artifacts from many origin experiments, including secondary reproductions
+# from namek and yardrat. For the paper we only want runs from aiq-gpu, so
+# blocklist origin experiments whose name we know corresponds to a
+# secondary host. Comma-separated; substring match against the origin
+# experiment recorded in each artifact's status.json ``run_path``.
+EXCLUDE_ORIGIN_EXPERIMENTS="${EXCLUDE_ORIGIN_EXPERIMENTS:-audit-namek-subset,audit-yardrat-subset}"
+
 cd "$ROOT"
 
-python3 - "$STORE_ROOT" "$OUT_TREE" <<'PYEOF'
+python3 - "$STORE_ROOT" "$OUT_TREE" "$EXCLUDE_ORIGIN_EXPERIMENTS" <<'PYEOF'
 """Build the official/local EEE symlink tree for the reproducibility heatmap."""
 import json
 import sys
@@ -30,6 +38,48 @@ from pathlib import Path
 
 store_root = Path(sys.argv[1])
 out_tree = Path(sys.argv[2])
+EXCLUDE_ORIGIN_EXPERIMENTS = tuple(
+    x.strip() for x in sys.argv[3].split(",") if x.strip()
+)
+
+
+def _origin_experiment_for_local_artifact(aggregate_path):
+    """Return the origin experiment name (third path segment of the
+    audit run_path), or None if the layout doesn't expose it.
+
+    Each local EEE artifact has a sibling ``status.json`` written by
+    the helm_audit conversion pipeline. Its ``run_path`` field looks
+    like::
+
+        /data/crfm-helm-audit/<origin-experiment>/helm/<helm_id>/
+        benchmark_output/runs/<suite>/<run_dir>/
+
+    We're after ``<origin-experiment>``. Used to blocklist runs that
+    came from secondary hosts (namek, yardrat) when assembling the
+    paper-scope heatmap.
+    """
+    # status.json is at the dir 3 levels above the aggregate JSON:
+    #   <helm_id>/<run_slug>/eee_output/<bench>/<dev>/<model>/<uuid>.json
+    #          ^                                                ^
+    #          status.json lives here              we're here
+    candidate = aggregate_path.parents[4] / "status.json"
+    if not candidate.is_file():
+        return None
+    try:
+        d = json.loads(candidate.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    rp = (d.get("run_path") or "").strip("/").split("/")
+    # ['data', 'crfm-helm-audit', '<exp>', 'helm', ...]
+    if len(rp) >= 3 and rp[1] == "crfm-helm-audit":
+        return rp[2]
+    return None
+
+
+def _is_excluded_origin(origin_exp):
+    if origin_exp is None:
+        return False
+    return any(blocked in origin_exp for blocked in EXCLUDE_ORIGIN_EXPERIMENTS)
 
 OFFICIAL_V24 = store_root / "crfm-helm-public-eee-test/classic/v0.2.4"
 OFFICIAL_V30 = store_root / "crfm-helm-public-eee-test/classic/v0.3.0"
@@ -203,6 +253,7 @@ for (version, dev, model_name, bench_family, official_run_dir, local_slug) in EN
     # Walk the local exp looking for artifacts under eee_output/<bench>/<dev>/<model>/
     dst_loc_dir = out_tree / "local" / LOCAL_EXP / bench_family / dev / model_name
     n_local = 0
+    n_skipped_origin = 0
     local_exp_root = LOCAL_ROOT / LOCAL_EXP
     if local_exp_root.is_dir():
         for dirpath, _dirnames, filenames in os.walk(local_exp_root):
@@ -226,6 +277,15 @@ for (version, dev, model_name, bench_family, official_run_dir, local_slug) in EN
                         if fname in {"status.json", "provenance.json"}:
                             continue
                         src_f = dp / fname
+                        # Origin-experiment blocklist. The artifact's
+                        # status.json sits four directories above its
+                        # aggregate JSON; reading run_path tells us which
+                        # audit experiment (and therefore which host)
+                        # produced it. Skip secondary hosts entirely.
+                        origin_exp = _origin_experiment_for_local_artifact(src_f)
+                        if _is_excluded_origin(origin_exp):
+                            n_skipped_origin += 1
+                            continue
                         u = fname[:-5]  # strip .json
                         src_s = dp / f"{u}_samples.jsonl"
                         _symlink_force(src_f, dst_loc_dir / f"{u}.json")
@@ -237,7 +297,10 @@ for (version, dev, model_name, bench_family, official_run_dir, local_slug) in EN
         print(f"  WARN(loc): no local artifacts for {bench_family}/{dev}/{model_name}"
               f" (filter='{local_slug}') — cell will be N/A")
     else:
-        print(f"  local:    {bench_family}/{dev}/{model_name}  ({n_local} artifacts)")
+        suffix = ""
+        if n_skipped_origin:
+            suffix = f"  [skipped {n_skipped_origin} from excluded origins]"
+        print(f"  local:    {bench_family}/{dev}/{model_name}  ({n_local} artifacts){suffix}")
 
 print(f"\nTree ready at: {out_tree}")
 print("Next: ./20_run.sh")
