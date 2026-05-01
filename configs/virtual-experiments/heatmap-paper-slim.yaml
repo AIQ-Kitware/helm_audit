@@ -52,9 +52,17 @@ sources:
 
   - kind: official_public_index
     fpath: /data/crfm-helm-audit-store/indexes/official_public_index.csv
-    pre_filter:
-      kind: helm_stage1
-      inventory_fpath: /data/crfm-helm-audit-store/analysis/filter_inventory.json
+    # No pre_filter: the Stage-1 helm_stage1 inventory was generated
+    # before Falcon-7B was locally wired up and incorrectly vetoes its
+    # 94 public rows with ``no-hf-deployment`` (HELM upstream ships
+    # only ``together/falcon-7b``; we register ``huggingface/...``
+    # dynamically via --enable-huggingface-models). Including the
+    # filter would drop Falcon entirely from the slim heatmap.
+    # The slim manifest doesn't need the Stage-1 funnel context for
+    # paper purposes — it just needs the (model, benchmark) cells —
+    # so dropping the pre_filter is the right call here. The broader
+    # open-helm-models-reproducibility manifest still applies it for
+    # its full Sankey "Universe → Stage-1 → scope → selected" funnel.
 
   - kind: external_eee
     components: []
