@@ -286,20 +286,33 @@ for (version, dev, model_name, bench_family, official_run_dir, local_slug) in EN
     print(f"  official: {bench_family}/{dev}/{model_name}/{uuid}  ({version})")
 
     # ---- local: link ALL matching artifacts ----
-    # Walk the local exp looking for artifacts under eee_output/<bench>/<dev>/<model>/
+    # Walk every experiment dir under LOCAL_ROOT, not just LOCAL_EXP.
+    # Pythia / Vicuna locals live under
+    # ``open-helm-models-reproducibility/`` (the historical
+    # composite experiment name); Falcon-7B locals live under
+    # ``audit-falcon-7b-helm-grid/`` (the audit experiment name from
+    # its runbook). Future model additions will land under their own
+    # experiment names. The (bench, dev, model_name) triple at the
+    # leaf is sufficient to disambiguate, so we don't need to filter
+    # by experiment-name path component — just scan ``eee/local/`` as
+    # a whole and rely on the leaf match plus the origin blocklist
+    # (read from each artifact's status.json) for cross-host filtering.
     dst_loc_dir = out_tree / "local" / LOCAL_EXP / bench_family / dev / model_name
     n_local = 0
     n_skipped_origin = 0
-    local_exp_root = LOCAL_ROOT / LOCAL_EXP
-    if local_exp_root.is_dir():
-        for dirpath, _dirnames, filenames in os.walk(local_exp_root):
+    if LOCAL_ROOT.is_dir():
+        for dirpath, _dirnames, filenames in os.walk(LOCAL_ROOT):
             dp = Path(dirpath)
             # Must be under .../eee_output/<bench>/<dev>/<model>/ exactly
-            rel = dp.relative_to(local_exp_root)
+            try:
+                rel = dp.relative_to(LOCAL_ROOT)
+            except ValueError:
+                continue
             parts = rel.parts
-            # Structure: <helm_id>/<run_slug>/eee_output/<bench>/<dev>/<model>
-            # So we need exactly: parts[-4] == 'eee_output', parts[-3] == bench,
-            #                     parts[-2] == dev, parts[-1] == model_name
+            # Structure (full):
+            #   <experiment>/<helm_id>/<run_slug>/eee_output/<bench>/<dev>/<model>
+            # We pin only the bench/dev/model leaves; experiment +
+            # helm_id + run_slug are free to vary across audit runs.
             if (len(parts) >= 4
                     and parts[-4] == "eee_output"
                     and parts[-3] == bench_family
