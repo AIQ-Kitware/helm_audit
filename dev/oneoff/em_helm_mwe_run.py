@@ -70,6 +70,12 @@ def main() -> int:
     args = parser.parse_args()
 
     # Lazy imports — fail with a useful message if HELM isn't here.
+    # downsample_eval_instances is only a free function in newer HELM
+    # (was a method on Adapter in v0.3.0). When unavailable, we inline
+    # the exact same logic — both versions use np.random.seed(0) +
+    # np.random.choice and that's what we replicate. The pandas-bearing
+    # work (scenario.get_instances) still goes through HELM's actual
+    # scenario code regardless.
     try:
         import pandas as pd
         import numpy as np
@@ -77,13 +83,35 @@ def main() -> int:
             EntityMatchingScenario,
         )
         from helm.benchmark.scenarios.scenario import with_instance_ids
-        from helm.benchmark.runner import downsample_eval_instances
     except ImportError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         print("This script needs crfm-helm installed. "
               "Install with `pip install crfm-helm` (or `crfm-helm[scenarios]` "
               "for full scenario data deps).", file=sys.stderr)
         return 3
+
+    try:
+        from helm.benchmark.runner import downsample_eval_instances  # newer HELM
+        downsample_source = "helm.benchmark.runner.downsample_eval_instances"
+    except ImportError:
+        # v0.3.0-era HELM: replicate the logic from
+        # helm/benchmark/adaptation/adapters/adapter.py:get_run_instances.
+        # Same algorithm, just inlined.
+        downsample_source = "inlined (v0.3.0-era; logic matches Adapter.get_run_instances)"
+
+        def downsample_eval_instances(instances, max_eval_instances, eval_splits):
+            from helm.benchmark.scenarios.scenario import TRAIN_SPLIT
+            train = [i for i in instances if i.split == TRAIN_SPLIT]
+            eval_pool = [i for i in instances if i.split in eval_splits]
+            if max_eval_instances is not None and len(eval_pool) > max_eval_instances:
+                np.random.seed(0)
+                selected = list(
+                    np.random.choice(eval_pool, max_eval_instances, replace=False)
+                )
+            else:
+                selected = eval_pool
+            return train + selected
+    print(f"# downsample source: {downsample_source}")
 
     print(f"# pandas={pd.__version__}  numpy={np.__version__}  "
           f"helm scenario module={EntityMatchingScenario.__module__}")
