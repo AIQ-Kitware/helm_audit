@@ -34,6 +34,18 @@ echo
 WORKERS="${WORKERS:-$(( $(nproc 2>/dev/null || echo 2) / 2 ))}"
 echo "Parallelism: WORKERS=$WORKERS  (set WORKERS=1 to serialize, =0 for auto)"
 
+# Static plot rendering (Chromium via plotly/kaleido) dominates the
+# aggregate-summary step for runs of this size — every sankey + bar
+# chart spawns a Chromium subprocess for PNG/JPG export. The canonical
+# JSON/CSV/TXT/HTML artifacts are written regardless; PNG/JPG are
+# derivative and can be regenerated on demand via redraw_plots.sh.
+# Set FAST_AGG_SUMMARY=1 (or HELM_AUDIT_SKIP_PLOTLY=1 directly) to skip
+# them here for fast iterations.
+if [ "${FAST_AGG_SUMMARY:-0}" = "1" ]; then
+  echo "FAST_AGG_SUMMARY=1: skipping static plot rendering in aggregate summary."
+  export HELM_AUDIT_SKIP_PLOTLY=1
+fi
+
 eval-audit-from-eee \
   --eee-root "$OUT_TREE" \
   --out-dpath "$FROM_EEE_OUT" \
