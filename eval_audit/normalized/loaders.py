@@ -188,26 +188,58 @@ class EeeArtifactLoader(Loader):
         instances: list[InstanceRecord] = []
         if samples_path.exists():
             # Hot loop. Profile shows this is the dominant cost in the
-            # whole analysis pipeline (35s+/run on a 4-packet heatmap
-            # with civil_comments-scale samples files at ~100k+ lines).
-            # Two changes vs. the obvious ``read_text().splitlines() +
-            # model_validate_json(line)`` form:
-            #   1. read_bytes + bytes.split(b"\n") avoids decoding the
-            #      whole file twice (once for splitlines, once for the
-            #      json parser) and skips materializing a list of str.
-            #   2. orjson.loads + model_validate parses with orjson
-            #      (~3x faster than stdlib) and validates the resulting
-            #      dict in pydantic core (no JSON re-decode inside
-            #      pydantic). Net per-line: ~22µs → ~16µs.
-            instance_validate = InstanceLevelEvaluationLog.model_validate
-            for raw in samples_path.read_bytes().split(b"\n"):
-                if not raw or raw.isspace():
-                    continue
-                try:
-                    rec = instance_validate(_loads(raw))
-                except Exception:
-                    continue
-                instances.append(_instance_record_from_eee(rec))
+            # whole analysis pipeline (~96s on a 4-packet heatmap with
+            # civil_comments-scale samples files, ~798k lines total).
+            #
+            # Two modes, picked by EVAL_AUDIT_TRUST_EEE_SCHEMA:
+            #
+            # 1. Trust mode (env var = 1/true/yes): skip pydantic
+            #    validation entirely. Parse the line with orjson and
+            #    project directly into InstanceRecord using dict
+            #    access. About 2.4x faster than mode 2 because it
+            #    drops both the per-line pydantic schema check and the
+            #    cost of building 798k nested model trees that nobody
+            #    in this repo reads (see ``record`` field comment in
+            #    model.py — that field is dead-weight today).
+            #    Use this for paper-pass iteration; reviewers can flip
+            #    it off with the env var unset to re-validate the same
+            #    inputs.
+            #
+            # 2. Validate mode (default): orjson.loads + pydantic
+            #    model_validate. Same shape as before; no behavior
+            #    change vs. the previous commit. ~120µs/line on
+            #    production-shape records.
+            _trust = os.environ.get(
+                "EVAL_AUDIT_TRUST_EEE_SCHEMA", ""
+            ).strip().lower() in {"1", "true", "yes"}
+            if _trust:
+                for raw in samples_path.read_bytes().split(b"\n"):
+                    if not raw or raw.isspace():
+                        continue
+                    try:
+                        d = _loads(raw)
+                        ev = d["evaluation"]
+                        instances.append(InstanceRecord(
+                            sample_id=d["sample_id"],
+                            sample_hash=d.get("sample_hash"),
+                            metric_id=d.get("evaluation_result_id") or d.get("evaluation_name"),
+                            metric_kind=None,
+                            score=float(ev["score"]),
+                            is_correct=ev.get("is_correct"),
+                            record=None,
+                        ))
+                    except Exception:
+                        continue
+            else:
+                instance_validate = InstanceLevelEvaluationLog.model_validate
+                for raw in samples_path.read_bytes().split(b"\n"):
+                    if not raw or raw.isspace():
+                        continue
+                    try:
+                        rec = instance_validate(_loads(raw))
+                    except Exception:
+                        continue
+                    instances.append(_instance_record_from_eee(rec))
 
         # HELM-origin EEE artifacts use the EEE aggregate as the run-level
         # source, but report drilldown still needs stable HELM sample ids.

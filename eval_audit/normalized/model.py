@@ -179,7 +179,15 @@ class InstanceRecord:
     metric_kind: str | None
     score: float
     is_correct: bool | None
-    record: "InstanceLevelEvaluationLog"
+    # ``record`` was originally the full pydantic ``InstanceLevelEvaluation
+    # Log`` so consumers could reach raw EEE fields (input.raw, etc.).
+    # Audit (2026-05-01): no caller in this repo actually reads
+    # ``InstanceRecord.record.<...>`` — it was dead weight on the hot path
+    # (798k pydantic objects per heatmap run). Loosened to allow None so
+    # the loader can skip pydantic validation under
+    # EVAL_AUDIT_TRUST_EEE_SCHEMA=1. Re-add a typed value here if a
+    # consumer ever needs to inspect raw EEE fields.
+    record: "InstanceLevelEvaluationLog | None" = None
 
     @property
     def join_key(self) -> tuple[str, str | None]:
