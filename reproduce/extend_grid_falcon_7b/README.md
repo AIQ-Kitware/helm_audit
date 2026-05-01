@@ -16,6 +16,17 @@ run-specs (or split into a sibling `extend_grid_llama_2_13b/`).
 - Model: `tiiuae/falcon-7b` (base model, completions protocol)
 - Suite version target: HELM Classic v0.3.0 (matches the existing
   Pythia-6.9B / Vicuna-7B locals, which are also at v0.3.0)
+**HELM deployment-resolution gotcha:** upstream HELM only ships a
+`together/falcon-7b` deployment (Together API, requires
+`togetherApiKey`). It does *not* ship a built-in `huggingface/falcon-7b`
+deployment, unlike Pythia/Vicuna which do. The generated manifest
+sets `enable_huggingface_models: [tiiuae/falcon-7b]` so HELM
+dynamically registers an in-process HuggingFaceClient deployment at
+run time (registered *last*, so it wins the "last non-deprecated
+deployment" rule in `get_default_model_deployment_for_model`).
+Without this you get `TogetherClientError: togetherApiKey not set`
+on every retry. `00_check_env.sh` warns if this constraint changes.
+
 - 41 run-specs across the heatmap's 14 benchmarks:
 
   | benchmark | count |

@@ -105,9 +105,14 @@ schema_version: 1
 experiment_name: $EXP
 description: >-
   tiiuae/falcon-7b grid on benchmarks ($BENCHMARK_DESC) via HELM's
-  built-in huggingface/falcon-7b deployment (HuggingFaceClient, fp16,
-  max_sequence_length 2048). $n_entries run-specs matching public HELM
-  Classic v0.3.0 for the EEE-only reproducibility heatmap grid extension.
+  HuggingFaceClient (fp16, in-process, max_sequence_length 2048).
+  $n_entries run-specs matching public HELM Classic v0.3.0 for the
+  EEE-only reproducibility heatmap grid extension. The
+  enable_huggingface_models list below is required because upstream
+  HELM only ships a together/falcon-7b deployment — without this,
+  HELM auto-resolves model=tiiuae/falcon-7b to the Together API and
+  the run dies with TogetherClientError. Pythia/Vicuna don't need
+  this because HELM ships built-in huggingface/pythia-* deployments.
 run_entries:
 ${RUN_ENTRIES_BLOCK}suite: $EXP
 max_eval_instances: $MAX_EVAL_INSTANCES
@@ -120,7 +125,13 @@ local_path: prod_env
 precomputed_root: null
 require_per_instance_stats: true
 model_deployments_fpath: null
-enable_huggingface_models: []
+# Force HELM to register and use an in-process HuggingFaceClient
+# deployment for tiiuae/falcon-7b (registered last → wins the
+# "last non-deprecated deployment" rule in
+# get_default_model_deployment_for_model). Without this, HELM
+# auto-resolves to together/falcon-7b which requires togetherApiKey.
+enable_huggingface_models:
+  - tiiuae/falcon-7b
 enable_local_huggingface_models: []
 EOF
 

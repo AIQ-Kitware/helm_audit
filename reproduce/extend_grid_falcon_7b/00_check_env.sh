@@ -64,6 +64,27 @@ fi
 # because some downstream HF resources (datasets, tokenizers) may
 # rate-limit anonymous traffic during long runs.
 echo
+echo "== HELM falcon-7b deployment =="
+# Sanity: confirm HELM upstream ships only a together/falcon-7b deployment.
+# If a built-in huggingface/falcon-7b is added in a future helm-bump, the
+# manifest's enable_huggingface_models entry becomes redundant (harmless,
+# but worth knowing — and HELM will warn about duplicate registration).
+HELM_DEPLOYMENTS_FPATH="$ROOT/submodules/helm/src/helm/config/model_deployments.yaml"
+if [[ -f "$HELM_DEPLOYMENTS_FPATH" ]]; then
+  has_together=$(grep -c "name: together/falcon-7b\b" "$HELM_DEPLOYMENTS_FPATH" || true)
+  has_hf=$(grep -c "name: huggingface/falcon-7b\b" "$HELM_DEPLOYMENTS_FPATH" || true)
+  echo "  together/falcon-7b deployment present: $has_together"
+  echo "  huggingface/falcon-7b deployment present: $has_hf"
+  if [[ "$has_hf" -eq 0 && "$has_together" -ge 1 ]]; then
+    echo "  → HELM auto-resolution would land on Together (needs API key)."
+    echo "    The generated manifest's enable_huggingface_models setting"
+    echo "    overrides this by registering an in-process HF deployment."
+  fi
+else
+  echo "  WARN: $HELM_DEPLOYMENTS_FPATH not found; can't verify upstream config." >&2
+fi
+
+echo
 echo "== HF auth =="
 if huggingface-cli whoami >/dev/null 2>&1; then
   echo "  huggingface-cli logged in as: $(huggingface-cli whoami | head -1)"
