@@ -299,21 +299,45 @@ def _explicit_eee_resolution(row: dict[str, Any]) -> EeeArtifactResolution | Non
 
 @lru_cache(maxsize=8)
 def _official_sweep_results_by_run_path(root_text: str) -> dict[str, Path]:
+    """Map ``run_path → eee_output Path`` by parsing one converter sweep's
+    ``results.jsonl``.
+
+    First call walks the whole file (~68k rows on the public CRFM
+    sweep); the lru_cache amortizes subsequent calls to ~µs. Use
+    ``orjson`` when available — it's ~3x faster than ``json`` on the
+    one-row-per-line shape this file uses.
+
+    Path keys are the ``run_path`` JSON value verbatim (after
+    whitespace strip). The previous implementation called
+    ``Path(...).expanduser().resolve()`` on both the dict construction
+    side and every lookup; on a 68k-row file that was 130k+ extra
+    ``stat()`` syscalls for no functional gain — converter
+    ``run_path`` values are already absolute paths under
+    ``/data/crfm-helm-public/`` (no ``~``, no symlinks). Callers must
+    normalize their lookup key the same way (a stripped absolute
+    string, no ``.resolve()``).
+    """
     root = Path(root_text)
     results_fpath = root / "results.jsonl"
-    out: dict[str, Path] = {}
     if not results_fpath.exists():
-        return out
+        return {}
     try:
-        lines = results_fpath.read_text().splitlines()
+        data = results_fpath.read_bytes()
     except OSError:
-        return out
-    for line in lines:
-        if not line.strip():
+        return {}
+    try:
+        import orjson
+        _loads = orjson.loads
+    except ImportError:
+        _loads = json.loads
+
+    out: dict[str, Path] = {}
+    for line in data.splitlines():
+        if not line:
             continue
         try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
+            row = _loads(line)
+        except (ValueError, json.JSONDecodeError):
             continue
         if row.get("status") != "ok":
             continue
@@ -321,8 +345,7 @@ def _official_sweep_results_by_run_path(root_text: str) -> dict[str, Path]:
         out_dir = _clean_optional_text(row.get("out_dir"))
         if not run_path or not out_dir:
             continue
-        artifact_path = Path(out_dir).expanduser() / "eee_output"
-        out[str(Path(run_path).expanduser().resolve())] = artifact_path.resolve()
+        out[run_path] = Path(out_dir) / "eee_output"
     return out
 
 
@@ -375,8 +398,9 @@ def resolve_official_eee_artifact(
 
     run_path = _clean_optional_text(row.get("run_path") or row.get("public_run_dir"))
     if run_path:
-        resolved_run_path = str(Path(run_path).expanduser().resolve())
-        artifact_path = _official_sweep_results_by_run_path(str(root)).get(resolved_run_path)
+        # Match the dict's key shape exactly (cleaned absolute string, no
+        # filesystem resolution) — see _official_sweep_results_by_run_path.
+        artifact_path = _official_sweep_results_by_run_path(str(root)).get(run_path)
         if artifact_path is not None and _artifact_has_aggregate(artifact_path):
             return EeeArtifactResolution(
                 artifact_path=artifact_path,

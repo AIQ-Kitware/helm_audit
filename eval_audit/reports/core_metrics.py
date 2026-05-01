@@ -17,6 +17,7 @@ from typing import Any
 
 import kwutil
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 
@@ -418,18 +419,39 @@ def _diagnostic_flags(
 
 @profile
 def _group_quantiles(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    values = sorted(float(r['abs_delta']) for r in rows)
-    # FIXME: calling quantile like this is likely inefficient and duplicating
-    # work. Use a vectorized approach instead.
+    """Compute every reported quantile of ``abs_delta`` in a single pass.
+
+    Previously called the pure-python ``_quantile`` helper six times, and
+    each call did its own internal sort — so we sorted the same vector
+    seven times. ``np.quantile`` does one sort and answers every q at
+    once.
+    """
+    n = len(rows)
+    if n == 0:
+        return {
+            'count': 0,
+            'abs_delta': {
+                'min': None, 'p50': None, 'p90': None,
+                'p95': None, 'p99': None, 'max': None,
+            },
+        }
+    arr = np.fromiter(
+        (float(r['abs_delta']) for r in rows),
+        dtype=np.float64,
+        count=n,
+    )
+    # method='linear' matches the existing _quantile helper's
+    # interpolation rule, so existing report numbers don't shift.
+    qs = np.quantile(arr, [0.0, 0.5, 0.9, 0.95, 0.99, 1.0], method='linear')
     return {
-        'count': len(values),
+        'count': n,
         'abs_delta': {
-            'min': _quantile(values, 0.0),
-            'p50': _quantile(values, 0.5),
-            'p90': _quantile(values, 0.9),
-            'p95': _quantile(values, 0.95),
-            'p99': _quantile(values, 0.99),
-            'max': _quantile(values, 1.0),
+            'min': float(qs[0]),
+            'p50': float(qs[1]),
+            'p90': float(qs[2]),
+            'p95': float(qs[3]),
+            'p99': float(qs[4]),
+            'max': float(qs[5]),
         },
     }
 
