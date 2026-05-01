@@ -2638,6 +2638,7 @@ def _iter_prioritized_example_rows(summary: dict[str, Any]) -> list[dict[str, An
     return rows
 
 
+@profile
 def _prioritized_example_artifact_names(report_dir: Path) -> list[str]:
     try:
         packet = load_core_report_bundle(report_dir / "core_metric_report.json")["packet"]
@@ -2657,6 +2658,7 @@ def _report_artifact_is_usable(fpath: Path) -> bool:
     return fpath.exists()
 
 
+@profile
 def _prioritized_example_missing_artifacts(report_dir: Path) -> list[str]:
     return [
         name for name in _prioritized_example_artifact_names(report_dir)
@@ -2664,6 +2666,7 @@ def _prioritized_example_missing_artifacts(report_dir: Path) -> list[str]:
     ]
 
 
+@profile
 def _repair_prioritized_example_reports(
     *,
     summary: dict[str, Any],

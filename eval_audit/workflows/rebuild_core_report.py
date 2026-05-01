@@ -33,6 +33,14 @@ from eval_audit.reports.core_packet import (
     slugify_identifier,
 )
 
+# Same line_profiler shim used in build_reports_summary / sankey: zero cost
+# unless LINE_PROFILE=1, identity wrapper if line_profiler isn't installed.
+try:
+    from line_profiler import profile  # type: ignore[import-not-found]
+except ImportError:
+    def profile(func):  # type: ignore[no-redef]
+        return func
+
 
 def latest_index_csv(index_dpath: Path) -> Path:
     cands = sorted(index_dpath.glob("audit_results_index_*.csv"), reverse=True)
@@ -342,6 +350,7 @@ def _cleanup_legacy_report_surfaces(report_dpath: Path, enabled_comparison_ids: 
             safe_unlink(path)
 
 
+@profile
 def main(argv: list[str] | None = None) -> None:
     setup_cli_logging()
     parser = argparse.ArgumentParser()
