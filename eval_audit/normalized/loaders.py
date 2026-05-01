@@ -33,6 +33,14 @@ from eval_audit.normalized.model import (
     Origin,
 )
 
+# Zero-overhead in normal runs; line_profiler swaps in a real profiler when
+# the LINE_PROFILE env var is set.
+try:
+    from line_profiler import profile  # type: ignore[import-not-found]
+except ImportError:
+    def profile(func):  # type: ignore[no-redef]
+        return func
+
 # Concrete loaders are registered by ArtifactFormat.
 _REGISTRY: dict[ArtifactFormat, "Loader"] = {}
 
@@ -64,6 +72,7 @@ def get_loader(artifact_format: ArtifactFormat) -> Loader:
         ) from exc
 
 
+@profile
 def load_run(ref: NormalizedRunRef) -> NormalizedRun:
     """Load a normalized run, dispatching on ``ref.artifact_format``."""
     return get_loader(ref.artifact_format).load(ref)
@@ -94,6 +103,7 @@ class EeeArtifactLoader(Loader):
 
     artifact_format = ArtifactFormat.EEE
 
+    @profile
     def load(self, ref: NormalizedRunRef) -> NormalizedRun:
         from every_eval_ever.eval_types import EvaluationLog
         from every_eval_ever.instance_level_types import InstanceLevelEvaluationLog
@@ -219,6 +229,7 @@ class EeeArtifactLoader(Loader):
         )
 
 
+@profile
 def _instance_record_from_eee(rec) -> InstanceRecord:
     """Project an InstanceLevelEvaluationLog into the comparison-friendly shape."""
     return InstanceRecord(
@@ -263,6 +274,7 @@ class HelmRawLoader(Loader):
         "per_instance_stats.json",
     )
 
+    @profile
     def load(self, ref: NormalizedRunRef) -> NormalizedRun:
         if ref.artifact_format is not ArtifactFormat.HELM:
             raise LoaderError(f"HelmRawLoader cannot load {ref.artifact_format!r}")
@@ -348,6 +360,7 @@ class HelmRawLoader(Loader):
         )
 
 
+@profile
 def _read_raw_helm_jsons(run_path: Path) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for stem in ("run_spec", "scenario_state", "stats", "per_instance_stats", "scenario"):
@@ -360,6 +373,7 @@ def _read_raw_helm_jsons(run_path: Path) -> dict[str, Any]:
     return out
 
 
+@profile
 def _instances_from_raw_helm(run_path: Path, evaluation_log) -> list[InstanceRecord]:
     """Lift HELM ``per_instance_stats.json`` rows into :class:`InstanceRecord`.
 
