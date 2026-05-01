@@ -7,6 +7,9 @@
 requires = ["uv_build"]
 build-backend = "uv_build"
 
+[tool.uv]
+exclude-newer = "14 days"  # Can also use ISO format like "P14D"
+
 [project]
 name = "eval-audit"
 version = "0.0.1"
