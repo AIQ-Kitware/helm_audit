@@ -564,19 +564,37 @@ def _should_treat_as_discrete(values) -> bool:
 
 @profile
 def _agreement_curve(rows: list[dict[str, Any]], thresholds: list[float]) -> list[dict[str, Any]]:
+    """Count abs_delta-≤-threshold for each threshold via a single sort + searchsorted.
+
+    Previously did ``sum(v <= t for v in vals)`` inside a per-threshold
+    Python loop — O(N × K) Python comparisons per call. With ~7000 rows
+    × 13 thresholds × ~1400 calls per heatmap run it accounted for ~10s
+    of pure interpreter loop overhead.
+
+    np.searchsorted on a sorted array does each threshold's count in
+    O(log N) (binary search). For "≤ t" we use side='right': the
+    rightmost insertion point equals the number of values ≤ t.
+    """
     if not rows:
         return []
-    vals = [float(r['abs_delta']) for r in rows]
-    out = []
-    for t in thresholds:
-        matched = sum(v <= t for v in vals)
-        out.append({
-            'abs_tol': t,
-            'agree_ratio': matched / len(vals),
-            'matched': matched,
-            'count': len(vals),
-        })
-    return out
+    n = len(rows)
+    arr = np.fromiter(
+        (float(r['abs_delta']) for r in rows),
+        dtype=np.float64,
+        count=n,
+    )
+    arr.sort()
+    thresh_arr = np.asarray(thresholds, dtype=np.float64)
+    counts = np.searchsorted(arr, thresh_arr, side='right')
+    return [
+        {
+            'abs_tol': float(t),
+            'agree_ratio': int(c) / n,
+            'matched': int(c),
+            'count': n,
+        }
+        for t, c in zip(thresh_arr, counts)
+    ]
 
 
 def _infer_run_spec_name(*run_paths: str) -> str:
