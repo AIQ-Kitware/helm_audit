@@ -659,6 +659,7 @@ def _build_pair(
     component_a: dict[str, Any] | None = None,
     component_b: dict[str, Any] | None = None,
     component_cache: dict[str, NormalizedRun] | None = None,
+    skip_diagnosis: bool = False,
 ) -> dict[str, Any]:
     # Stage-4 + Stage-5: the per-metric measurement core operates on the
     # EEE-normalized representation. When the planner has tagged a
@@ -666,6 +667,16 @@ def _build_pair(
     # otherwise we fall back to in-memory HELM->EEE conversion. The legacy
     # HelmRunDiff is still used for the run-spec-semantic diagnosis (which
     # reads run_spec.json from the raw HELM JSONs cached on the run).
+    #
+    # ``skip_diagnosis=True`` (driven by --skip-diagnosis or
+    # EVAL_AUDIT_SKIP_HELM_DIAGNOSIS=1) bypasses HelmRunDiff entirely. The
+    # diagnosis labels (recipe_clean / deployment_drift / ...) need
+    # run_spec.json which is a HELM artifact; for the EEE-only paper
+    # validity claim the heatmap's NUMBERS must come from EEE alone, and
+    # the diagnosis is auxiliary metadata, not load-bearing for the
+    # core agreement-ratio comparisons. Skipping it also drops ~57s/packet
+    # of wasted compute (summary_dict(level=20) computes far more than
+    # the diagnosis we actually consume).
     if component_a is not None:
         nrun_a = _load_component_run(component_a, cache=component_cache)
     else:
@@ -674,12 +685,16 @@ def _build_pair(
         nrun_b = _load_component_run(component_b, cache=component_cache)
     else:
         nrun_b = _load_normalized(run_b, source_kind=SourceKind.LOCAL)
-    diff = HelmRunDiff(
-        helm_view(nrun_a),
-        helm_view(nrun_b),
-        a_name=f'{label}:A',
-        b_name=f'{label}:B',
-    )
+    if skip_diagnosis:
+        diagnosis: dict[str, Any] = {}
+    else:
+        diff = HelmRunDiff(
+            helm_view(nrun_a),
+            helm_view(nrun_b),
+            a_name=f'{label}:A',
+            b_name=f'{label}:B',
+        )
+        diagnosis = diff.summary_dict(level=20).get('diagnosis', {})
     run_rows = ncompare.run_level_core_rows(nrun_a, nrun_b)
     inst_rows = ncompare.instance_level_core_rows(nrun_a, nrun_b)
 
@@ -701,7 +716,7 @@ def _build_pair(
             'run_a': str(Path(run_a).expanduser().resolve()),
             'run_b': str(Path(run_b).expanduser().resolve()),
         },
-        'diagnosis': diff.summary_dict(level=20).get('diagnosis', {}),
+        'diagnosis': diagnosis,
         'core_metrics': sorted({str(r['metric']) for r in inst_rows}),
         'run_level': {
             'n_rows': len(run_rows),
@@ -2109,6 +2124,33 @@ def main(argv: list[str] | None = None) -> None:
         type=float,
         help=argparse.SUPPRESS,
     )
+    # The diagnosis labels (recipe_clean / deployment_drift /
+    # comparability_unknown / ...) live on top of the agreement-ratio
+    # numbers and are derived from HELM ``run_spec.json``. For the EEE-only
+    # paper validity claim, the heatmap's numerical content must come from
+    # EEE alone; --skip-diagnosis bypasses the HelmRunDiff branch in
+    # _build_pair so no run_spec.json is consulted, the auxiliary
+    # diagnosis dict comes back empty, and the agreement numbers are
+    # untouched. Default reads EVAL_AUDIT_SKIP_HELM_DIAGNOSIS={1,true,yes}
+    # so wrappers can flip this for an entire pipeline invocation without
+    # threading the flag through every CLI hop.
+    _skip_diag_default = os.environ.get(
+        'EVAL_AUDIT_SKIP_HELM_DIAGNOSIS', ''
+    ).strip().lower() in {'1', 'true', 'yes'}
+    parser.add_argument(
+        '--skip-diagnosis',
+        action='store_true',
+        default=_skip_diag_default,
+        help=(
+            'Skip the HELM-derived diagnosis labels (recipe_clean / '
+            'deployment_drift / etc). Use for the EEE-only paper path '
+            'where run_spec.json must not be consulted. The heatmap '
+            'numerical content is unaffected; only the auxiliary '
+            'diagnosis dict in core_metric_report.json becomes empty. '
+            'Also reads EVAL_AUDIT_SKIP_HELM_DIAGNOSIS={1,true,yes} as '
+            'the default.'
+        ),
+    )
     args = parser.parse_args(argv)
     plot_layout = _plot_layout_from_cli(args)
     plot_target = args.plot_target
@@ -2175,6 +2217,7 @@ def main(argv: list[str] | None = None) -> None:
             component_a=component_a,
             component_b=component_b,
             component_cache=component_cache,
+            skip_diagnosis=args.skip_diagnosis,
         )
         pair['artifact_formats'] = {
             component_ids[0]: component_a.get('artifact_format') or 'helm',
