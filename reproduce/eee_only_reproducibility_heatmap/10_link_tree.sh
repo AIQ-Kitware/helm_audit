@@ -91,12 +91,6 @@ LOCAL_EXP = "open-helm-models-reproducibility"
 # local_slug_filter is a substring that must appear in the run-spec slug path
 # segment when there are multiple sub-benchmarks; "" means no filter.
 ENTRIES = [
-    # pythia-2.8b-v0 (v0.2.4 — only boolq + civil_comments available publicly)
-    ("v0.2.4", "eleutherai", "pythia-2.8b-v0", "boolq",
-     "boolq:model=eleutherai_pythia-2.8b-v0,data_augmentation=canonical", ""),
-    ("v0.2.4", "eleutherai", "pythia-2.8b-v0", "civil_comments",
-     "civil_comments:demographic=all,model=eleutherai_pythia-2.8b-v0,data_augmentation=canonical",
-     "demographic-all"),
     # pythia-6.9b (v0.3.0 — all 14 benchmarks)
     ("v0.3.0", "eleutherai", "pythia-6.9b", "boolq",
      "boolq:model=eleutherai_pythia-6.9b,data_augmentation=canonical", ""),

@@ -50,7 +50,6 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 _MODEL_DISPLAY: dict[str, str] = {
-    "eleutherai/pythia-2.8b-v0": "Pythia-2.8B",
     "eleutherai/pythia-6.9b": "Pythia-6.9B",
     "lmsys/vicuna-7b-v1.3": "Vicuna-7B-v1.3",
     "tiiuae/falcon-7b": "Falcon-7B",
@@ -92,7 +91,6 @@ _BENCHMARK_ORDER: list[str] = [
 ]
 
 _MODEL_ORDER: list[str] = [
-    "eleutherai/pythia-2.8b-v0",
     "eleutherai/pythia-6.9b",
     "lmsys/vicuna-7b-v1.3",
     "tiiuae/falcon-7b",

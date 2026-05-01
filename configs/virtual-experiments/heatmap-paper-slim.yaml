@@ -22,7 +22,7 @@ scope:
   # is fully synced; until then the regex still matches the partial
   # rows that have been indexed.
   models:
-    - "regex:^eleutherai/pythia-(2\\.8b-v0|6\\.9b)$"
+    - "regex:^eleutherai/pythia-6\\.9b$"
     - "regex:^lmsys/vicuna-7b-v1\\.3$"
     - "regex:^tiiuae/falcon-7b$"
 
