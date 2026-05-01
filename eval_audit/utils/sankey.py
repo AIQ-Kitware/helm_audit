@@ -14,7 +14,16 @@ from eval_audit.infra.logging import rich_link
 from eval_audit.utils import sankey_builder
 from loguru import logger
 
+# Zero-overhead in normal runs; line_profiler swaps in a real profiler when
+# the LINE_PROFILE env var is set. See the same shim in build_reports_summary.
+try:
+    from line_profiler import profile  # type: ignore[import-not-found]
+except ImportError:
+    def profile(func):  # type: ignore[no-redef]
+        return func
 
+
+@profile
 def emit_sankey_artifacts(
     *,
     rows: list[dict[str, Any]],

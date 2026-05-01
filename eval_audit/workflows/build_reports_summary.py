@@ -42,6 +42,18 @@ from eval_audit.workflows.rebuild_core_report import main as rebuild_core_report
 
 from loguru import logger
 
+# ``@profile`` is a zero-overhead no-op unless ``LINE_PROFILE=1`` is set in
+# the environment, in which case ``line_profiler`` swaps in a real profiler.
+# That lets us leave decorators on hot functions in production without any
+# runtime cost. Fallback to an identity wrapper when line_profiler isn't
+# installed at all (so fresh checkouts don't break before someone runs
+# ``uv pip install line_profiler``).
+try:
+    from line_profiler import profile  # type: ignore[import-not-found]
+except ImportError:
+    def profile(func):  # type: ignore[no-redef]
+        return func
+
 
 DEFAULT_BREAKDOWN_DIMS = [
     "experiment_name",
@@ -2708,6 +2720,7 @@ def _repair_prioritized_example_reports(
     return repairs
 
 
+@profile
 def _publish_prioritized_examples_tree(
     *,
     level_002: Path,
@@ -2830,6 +2843,7 @@ def _compact_bar_figure_size(unique_x: list[str]) -> tuple[int, int]:
     return width, height
 
 
+@profile
 def _write_plotly_bar(
     *,
     rows: list[dict[str, Any]],
@@ -3288,6 +3302,7 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         link_alias(machine_csv, summary_root, "machine_summary.csv")
 
 
+@profile
 def _render_breakdown_scopes(
     *,
     enriched_rows: list[dict[str, Any]],
@@ -3466,6 +3481,7 @@ _FAILURE_CATEGORY_LABELS = {
 }
 
 
+@profile
 def _write_agreement_curve_plot(
     repro_rows: list[dict[str, Any]],
     enriched_rows: list[dict[str, Any]],
@@ -3631,6 +3647,7 @@ def _write_agreement_curve_plot(
     return {"json": str(json_fpath), "html": html_out, "jpg": jpg_out, "plotly_error": plotly_error}
 
 
+@profile
 def _write_per_metric_agreement_plot(
     repro_rows: list[dict[str, Any]],
     enriched_rows: list[dict[str, Any]],
@@ -3785,6 +3802,7 @@ def _write_per_metric_agreement_plot(
     return {"json": str(json_fpath), "html": html_out, "jpg": jpg_out, "plotly_error": plotly_error}
 
 
+@profile
 def _write_coverage_matrix_plot(
     enriched_rows: list[dict[str, Any]],
     repro_rows: list[dict[str, Any]],
@@ -3970,6 +3988,7 @@ def _write_coverage_matrix_plot(
     return {"json": str(json_fpath), "html": html_out, "jpg": jpg_out, "plotly_error": plotly_error}
 
 
+@profile
 def _write_failure_taxonomy_plot(
     failed_rows: list[dict[str, Any]],
     stem: Path,
@@ -4207,6 +4226,7 @@ def _write_redraw_plots_sh(
     fpath.chmod(0o755)
 
 
+@profile
 def _render_scope_summary(
     *,
     scope_kind: str,
@@ -5181,6 +5201,7 @@ def _cleanup_filter_artifact_aliases(scope_root: Path) -> None:
             safe_unlink(path)
 
 
+@profile
 def main(argv: list[str] | None = None) -> None:
     setup_cli_logging()
     parser = argparse.ArgumentParser()
