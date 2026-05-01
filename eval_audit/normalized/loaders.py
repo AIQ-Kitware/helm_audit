@@ -33,6 +33,23 @@ from eval_audit.normalized.model import (
     Origin,
 )
 
+# every_eval_ever's pydantic schemas — used by EeeArtifactLoader and
+# (separately) by HelmRawLoader. Imported at module level so the
+# pydantic schema build cost (~1s combined) happens once at import
+# rather than on every loader call. No circular import concern.
+from every_eval_ever.eval_types import EvaluationLog
+from every_eval_ever.instance_level_types import InstanceLevelEvaluationLog
+
+# orjson is ~3x faster than stdlib json on EEE samples.jsonl; we do
+# millions of line-parses per heatmap run. Bind once at module load
+# with a stdlib fallback so individual loaders can just call
+# ``_loads(raw)`` without re-importing.
+try:
+    import orjson as _orjson
+    _loads = _orjson.loads
+except ImportError:
+    _loads = json.loads
+
 # Zero-overhead in normal runs; line_profiler swaps in a real profiler when
 # the LINE_PROFILE env var is set.
 try:
@@ -105,26 +122,6 @@ class EeeArtifactLoader(Loader):
 
     @profile
     def load(self, ref: NormalizedRunRef) -> NormalizedRun:
-        from every_eval_ever.eval_types import EvaluationLog
-        from every_eval_ever.instance_level_types import InstanceLevelEvaluationLog
-        # orjson is ~3x faster than stdlib json on the per-line shape
-        # samples.jsonl uses. Combined with ``model_validate`` (parsing
-        # already done; no JSON re-decode inside pydantic) the per-line
-        # parse drops from ~22µs to ~16µs without losing the nested
-        # pydantic model construction.
-        #
-        # Why not ``model_construct``? It's faster (~11µs/line) but
-        # *doesn't recurse into nested models* — ``rec.evaluation``
-        # would come back as a plain dict and downstream attribute
-        # access (e.g. ``rec.evaluation.score``) crashes. The
-        # 30% win we get from ``orjson + model_validate`` keeps the
-        # full pydantic shape intact.
-        try:
-            import orjson
-            _loads = orjson.loads
-        except ImportError:
-            _loads = json.loads
-
         if ref.artifact_format is not ArtifactFormat.EEE:
             raise LoaderError(f"EeeArtifactLoader cannot load {ref.artifact_format!r}")
 
