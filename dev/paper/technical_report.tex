@@ -1,0 +1,2177 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{xspace}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage[colorlinks=true]{hyperref}
+\usepackage{url}
+\usepackage{xurl}
+
+\lstdefinestyle{shell}{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  keepspaces=true,
+  showstringspaces=false,
+}
+\lstdefinestyle{python}{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  keepspaces=true,
+  showstringspaces=false,
+  language=Python,
+}
+
+\newcommand{\eee}{\textit{Every Eval Ever}\xspace}
+\newcommand{\eeeshort}{\textsc{EEE}\xspace}
+
+\title{HELM Instance-level Reproducibility Audit: \\
+       \large Technical Report}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+
+% =====================================================================
+\section{Executive Summary}
+\label{sec:tr-summary}
+% =====================================================================
+
+This technical report documents an end-to-end reproducibility audit of
+  three open-weight model families
+  (Pythia-6.9B, Vicuna-7B v1.3, Falcon-7B) against the public HELM
+  Classic v0.3.0 corpus on fourteen single-turn benchmarks, totalling
+  42 \mbox{(model, benchmark)} cells.
+The audit operates entirely through the \eee{} schema and is
+  empirically validated --- via a runtime audit hook installed into
+  every child Python process --- to read zero HELM run-dir artifacts
+  during analysis (88 child processes, 205{,}798 file-open events,
+  6{,}902 unique paths, 0 flagged).
+
+\paragraph{Headline numbers.}
+On the resulting heatmap, 39 of 42 cells have a micro-averaged
+  instance-level agree\_ratio in $[0.788, 1.000]$ at \texttt{abs\_tol=0};
+  the remaining 3 are the \texttt{entity\_matching} cells across all
+  three models, where official-side and local-side \texttt{sample\_hash}
+  sets have zero overlap.
+
+\paragraph{Three reproducibility-failure mechanisms identified.}
+Each illustrates a different layer at which HELM-side reproducibility
+  can leak, and each is detected by EEE's content-addressed
+  \texttt{sample\_hash} while HELM's positional \texttt{id<i>}-based
+  comparison would silently agree on different examples.
+
+\begin{enumerate}
+  \item \textbf{Data-pipeline non-determinism (Case~A).}
+        The \texttt{entity\_matching} \texttt{join\_failed} cells are
+        caused by \texttt{pd.merge} producing different row orderings
+        between pandas~2.0.x (HELM Classic v0.3.0 era) and pandas~2.2+
+        (current) on byte-identical input CSVs.
+        HELM's downstream \texttt{with\_instance\_ids} assigns
+        identifiers positionally over the merged list, so the same
+        \texttt{id<i>} binds to different rows under different pandas
+        versions.
+        We close this loop empirically: we reproduce the official
+        v0.3.0 \texttt{scenario\_state.json} byte-for-byte from a
+        \texttt{crfm-helm==0.3.0 + pandas==2.0.3 + numpy==1.23.5} venv,
+        and our local audit \texttt{scenario\_state.json} byte-for-byte
+        from a current venv (\texttt{pandas==2.3.3 + numpy==2.2.6}).
+  \item \textbf{Inference-backend non-determinism (Case~B).}
+        The \texttt{synthetic\_reasoning\_natural~$\times$~Pythia-6.9B}
+        cell at $0.788$ is a Pythia-specific artifact of HELM's
+        deployment routing on the official side: with
+        \texttt{model\_deployment=None}, HELM v0.3.0's
+        \texttt{auto\_client.py} dispatches \texttt{eleutherai/*}
+        models to Together.ai's hosted API, where Pythia at
+        \texttt{temperature=0} emits a leading
+        \texttt{`\textbackslash n'} as its greedy first token.
+        HELM's \texttt{stop\_sequences=[`\textbackslash n']} then
+        trims \texttt{completion.text} to empty before scoring, and
+        the resulting HELM-published score on the Stanford dashboard
+        is $0\%$ accuracy on every one of the 1{,}000 evaluation
+        instances.
+        Our local re-run, served via HuggingFace transformers,
+        produces a greedy first token of \texttt{`The'}, captures the
+        model's actual answer, and recovers $\approx 20\%$ accuracy on
+        the same task.
+  \item \textbf{Recipe-level stochasticity (Case~C).}
+        The \texttt{wikifact} cells at $\approx 0.92$ across all three
+        models reflect HELM's recipe-level non-determinism: the
+        benchmark pins \texttt{temperature=1.0, num\_outputs=5}, and
+        the expected agreement of two independent stochastic runs on
+        a benchmark with per-prompt \texttt{exact\_match@5} hit rate
+        $p_i$ decomposes as
+        $\mathbb{E}_i[p_i^2 + (1-p_i)^2]
+        = \text{agree}(\bar p) + 2\,\mathrm{Var}_i(p_i)$
+        (formalized in
+        \texttt{wikifact\_consistency\_claim.lean}, theorem
+        \texttt{expectedAgreement\_eq\_uniformAgreement\_add\_variance}).
+        This is the only one of the three mechanisms not surfaceable as
+        a reproducibility bug; it is the design-baked floor that any
+        honest reproducibility audit must acknowledge.
+\end{enumerate}
+
+\paragraph{The systematic Pythia-Together-vs-HuggingFace pattern.}
+Eleven cells fall below 0.98 agreement on the slim heatmap; ten of
+  them are Pythia-6.9B.
+The non-WikiFact eight Pythia cells share a single underlying
+  mechanism (Section~\ref{sec:tr-pythia-pattern}): at
+  \texttt{temperature=0}, Together-hosted Pythia and HuggingFace-served
+  Pythia disagree at the greedy argmax for the first divergent token
+  on a small fraction of prompts.
+SR-Natural~$\times$~Pythia is the catastrophic special case where the
+  divergence happens at the very first generated token AND the
+  divergent token is \texttt{`\textbackslash n'} (the
+  \texttt{stop\_sequence}), zeroing the score outright; the other
+  Pythia cells are the same backend divergence under benchmarks whose
+  scorers tolerate it more gracefully.
+Vicuna-7B v1.3 and Falcon-7B --- also Together-hosted in the official
+  run --- agree at $\geq 0.984$ on every non-WikiFact cell, indicating
+  the divergence is Pythia-specific and consistent with a logit-margin
+  effect from Pythia's smaller training-compute budget and absence of
+  instruction tuning (Section~\ref{sec:tr-pythia-pattern}).
+
+\paragraph{Three failure modes of micro-averaged agree\_ratio.}
+A reproducibility report that surfaces the cell-level number alone
+  cannot distinguish a recipe-clean near-perfect reproduction from
+  three alternative regimes that the audit catalogues
+  (Section~\ref{sec:tr-microavg}):
+  (i)~\emph{degenerate-zero agreement}, where one side scores 0 on
+  every row and the agreement reads as ``fraction the other side also
+  failed'' (SR-Natural~$\times$~Pythia at $0.788$);
+  (ii)~\emph{both-wrong masking}, where outputs differ on a fraction of
+  prompts but the metric scores both as 0, so the agreement reads as
+  1.0 even though outputs differ (Falcon~$\times$~SR at $0.999$ hides
+  a $1.0\%$ true output-divergence rate);
+  (iii)~\emph{stochastic noise floor}, where recipe-pinned
+  \texttt{temperature>0} sets an inherent non-zero disagreement
+  expectation regardless of any reproduction effort
+  (\texttt{wikifact} at $\approx 0.92$).
+
+\paragraph{EEE audit/forensics scope.}
+Each of the three case studies was \emph{detected} from EEE alone but
+  required walking back to HELM's run-time artifacts
+  (\texttt{run\_spec.json}, \texttt{scenario\_state.json}, and the
+  framework source) to identify the proximate \emph{mechanism}.
+This is a deliberate scope decision (Section~\ref{sec:tr-scope-split}):
+  EEE preserves enough for audit, deliberately less for forensics.
+
+\paragraph{Tooling delivered.}
+We release four reproducer tools alongside this report
+  (Section~\ref{sec:tr-tooling}):
+  \texttt{audit\_eee\_only\_run.py} (runtime EEE-only paper-validity
+  hook),
+  \texttt{em\_pandas\_mwe.sh} (5-combo pandas-merge isolation
+  reproducer),
+  \texttt{em\_helm\_mwe.sh} (end-to-end HELM-in-the-loop reproducer
+  for Case~A),
+  and \texttt{diagnose\_entity\_matching\_join.py} (Q1--Q5
+  divergence-pattern diagnostic).
+We also contribute four code changes to the audit pipeline:
+  registration of the \texttt{*\_set\_match} metric family in the core
+  classifier, a new \texttt{no\_core\_metrics} heatmap status
+  (distinct from \texttt{join\_failed}), automatic emission of a
+  per-output-dir \texttt{redraw\_plots.sh} alongside the rendered
+  heatmap, and a tightened heatmap colour scale and dynamic legend.
+
+
+% =====================================================================
+\section{Background and Motivation}
+\label{sec:tr-background}
+% =====================================================================
+
+Evaluation reports for large language models are increasingly relied
+  on as evidence in research papers, leaderboards, model cards, and
+  governance assessments.
+A published HELM run records, for each evaluation instance, a
+  per-metric score that a downstream consumer can read directly off
+  the leaderboard.
+What the leaderboard does \emph{not} record on a per-record basis is
+  the upstream-framework version, the inference-backend identity, or
+  the recipe-level stochasticity parameters that determine whether
+  two runs of nominally the same recipe should agree.
+
+The reproducibility question for any single such record is:
+
+\begin{quote}\itshape
+For a published HELM evaluation result, can a downstream consumer who
+  has only the published artifacts (a)~detect whether a re-execution
+  agrees with the published number, (b)~localize where any
+  disagreement comes from, and (c)~reach a defensible verdict about
+  whether the disagreement reflects a real reproducibility failure or
+  an expected artifact of the evaluation recipe?
+\end{quote}
+
+The audit's first job is to \emph{distinguish} layers of disagreement,
+  not just to count instance-level mismatches.
+A mismatch that comes from \texttt{temperature=1} stochastic sampling
+  is a different finding from a mismatch that comes from a silent
+  pandas-version-dependent reshuffle of the test set.
+Both are present in the slim-paper grid we audit; both are detected
+  by \eee{}; the mechanisms are completely different.
+
+
+% =====================================================================
+\section{Audit Pipeline Architecture}
+\label{sec:tr-pipeline}
+% =====================================================================
+
+\subsection{The \eee{} artifact format}
+\label{sec:tr-eee-format}
+
+The audit consumes \eee{} artifacts on both sides of the comparison.
+For each evaluation run, \eee{} stores:
+\begin{itemize}
+  \item An aggregate JSON file with run-level metadata
+        (\texttt{schema\_version}, \texttt{evaluation\_id},
+        \texttt{model\_id}, \texttt{evaluation\_name},
+        \texttt{evaluation\_timestamp}, \texttt{source\_metadata},
+        \texttt{eval\_library},
+        \texttt{evaluation\_results}).
+  \item A companion \texttt{<uuid>\_samples.jsonl} file with one
+        record per (instance, metric), each containing
+        \texttt{input.raw} (the prompt the model saw),
+        \texttt{output.raw} (the model's completions),
+        \texttt{answer\_attribution.extracted\_value} (what the
+        evaluator extracted),
+        \texttt{evaluation.score} (the per-metric score the harness
+        recorded),
+        \texttt{sample\_id} (the harness's per-record identifier),
+        and \texttt{sample\_hash} (a content-addressed identifier
+        we compute at conversion time).
+\end{itemize}
+
+The \texttt{sample\_hash} is the central identity primitive on which
+  the audit depends.
+For HELM-converted records, it is computed as
+\[
+  \texttt{sample\_hash}
+  = \mathrm{sha256}(\texttt{state.request.prompt}
+    \;\Vert\; \texttt{correct\_refs[0]}),
+\]
+where \texttt{state} is HELM's per-instance \texttt{request\_state},
+  \texttt{request.prompt} is the rendered prompt the model saw, and
+  \texttt{correct\_refs[0]} is the first gold reference for the
+  instance.
+The hash is content-derived: two records with identical rendered
+  prompt and gold reference produce identical hashes; any drift in
+  prompt construction (e.g.\ a different fewshot exemplar, a
+  different newline pattern, a different gold reference) produces a
+  different hash.
+
+For a comparison of two evaluations of nominally the same recipe
+  (e.g., the published HELM run and our local re-run), the audit
+  joins the two sample sets on
+  \texttt{(sample\_hash, evaluation\_result\_id)} pairs.
+A pair is produced if and only if both sides have the same content
+  hash for the same metric; an audit that observes zero joined pairs
+  is observing two evaluations whose underlying contents differ.
+
+\subsection{Pipeline stages}
+\label{sec:tr-pipeline-stages}
+
+The slim-paper pipeline runs three stages:
+
+\begin{enumerate}
+  \item \texttt{10\_link\_tree.sh}.
+        Walk the \eee{} artifacts on both sides and build a symlink
+        tree under
+        \texttt{eee\_artifacts/\{official,local\}/<benchmark>/<org>/<model>/}
+        so a single reader can walk both sides as an \eee{}-shaped
+        directory hierarchy.
+        This stage is filesystem plumbing; no analysis happens here.
+  \item \texttt{20\_run.sh}.
+        Invoke \texttt{eval-audit-from-eee} (the EEE-only entry point
+        of the analysis pipeline) over the link tree.
+        For each \mbox{(model, benchmark)} cell, this produces a
+        \texttt{core\_metric\_report.json} containing the
+        instance-level agreement curves, per-metric breakdowns, and
+        run-level mean scores.
+        This is the analysis step where any reproducibility signal is
+        actually computed.
+  \item \texttt{30\_heatmap.sh}.
+        Aggregate the per-cell reports into the publication heatmap
+        (\texttt{reproducibility\_heatmap.png}) and a per-metric
+        drill-down panel (one PNG per metric, under
+        \texttt{reproducibility\_heatmap\_per\_metric/}).
+\end{enumerate}
+
+The output dir for the slim-paper run is at
+  \texttt{/data/crfm-helm-audit-store/eee-only-reproducibility-heatmap-paper-slim/}.
+
+\subsection{Runtime EEE-only paper-validity guard}
+\label{sec:tr-paper-validity-guard}
+
+A reviewer concerned with the \eee{}-sufficiency claim of this audit
+  will reasonably ask: when the audit computes the published agreement
+  numbers, does the analysis code actually use only EEE artifacts, or
+  does it silently fall back to HELM run-dir reads when those happen
+  to be on disk?
+We resolve this question two ways.
+
+\paragraph{Behaviour-level guarantee: \texttt{EVAL\_AUDIT\_EEE\_STRICT=1}.}
+The \eee{} artifact loader at
+  \texttt{eval\_audit/normalized/loaders.py} contains a legacy
+  fallback: when the EEE artifact's provenance refers to a HELM run
+  dir that exists on disk, the loader replaces the EEE-derived
+  per-instance records with records read directly from
+  \texttt{per\_instance\_stats.json}.
+This fallback was added to support older HELM-shape consumers; it is
+  a paper-validity hazard for a strict EEE-only run because it means
+  the same EEE artifact, run with the same code, can produce
+  different numbers depending on whether the corresponding HELM run
+  dir is on the analysis host.
+Setting \texttt{EVAL\_AUDIT\_EEE\_STRICT=1} disables the fallback;
+  with it set, the EEE loader is provably EEE-only at the
+  instance-record level.
+
+\paragraph{Runtime-level evidence: \texttt{audit\_eee\_only\_run.py}.}
+The behaviour-level guarantee is necessary but not sufficient ---
+  \texttt{EVAL\_AUDIT\_EEE\_STRICT} closes the documented fallback,
+  but a reviewer would reasonably want runtime evidence that no other
+  HELM-shaped read sneaks through.
+We implement that evidence as a wrapper script
+  (\texttt{dev/oneoff/audit\_eee\_only\_run.py}) that:
+
+\begin{enumerate}
+  \item Builds a temporary directory containing a
+        \texttt{sitecustomize.py} that installs a
+        \texttt{sys.addaudithook} on Python startup.
+        The hook records every \texttt{open} and \texttt{os.open}
+        event to a per-PID JSONL log file at
+        \texttt{\$EVAL\_AUDIT\_AUDIT\_LOG\_DIR/audit\_<pid>.jsonl}.
+  \item Prepends the temporary directory to \texttt{PYTHONPATH} and
+        sets \texttt{EVAL\_AUDIT\_AUDIT\_LOG\_DIR=<log\_dir>}, so the
+        sitecustomize is auto-imported by every child Python process
+        that the wrapped command spawns.
+        Because \texttt{eval-audit-from-eee} spawns a per-packet
+        \texttt{python -m eval\_audit.reports.core\_metrics} child for
+        each \mbox{(model, benchmark)} pair, the audit hook propagates
+        through every analysis subprocess.
+  \item Executes the wrapped command (\texttt{20\_run.sh}) under the
+        instrumented environment.
+  \item After the wrapped command exits, walks the log directory,
+        classifies every recorded path against a HELM-shape signature
+        (basenames \texttt{run\_spec.json},
+        \texttt{scenario.json}, \texttt{scenario\_state.json},
+        \texttt{stats.json}, \texttt{per\_instance\_stats.json};
+        substring \texttt{benchmark\_output/runs/}), and writes a
+        per-run report
+        (\texttt{audit\_eee\_only\_run.report.json}) summarizing
+        total opens, unique paths, and any flagged paths.
+  \item Returns nonzero exit if any HELM-shaped path was opened.
+\end{enumerate}
+
+The hook is reentrancy-safe (a thread-local guard suppresses the
+  recursive event triggered by opening the log file itself) and
+  never raises out of audit-event delivery.
+The full implementation is at
+  \texttt{dev/oneoff/audit\_eee\_only\_run.py}; the verdict for our
+  slim-paper run is reproduced in
+  Table~\ref{tab:tr-audit-verdict}.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Runtime EEE-only paper-validity hook verdict for the slim
+  heatmap analysis step (\texttt{20\_run.sh}).
+The verdict is empirical evidence that the published numbers
+  reported in this technical report are produced from EEE artifacts
+  alone, regardless of whether HELM run dirs happen to be available
+  to the analysis host.}
+\label{tab:tr-audit-verdict}
+\begin{tabular}{lr}
+\toprule
+metric & value \\
+\midrule
+child Python processes audited      & 88 \\
+total open / os.open events recorded & 205{,}798 \\
+unique file paths observed          & 6{,}902 \\
+\textbf{HELM-shaped opens flagged}  & \textbf{0} \\
+\midrule
+verdict & PASS \\
+wrapped command exit                & 0 \\
+\texttt{EVAL\_AUDIT\_EEE\_STRICT} at run time & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The hook catches every Python-level file open (\texttt{open},
+  \texttt{pathlib.Path.open}, \texttt{json.load(file)},
+  \texttt{Path.read\_text}, etc.) and every \texttt{os.open} call.
+It does not catch reads from C extensions that bypass the Python audit
+  framework (e.g., a C extension calling \texttt{fopen()} without
+  routing through CPython's IO layer).
+For belt-and-suspenders verification against this case, the same
+  command can be re-wrapped under
+  \texttt{strace -fe trace=openat -o trace.log} and the resulting
+  syscall log grepped for the same patterns.
+We did not run the strace verification for this technical report;
+  the in-Python audit hook produces zero flagged events on its own,
+  and we have no positive indication that a C-extension bypass
+  exists in the audit code path.
+
+
+% =====================================================================
+\section{Scope and Methodology}
+\label{sec:tr-scope}
+% =====================================================================
+
+\subsection{Three-model slim slice}
+\label{sec:tr-slim-models}
+
+We picked three open-weight model families that span useful variation
+  in pretraining budget, post-pretraining alignment style, and
+  inference-backend default:
+
+\begin{itemize}
+  \item \texttt{eleutherai/pythia-6.9b} --- raw pretrained, 6.9B
+        parameters, $\sim$300\,B training tokens, EleutherAI's
+        open-source replication of GPT-NeoX.
+  \item \texttt{lmsys/vicuna-7b-v1.3} --- LLaMA-1 7B base
+        (1\,T pretraining tokens) with ShareGPT-style
+        instruction-tuning supervised fine-tuning on top.
+  \item \texttt{tiiuae/falcon-7b} --- raw pretrained, 7B parameters,
+        $\sim$1.5\,T training tokens, TII's RefinedWeb-trained model
+        with multi-query attention.
+\end{itemize}
+
+All three have a HELM Classic v0.3.0 entry in the public corpus and
+  a runnable HELM reproduction in our local audit.
+The intent of the three-model choice is that the trio together
+  exercises the case where the model is and is not instruction-tuned,
+  the case where pretraining compute differs by 5$\times$ at fixed
+  parameter count, and the case where the architecture
+  (multi-query vs.\ standard multi-head attention) differs.
+
+\subsection{Fourteen-benchmark scope}
+\label{sec:tr-slim-benchmarks}
+
+The fourteen benchmarks are the HELM Classic core scenarios for which
+  all three models have both a public-HELM run and a local audit
+  reproduction.
+They span:
+\begin{itemize}
+  \item Multiple-choice
+        (\texttt{mmlu}, \texttt{lsat\_qa}, \texttt{truthful\_qa}).
+  \item Short-answer classification
+        (\texttt{boolq}, \texttt{civil\_comments}, \texttt{imdb}).
+  \item Entity tasks
+        (\texttt{entity\_data\_imputation},
+         \texttt{entity\_matching},
+         \texttt{wikifact}).
+  \item Free-form question answering
+        (\texttt{narrativeqa}, \texttt{quac}).
+  \item Structured reasoning
+        (\texttt{gsm}, \texttt{synthetic\_reasoning},
+         \texttt{synthetic\_reasoning\_natural}).
+\end{itemize}
+
+\subsection{Comparison metric}
+\label{sec:tr-comparison-metric}
+
+For each cell we compute the \emph{micro-averaged} instance-level
+  agreement at \texttt{abs\_tol=0}: the fraction of
+  \mbox{(\texttt{sample\_hash}, \texttt{evaluation\_result\_id})}
+  rows whose per-metric \texttt{evaluation.score} is bit-identical
+  between the public-HELM-side and local-side records.
+Concretely:
+\[
+  \mathrm{agree\_ratio}_{\mathrm{cell}}
+  \;=\;
+  \frac{\sum_{(s, m) \in \mathrm{cell}}
+       \mathbb{1}[\,
+         |\mathrm{score}_{\mathrm{off}}(s, m)
+          - \mathrm{score}_{\mathrm{loc}}(s, m)|
+         < \epsilon
+       \,]}
+       {\sum_{(s, m) \in \mathrm{cell}} 1},
+\]
+with $\epsilon = 10^{-9}$.
+The micro-average means a cell with multiple metric kinds is
+  effectively weighted by per-metric row count, and any $0=0$
+  collision between the two sides on a (sample, metric) row counts
+  as a match --- a property that interacts with several of the
+  failure modes we report and that we discuss in detail in
+  Section~\ref{sec:tr-microavg}.
+
+We deliberately use \texttt{abs\_tol=0} as the headline tolerance:
+  looser tolerances erase the per-instance flips this audit is
+  designed to detect, and a relaxed tolerance hides the
+  upstream effects we want to surface.
+Per-cell tolerance sweeps are computed by the pipeline and are
+  available in the cell-level JSON output, but the headline number is
+  always at \texttt{abs\_tol=0}.
+
+\subsection{Validation strategy}
+\label{sec:tr-validation}
+
+We use three validation hooks, each independently verifiable:
+
+\begin{enumerate}
+  \item Behaviour-level: \texttt{EVAL\_AUDIT\_EEE\_STRICT=1} disables
+        the silent HELM fallback in the EEE artifact loader
+        (Section~\ref{sec:tr-paper-validity-guard}).
+  \item Runtime-level: \texttt{audit\_eee\_only\_run.py} records every
+        file open across all child Python processes during the
+        analysis step and emits a verdict
+        (Table~\ref{tab:tr-audit-verdict}).
+  \item Numerical-level: the math claims about \texttt{wikifact}'s
+        stochastic-recipe expected agreement are formalized in
+        \texttt{wikifact\_consistency\_claim.lean}, which compiles
+        against \texttt{Mathlib} and is referenced by theorem name in
+        Section~\ref{sec:tr-case-c}.
+\end{enumerate}
+
+
+% =====================================================================
+\section{Headline Results}
+\label{sec:tr-headline}
+% =====================================================================
+
+\subsection{Cell status distribution}
+\label{sec:tr-status-dist}
+
+Table~\ref{tab:tr-cell-status} reports the cell-level outcome
+  distribution on the slim heatmap.
+The pipeline distinguishes four cell statuses:
+
+\begin{itemize}
+  \item \texttt{present} --- both sides have an artifact, the
+        \texttt{sample\_hash} sets overlap, and at least one
+        recognized core metric scored on at least one row.
+        The cell renders as a colored agree\_ratio value on the
+        heatmap.
+  \item \texttt{join\_failed} --- both sides have an artifact but the
+        \texttt{sample\_hash} sets do not overlap (and so no joined
+        rows exist for any metric).
+        The cell renders with diagonal hatching and the marker
+        \texttt{join0/N}, where $N$ is the number of
+        \texttt{official\_vs\_local} pair attempts.
+  \item \texttt{no\_core\_metrics} --- a status introduced by this
+        audit (commit \texttt{36fc52e};
+        Section~\ref{sec:tr-tooling-classifier}).
+        Both sides have an artifact, the sample\_hashes overlap, but
+        no recognized core metric scored on any row, because the
+        metric classifier did not register the metric family.
+        The cell renders with dotted hatching and the marker
+        \texttt{no core}.
+        On the slim-paper run this status occurs zero times --- the
+        \texttt{*\_set\_match} family registration was the patch
+        that converted the previously-\texttt{join\_failed}
+        \texttt{synthetic\_reasoning\_natural} cells into proper
+        \texttt{present} cells.
+  \item \texttt{missing} --- the cell is absent from the result dict
+        because no packet exists for the (model, benchmark) pair.
+        Renders as a solid grey cell with a dash.
+        Zero on the slim-paper run; every \mbox{(model, benchmark)}
+        pair has both sides.
+\end{itemize}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Cell status distribution on the slim heatmap (3 models
+  $\times$ 14 benchmarks $=$ 42 cells).
+The 3 \texttt{join\_failed} cells are the
+  \texttt{entity\_matching} row across all three models; the
+  mechanism is detailed in Section~\ref{sec:tr-case-a}.
+No cell is \texttt{no\_core\_metrics} or \texttt{missing}.}
+\label{tab:tr-cell-status}
+\begin{tabular}{lr}
+\toprule
+status & cells \\
+\midrule
+\texttt{present}            & 39 \\
+\texttt{join\_failed}       &  3 \\
+\texttt{no\_core\_metrics}  &  0 \\
+\texttt{missing}            &  0 \\
+\midrule
+total                       & 42 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Per-benchmark agreement}
+\label{sec:tr-perbench}
+
+Table~\ref{tab:tr-perbench} reports the cell-level micro-averaged
+  agree\_ratio per (benchmark, model) pair, sorted by the Pythia-6.9B
+  agreement ascending.
+The Pythia column is the systematic outlier on this slim grid; the
+  pattern is the subject of Section~\ref{sec:tr-pythia-pattern}.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Per-benchmark micro-averaged instance-level agreement at
+  \texttt{abs\_tol=0} on the slim heatmap, sorted by Pythia-6.9B
+  agreement ascending.
+Three observations are visible at this granularity:
+  (i)~Pythia is the dominant outlier on every cell except
+  \texttt{wikifact} and \texttt{entity\_data\_imputation};
+  (ii)~Vicuna and Falcon agree at $\geq 0.984$ on every non-WikiFact
+  cell;
+  (iii)~All three models converge to $\approx 0.92$ on
+  \texttt{wikifact}, including Pythia.
+\texttt{entity\_matching}'s \texttt{(--)} entries reflect the
+  \texttt{join\_failed} status across all three models; agreement
+  is undefined because the \texttt{sample\_hash} sets do not
+  overlap (Section~\ref{sec:tr-case-a}).}
+\label{tab:tr-perbench}
+\begin{tabular}{lrrr}
+\toprule
+benchmark & Pythia-6.9B & Vicuna-7B-v1.3 & Falcon-7B \\
+\midrule
+SyntheticReasoning-Natural   & 0.788 & 0.998 & 0.997 \\
+NarrativeQA                  & 0.910 & 0.985 & 0.984 \\
+WikiFact                     & 0.922 & 0.920 & 0.927 \\
+BoolQ                        & 0.934 & 1.000 & 0.996 \\
+MMLU                         & 0.935 & 1.000 & 1.000 \\
+CivilComments                & 0.940 & 0.997 & 0.999 \\
+QuAC                         & 0.942 & 0.987 & 0.997 \\
+LSAT-QA                      & 0.960 & 0.998 & 0.998 \\
+TruthfulQA                   & 0.977 & 0.998 & 0.998 \\
+SyntheticReasoning           & 0.982 & 0.997 & 0.999 \\
+GSM                          & 0.983 & 0.990 & 0.996 \\
+IMDB                         & 0.991 & 1.000 & 1.000 \\
+Entity-DataImputation        & 1.000 & 1.000 & 1.000 \\
+\midrule
+Entity-Matching              & --    & --    & --    \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% =====================================================================
+\section{Case Study A: \texttt{entity\_matching} pandas-merge ordering}
+\label{sec:tr-case-a}
+% =====================================================================
+
+The three \texttt{entity\_matching} cells render as
+  \texttt{join\_failed} for every model in the slim grid because the
+  official-side and local-side \texttt{sample\_hash} sets have zero
+  overlap, despite both sides drawing from the same Abt-Buy
+  deepmatcher dataset and despite both sides exposing 1{,}000 instances
+  with byte-equivalent \texttt{run\_spec.json} adapter specs.
+
+\subsection{Symptom in the slim heatmap}
+\label{sec:tr-case-a-symptom}
+
+For each (model) on the slim grid, the per-side \eee{} record set
+  exhibits the following pattern:
+
+\begin{itemize}
+  \item Both sides have $\sim 21{,}000$ sample records (1{,}000
+        instances times $\sim 21$ metric records each).
+  \item Both sides have $1{,}000$ unique \texttt{sample\_id} values
+        (HELM's positional \texttt{id<i>} identifiers); the
+        \texttt{sample\_id} overlap between sides is $1000/1000$.
+  \item Each side has $\sim 996$--$999$ unique
+        \texttt{sample\_hash} values (a few hashes appear on
+        $> 1$ row each); the \texttt{sample\_hash} overlap between
+        sides is $0/\sim999$ for every model.
+  \item Both sides report $507$ \texttt{valid} + $493$ \texttt{test}
+        instances, exactly matching across sides.
+\end{itemize}
+
+The two sides therefore agree on \emph{which positional indices into
+  the eval pool got sampled}, but disagree on \emph{which dataset row
+  each index points to}.
+A concrete example for Pythia-6.9B: the official-side record with
+  \texttt{sample\_id="id2221"} contains the prompt
+  \texttt{Product A is name: panasonic silver dect 6.0 cordless telephone kxtg1033s.~description:~...},
+  while the local-side record with the \emph{same}
+  \texttt{sample\_id="id2221"} contains the prompt
+  \texttt{Product A is name: samsung 19' black flat panel series 6 lcd hdtv ln19a650.~description:~...}.
+
+\subsection{HELM downsample logic and instance-id assignment}
+\label{sec:tr-case-a-helm-internals}
+
+The relevant HELM source is concentrated in three files.
+First, the downsampler at
+  \texttt{helm/benchmark/runner.py:downsample\_eval\_instances}
+  hardcodes the random seed:
+
+\begin{lstlisting}[style=python, caption={HELM v0.3.0 / v0.5.x \texttt{runner.py:downsample\_eval\_instances}.\label{lst:tr-helm-downsample}}]
+def downsample_eval_instances(
+    instances: List[Instance], max_eval_instances: int, eval_splits: List[str]
+) -> List[Instance]:
+    """
+    Get the instances necessary for this run:
+    Train instances (split=train): keep all (if any) for in-context learning
+    Eval instances (split=valid or test): keep at most `max_eval_instances` specified in `AdapterSpec` by sampling
+    Return the resulting train and eval instances.
+    """
+    all_train_instances: List[Instance] = [
+        instance for instance in instances if instance.split == TRAIN_SPLIT
+    ]
+    all_eval_instances: List[Instance] = [
+        instance for instance in instances if instance.split in eval_splits
+    ]
+    if len(all_eval_instances) > max_eval_instances:
+        # The random sampling includes instances monotonically.
+        np.random.seed(0)
+        selected_eval_instances = list(
+            np.random.choice(
+                all_eval_instances,
+                max_eval_instances,
+                replace=False,
+            )
+        )
+    else:
+        selected_eval_instances = all_eval_instances
+    return all_train_instances + selected_eval_instances
+\end{lstlisting}
+
+The seed is hardcoded \texttt{0}, so given the same input array length,
+  \texttt{np.random.choice(arr, k, replace=False)} produces the same
+  index sequence on every invocation.
+Both sides have identical input array length and identical seeds; the
+  sampled indices are therefore identical between sides.
+
+Second, instance ids are assigned positionally over the
+  scenario-emitted list \emph{before} the downsampler runs.
+At \texttt{helm/benchmark/scenarios/scenario.py}:
+
+\begin{lstlisting}[style=python, caption={HELM \texttt{scenario.py:with\_instance\_ids}.\label{lst:tr-helm-with-instance-ids}}]
+def with_instance_ids(instances: List[Instance]) -> List[Instance]:
+    """Return the instances with an ID.  Note: order of instances matters."""
+    return [replace(instance, id=f"id{i}") for i, instance in enumerate(instances)]
+\end{lstlisting}
+
+The docstring is explicit: \emph{order of instances matters}.
+The instance id \texttt{id<i>} is by construction the positional
+  index of the instance in the scenario-emitted list; any upstream
+  reordering of that list silently rebinds id $\leftrightarrow$ content.
+
+Third, the scenario itself
+  (\texttt{helm/benchmark/scenarios/entity\_matching\_scenario.py})
+  emits instances by reading three CSV splits and joining each with
+  the lookup tables via \texttt{pd.merge}:
+
+\begin{lstlisting}[style=python, caption={HELM \texttt{entity\_matching\_scenario.py:read\_blocked\_pairs} (excerpt).\label{lst:tr-helm-read-blocked-pairs}}]
+def read_blocked_pairs(self, data_path, split, tableA, tableB):
+    """Read in pre-blocked pairs with T/F match labels."""
+    labels = pd.read_csv(data_path / f"{split}.csv")
+    mergedA = pd.merge(labels, tableA, right_on="id", left_on="ltable_id")
+    merged = pd.merge(
+        mergedA, tableB, right_on="id", left_on="rtable_id",
+        suffixes=("_A", "_B"),
+    )
+    if split == TRAIN_SPLIT:
+        num_pos_classes: int = sum(merged["label"] == 1)
+        sample_fn = lambda x: x.sample(num_pos_classes)
+        merged = merged.groupby("label", group_keys=False).apply(sample_fn)
+    return merged
+\end{lstlisting}
+
+The two \texttt{pd.merge} calls produce a merged DataFrame whose row
+  ordering depends on the pandas version's merge implementation.
+The scenario then iterates the merged DataFrame in row order to emit
+  Instance objects; \texttt{with\_instance\_ids} then assigns
+  \texttt{id<i>} positionally; the downsampler then samples deterministic
+  indices into the (possibly-reordered) list.
+
+The mechanism is transparent in retrospect: same recipe, same data,
+  same seed, same code, but different \texttt{pd.merge} row orderings
+  between pandas versions $\Rightarrow$ different content at each
+  positional index $\Rightarrow$ different
+  $(\texttt{prompt}, \texttt{correct\_ref})$ pairs at each
+  \texttt{id<i>} $\Rightarrow$ different
+  \texttt{sample\_hash} values $\Rightarrow$ zero overlap.
+
+\subsection{Pure-pandas minimal working example}
+\label{sec:tr-case-a-pure-pandas-mwe}
+
+We isolated the pandas-merge effect with a stand-alone reproducer that
+  invokes only the merge sequence from
+  \texttt{read\_blocked\_pairs} on the byte-identical Abt-Buy
+  deepmatcher CSVs.
+The reproducer scripts are at
+  \texttt{dev/oneoff/em\_pandas\_mwe\_run.py} (the per-venv merge +
+  digest harness) and
+  \texttt{dev/oneoff/em\_pandas\_mwe.sh} (the orchestrator that builds
+  five \mbox{(pandas, numpy)} venvs and diffs the resulting digests).
+
+\begin{lstlisting}[style=python, caption={The merge sequence under test
+  (\texttt{em\_pandas\_mwe\_run.py}, excerpt).\label{lst:tr-em-mwe-run}}]
+import pandas as pd, hashlib, sys
+from pathlib import Path
+
+data_dir = Path(sys.argv[1])
+tableA = pd.read_csv(data_dir / "tableA.csv")
+tableB = pd.read_csv(data_dir / "tableB.csv")
+labels = pd.read_csv(data_dir / "valid.csv")  # configurable
+
+# The exact merge sequence from EntityMatchingScenario.read_blocked_pairs
+mergedA = pd.merge(labels, tableA, right_on="id", left_on="ltable_id")
+merged  = pd.merge(mergedA, tableB, right_on="id", left_on="rtable_id",
+                   suffixes=("_A", "_B"))
+
+# Per-row signature in returned order
+for i, (_, row) in enumerate(merged.iterrows()):
+    sig = hashlib.sha256(repr(row.to_dict()).encode("utf-8")).hexdigest()[:16]
+    print(f"{i:>5d}\\tltable_id={row['ltable_id']}\\trtable_id={row['rtable_id']}\\tsig={sig}")
+
+# Whole-table digest reveals divergence at a glance
+full_text = "\\n".join(f"{row['ltable_id']},{row['rtable_id']},{row['label']}"
+                       for _, row in merged.iterrows())
+print(f"# full_order_digest={hashlib.sha256(full_text.encode()).hexdigest()}")
+\end{lstlisting}
+
+The orchestrator builds five venvs spanning the relevant version
+  axes and runs the script in each.
+Numpy is pinned to a single value within each pandas-version pair to
+  isolate the pandas effect; the gap between
+  \texttt{numpy~1.x} and \texttt{numpy~2.x} is also crossed inside the
+  pandas-2.2.x rows to verify numpy version is irrelevant.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Pure-pandas merge MWE on the Abt-Buy \texttt{valid.csv}
+  split.
+\texttt{full\_order\_digest} is sha256 of the merged row sequence
+  (\texttt{ltable\_id, rtable\_id, label}) in pandas-returned order.
+The digest collapses to two distinct values across the five combos;
+  the boundary is purely pandas (numpy version is irrelevant).
+First-divergence row index is row 1 (i.e., the second emitted row)
+  for every cross-boundary pair.}
+\label{tab:tr-em-pandas-mwe}
+\begin{tabular}{lll}
+\toprule
+pandas & numpy & full\_order\_digest (sha256, full) \\
+\midrule
+2.0.3 & 1.23.5 & \texttt{d449ad714509f19ac9120345ef430bbd73b52f20740b86ffdf3a7576abafbd66} \\
+2.0.3 & 1.26.4 & \texttt{d449ad714509f19ac9120345ef430bbd73b52f20740b86ffdf3a7576abafbd66} \\
+2.2.3 & 1.26.4 & \texttt{77d6810989c7e717e7d16012b1cf38a3bfc890fdbd8af248d2e13e74e2c28467} \\
+2.2.3 & 2.0.0  & \texttt{77d6810989c7e717e7d16012b1cf38a3bfc890fdbd8af248d2e13e74e2c28467} \\
+2.3.3 & 2.4.4  & \texttt{77d6810989c7e717e7d16012b1cf38a3bfc890fdbd8af248d2e13e74e2c28467} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The pandas $2.0 \to 2.2$ inflection is the single mechanism explaining
+  the divergence: pandas 2.0.3 produces digest \texttt{d449ad71\dots}
+  regardless of numpy version, and pandas 2.2.3 onwards produces
+  digest \texttt{77d68109\dots} regardless of numpy version
+  (all the way up to numpy 2.4.4, the user's actual local env).
+Everything except pandas is held fixed --- the input CSV bytes are
+  identical (verified via sha256), the data files are static (per the
+  Wisconsin CS dept's hosting page, the deepmatcher data has not been
+  modified since 2018), and the merge call is identical.
+
+\subsection{End-to-end HELM-in-the-loop reproducer}
+\label{sec:tr-case-a-helm-mwe}
+
+The pure-pandas MWE proves that the merge step alone is
+  pandas-version-dependent.
+To close the loop and demonstrate that this is the actual cause of
+  the slim-heatmap symptom, we run the full HELM scenario chain in two
+  isolated venvs and compare the resulting
+  \texttt{scenario\_state.json} against captured artifacts from the
+  real HELM runs (the official v0.3.0 and the local audit-grid run).
+
+The reproducer (\texttt{dev/oneoff/em\_helm\_mwe.sh},
+  \texttt{dev/oneoff/em\_helm\_mwe\_run.py}) does the following per
+  pass:
+
+\begin{enumerate}
+  \item Build a venv at the target \mbox{(crfm-helm, pandas, numpy)}
+        triple.
+        For the v0.3.0-era pass, this is
+        \texttt{crfm-helm==0.3.0 + pandas==2.0.3 + numpy==1.23.5};
+        Python 3.10 is required because HELM v0.3.0's
+        \texttt{python\_requires} pin is \texttt{>=3.8,<3.11} and
+        \texttt{pyext 0.7} (a transitive dependency) uses
+        \texttt{inspect.getargspec}, which was removed in Python 3.11.
+  \item Inside the venv, instantiate
+        \texttt{EntityMatchingScenario("Abt\_Buy")}, call
+        \texttt{scenario.get\_instances(scenario\_output\_path)} to
+        emit the full instance list, call \texttt{with\_instance\_ids}
+        to bind \texttt{id<i>}, and call
+        \texttt{downsample\_eval\_instances(instances, 1000,
+        ["valid", "test"])} (with the inlined replica of v0.3.0's
+        \texttt{Adapter.get\_run\_instances} when the new free
+        function isn't available).
+  \item Print a per-rank tuple
+        $(rank, \texttt{instance.id}, \texttt{instance.split},
+        \mathrm{sha256}(\texttt{instance.input.text}))$
+        for the 1{,}000 sampled eval instances, plus a
+        whole-list \texttt{live\_full\_digest}.
+  \item Optionally diff this live ordering rank-by-rank against a
+        captured \texttt{scenario\_state.json} from a real HELM run
+        (LOCAL: \texttt{audit-historic-grid};
+         OFFICIAL: \texttt{crfm-helm-public/classic/v0.3.0}), and
+        report a 4-cell verdict matrix.
+\end{enumerate}
+
+The verdict matrix is reproduced in
+  Table~\ref{tab:tr-em-helm-mwe-matrix}.
+The cleanly diagonal pattern is dispositive: under
+  \texttt{pandas==2.3.3} (current), the live HELM scenario chain
+  reproduces our local audit \texttt{scenario\_state.json}
+  byte-for-byte; under \texttt{pandas==2.0.3}, the same chain
+  reproduces the public HELM Classic v0.3.0
+  \texttt{scenario\_state.json} byte-for-byte.
+
+\begin{table}[h]
+\centering
+\small
+\caption{End-to-end \texttt{entity\_matching} reproducer verdict
+  matrix.
+``EXACT MATCH'' indicates the live HELM scenario chain reproduces the
+  captured \texttt{scenario\_state.json} byte-for-byte at every
+  $(rank, \texttt{instance.id},
+   \texttt{instance.split},
+   \mathrm{sha256}(\texttt{instance.input.text}))$
+  row.
+The matched-by-id columns confirm that
+  \texttt{np.random.seed(0)} downsampling is fully deterministic;
+  the matched-by-content columns track which pandas regime each
+  captured \texttt{scenario\_state} was produced under.}
+\label{tab:tr-em-helm-mwe-matrix}
+\begin{tabular}{lll}
+\toprule
+live environment & vs.\ LOCAL captured & vs.\ OFFICIAL captured \\
+\midrule
+current venv (\texttt{pandas==2.3.3}, \texttt{numpy==2.2.6},
+  \texttt{crfm-helm==0.5.x})   & EXACT MATCH (1000/1000) &
+  0/1000 sigs (1000/1000 ids) \\
+v0.3.0-era venv (\texttt{crfm-helm==0.3.0}, \texttt{pandas==2.0.3},
+  \texttt{numpy==1.23.5}) & 0/1000 sigs (1000/1000 ids) &
+  EXACT MATCH (1000/1000) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The whole-list digests match exactly across the diagonal:
+
+\begin{lstlisting}[style=shell, caption={Live and captured digests
+  from the end-to-end MWE.\label{lst:tr-em-mwe-digests}}]
+# pandas==2.3.3 (current) live run:
+live_full_digest    = f05853baf193fd1cce17d2d02ede53037e487373965c948c09137453efd4127f
+# LOCAL captured scenario_state digest:
+captured_full_digest = f05853baf193fd1cce17d2d02ede53037e487373965c948c09137453efd4127f   <- match
+
+# pandas==2.0.3 (v0.3.0-era) live run:
+live_full_digest    = 5fb729643b02413ea6b3c1c8c3a119d56e9df1dc35183805db2cdb9bbc74dddc
+# OFFICIAL captured scenario_state digest:
+captured_full_digest = 5fb729643b02413ea6b3c1c8c3a119d56e9df1dc35183805db2cdb9bbc74dddc   <- match
+\end{lstlisting}
+
+\subsection{Three independent reproducibility leaks}
+\label{sec:tr-case-a-three-leaks}
+
+HELM PR \#1475 (commit \texttt{d69a6e6}, 2023-04-19, ``Fix random
+  seeds for entity\_matching\_scenario'') added a fixed-numpy-random-state
+  file specifically to recover the original \texttt{entity\_matching}
+  sampling.
+The file at
+  \texttt{helm/benchmark/scenarios/entity\_matching\_scenario\_fixed\_random\_state.py}
+  documents the issue from HELM's side:
+
+\begin{quote}\itshape
+Set the fixed random state for entity\_matching\_scenario to ensure
+  reproducibility.
+Unfortunately, the previous official HELM runs did not initialize the
+  numpy random state to zero, so future runs must use the same random
+  states in order to sample the same test instances to reproduce the
+  official HELM runs.
+\end{quote}
+
+The fix is necessary but not sufficient: it pins numpy's RNG state
+  inside \texttt{get\_instances}, but the merge that determines which
+  rows occupy each index sits upstream of the seed and is invisible
+  to the fix.
+Three independent reproducibility leaks survive the PR:
+
+\begin{enumerate}
+  \item \textbf{Pandas-merge ordering} (this case study).
+        \texttt{pd.merge(\ldots, sort=False, how="inner")} does not
+        formally guarantee output row order across pandas versions on
+        all input shapes, and on the deepmatcher Abt-Buy data the
+        order changed between pandas 2.0.x and 2.2.x.
+  \item \textbf{Unchecksummed dataset download.}
+        HELM's \texttt{ensure\_file\_downloaded} at
+        \texttt{helm/common/general.py:80} treats the existence of the
+        target path as proof of correctness:
+
+        \begin{lstlisting}[style=python, caption={\texttt{helm/common/general.py:80} (excerpt).\label{lst:tr-helm-ensure-file-downloaded}}]
+def ensure_file_downloaded(source_url, target_path, unpack=False, ...):
+    """Download `source_url` to `target_path` if it doesn't exist."""
+    with FileLock(f"{target_path}.lock"):
+        if os.path.exists(target_path):
+            # Assume it's all good
+            hlog(f"Not downloading {source_url} because {target_path} already exists")
+            return
+        ...
+        \end{lstlisting}
+
+        A stale or corrupted local cache silently shadows the remote
+        dataset.
+        For the slim-paper run, the upstream Wisconsin CS host has
+        not modified the deepmatcher data since 2018, so this leak
+        does not manifest in our case --- but it is a latent
+        reproducibility hazard.
+  \item \textbf{Positional id binding.}
+        \texttt{with\_instance\_ids} at
+        \texttt{helm/benchmark/scenarios/scenario.py:284} binds
+        \texttt{id<i>} to the scenario-emit position, so any upstream
+        ordering instability silently rebinds id $\leftrightarrow$
+        content without surfacing in the run-spec hash.
+        This leak is what amplifies the pandas-merge effect into a
+        same-id-different-content pattern that
+        downstream consumers cannot detect via id-based comparison.
+\end{enumerate}
+
+\subsection{What \eee{} catches that HELM's id-based comparison misses}
+\label{sec:tr-case-a-eee-catches}
+
+A consumer who joins the two sides on
+  \mbox{(\texttt{sample\_id}, \texttt{evaluation\_result\_id})} would
+  observe perfect $1000/1000$ overlap and infer that the runs agree
+  on which examples were evaluated.
+That inference is wrong: the prompts under each id are completely
+  different.
+Joining on the content-addressed
+  \mbox{(\texttt{sample\_hash}, \texttt{evaluation\_result\_id})}
+  correctly rejects the join, because the prompts, although under the
+  same \texttt{id<i>}, refer to different concrete product pairs and
+  therefore hash to different values.
+
+The \texttt{join\_failed} cell on the slim heatmap is therefore not a
+  flaw in the audit: it is the audit correctly refusing to assert
+  agreement on samples whose content disagrees.
+
+
+% =====================================================================
+\section{Case Study B: SR-Natural~$\times$~Pythia-6.9B (0.788) ---
+        broken official inference}
+\label{sec:tr-case-b}
+% =====================================================================
+
+The \texttt{synthetic\_reasoning\_natural~$\times$~Pythia-6.9B} cell at
+  $0.788$ is the lowest non-\texttt{join\_failed} cell on the slim
+  heatmap and the only Pythia-specific outlier whose magnitude
+  approaches the catastrophic regime
+  (Section~\ref{sec:tr-pythia-pattern}).
+The recipe is bytewise-equivalent on both sides
+  (\texttt{temperature=0.0, num\_outputs=1, max\_tokens=20,
+  stop\_sequences=[`\textbackslash n']}), and HELM's
+  \texttt{set\_fixed\_random\_state\_for\_dataset} is active.
+At \texttt{temperature=0} the model is supposed to be deterministic,
+  so the divergence is at the inference-stack layer.
+
+\subsection{Symptom}
+\label{sec:tr-case-b-symptom}
+
+On the public HELM side, the per-instance scoring file
+  (\texttt{per\_instance\_stats.json}) records score $0.0$ on every one
+  of the 1{,}000 instances for all three set-match metrics
+  (\texttt{f1\_set\_match}, \texttt{iou\_set\_match},
+  \texttt{exact\_set\_match}), and the run-level mean across each
+  metric is $0.000$.
+Cross-checked against \texttt{scenario\_state.json}, every
+  \texttt{request\_state[i].result.completions[0].text} is the empty
+  string, with \texttt{n\_tokens=20} (i.e., the model always hits
+  \texttt{max\_tokens} and never emits EOS).
+The \eee{} conversion faithfully mirrors HELM:
+  \texttt{answer\_attribution[*].extracted\_value=""} for all 20{,}000
+  EEE records (1{,}000 instances $\times$ 20 metric ids), and
+  \texttt{evaluation.score=0.0} for the three set-match metric ids.
+
+Our local re-run, in contrast, produces \texttt{n\_tokens$\approx$5} on
+  average, real \texttt{completion.text} values like
+  \texttt{"The dog is old."}, and run-level means around
+  $0.21 / 0.21 / 0.18$ for the three set-match metrics.
+
+\subsection{Four-layer cross-check}
+\label{sec:tr-case-b-cross-check}
+
+Table~\ref{tab:tr-srnat-evidence} summarizes the per-layer evidence
+  that the divergence is at the HELM inference layer, not at the EEE
+  conversion layer.
+Each layer was inspected independently; all four agree that the
+  official Pythia-6.9B run on
+  \texttt{synthetic\_reasoning\_natural} produced empty
+  \texttt{completion.text} on every instance and scored 0 on every
+  metric.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Four-layer cross-check that the SR-Natural~$\times$~Pythia
+  divergence originates at HELM inference, not at EEE conversion.
+The EEE conversion is a faithful mirror of the HELM-side layer
+  beneath it.}
+\label{tab:tr-srnat-evidence}
+\begin{tabular}{lll}
+\toprule
+layer & artifact & finding \\
+\midrule
+HELM run-time scoring & \texttt{per\_instance\_stats.json}      & 1000/1000 score=0.0 for f1/iou/exact set\_match \\
+HELM raw output       & \texttt{scenario\_state.json}            & 1000/1000 \texttt{completion.text=""} with \texttt{n\_tokens=20} \\
+HELM token stream     & \texttt{scenario\_state.json}.tokens     & first token = \texttt{`\textbackslash n'}; answer present in tokens 2--6 \\
+EEE conversion        & \texttt{answer\_attribution},
+                        \texttt{evaluation.score}                 & 20000/20000 \texttt{extracted\_value=""}, all metric scores 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A representative HELM token stream from the official side, for the
+  prompt
+  \texttt{...\textbackslash n The following can be determined about the dog:},
+  is shown in Listing~\ref{lst:tr-helm-tokens}.
+The model has clearly generated a coherent answer in tokens 2--6
+  (\texttt{`The dog is sad.'}); HELM's
+  \texttt{stop\_sequences=[`\textbackslash n']} truncates
+  \texttt{completion.text} at the first
+  \texttt{`\textbackslash n'} token, which is token 0, leaving
+  \texttt{completion.text=""}.
+
+\begin{lstlisting}[style=shell, caption={First eight tokens of the
+  official Pythia-6.9B \texttt{completion} on a representative
+  SR-Natural prompt.
+  Tokens 2--6 contain the actual answer; HELM's stop\_sequence trim
+  at the leading newline (token 0) drops it from
+  \texttt{completion.text}.\label{lst:tr-helm-tokens}}]
+[
+  {"text": "\\u010A"},   # 'Ċ', the BPE encoding of newline
+  {"text": "The"},
+  {"text": "\\u0120dog"},  # 'Ġdog', leading-space-marker + dog
+  {"text": "\\u0120is"},
+  {"text": "\\u0120sad"},
+  {"text": "."},
+  {"text": "\\u010A"},
+  {"text": "\\u010A"},
+  ...
+]
+\end{lstlisting}
+
+\subsection{Mechanism: HELM's deployment routing on the official side}
+\label{sec:tr-case-b-mechanism}
+
+HELM v0.3.0's \texttt{auto\_client.py} dispatches based on the
+  organization prefix in the model id when no
+  \texttt{model\_deployment} is specified.
+The relevant block:
+
+\begin{lstlisting}[style=python, caption={\texttt{helm/proxy/clients/auto\_client.py:184--200}, v0.3.0.\label{lst:tr-helm-auto-client}}]
+elif organization in [
+    "together",
+    "databricks",
+    "eleutherai",      # <- Pythia
+    "lmsys",           # <- Vicuna
+    "meta",
+    "mistralai",
+    "mosaicml",
+    "stabilityai",
+    "stanford",
+    "tiiuae",          # <- Falcon
+]:
+    from helm.proxy.clients.together_client import TogetherClient
+
+    client = TogetherClient(
+        api_key=self.credentials.get("togetherApiKey", None),
+        tokenizer=tokenizer,
+        cache_config=cache_config,
+    )
+\end{lstlisting}
+
+The official run\_spec.json on the public-HELM side has
+  \texttt{model\_deployment=None} on every field
+  (\texttt{adapter\_spec}, \texttt{request}, top-level), so the
+  official runs were inferenced via Together.ai's hosted API.
+Our local-audit run\_spec.json pins
+  \texttt{model\_deployment="huggingface/pythia-6.9b"}, so the local
+  runs use HuggingFace transformers locally.
+
+On Together's hosted Pythia at \texttt{temperature=0}, the greedy
+  first token after a prompt ending in \texttt{:} is the newline
+  token \texttt{`\textbackslash n'}.
+Tokens 2--6 are the actual model answer; tokens 7--20 are further
+  newlines (the model has hit a degenerate-newline mode after
+  emitting the answer).
+HELM's \texttt{stop\_sequences=[`\textbackslash n']} trims
+  \texttt{completion.text} at the first newline, so the recorded
+  \texttt{completion.text} is empty even though the underlying token
+  stream contains a real answer.
+On HuggingFace transformers locally, Pythia's greedy first token
+  under the same prompt is \texttt{`The'} (not
+  \texttt{`\textbackslash n'}), so the trim happens after a real
+  answer is captured.
+
+\subsection{Independent verification: the Stanford HELM dashboard}
+\label{sec:tr-case-b-dashboard}
+
+The published Stanford HELM Classic v0.3.0 dashboard at
+\begin{quote}\small
+  \url{https://crfm.stanford.edu/helm/classic/latest/\#/groups/synthetic_reasoning_natural}
+\end{quote}
+reports Pythia-6.9B at $0\%$ accuracy on
+  \texttt{synthetic\_reasoning\_natural} for the three set-match
+  metrics, consistent with the empty-completion mechanism documented
+  here.
+The published number is therefore a real artifact of the published
+  audit, not a measurement of the model's capability on the task.
+
+\subsection{Why the $0.788$ cell value understates the gap}
+\label{sec:tr-case-b-understates}
+
+The headline cell-level agreement of $0.788$ is a micro-average over
+  $3000$ \mbox{(sample, metric)} rows; per-metric it breaks down as
+  $\{0.819, 0.772, 0.772\}$ for
+  \texttt{exact\_set\_match}, \texttt{f1\_set\_match}, and
+  \texttt{iou\_set\_match} respectively.
+Three independent reasons combine to make $0.788$ understate the
+  underlying disagreement; we discuss each in turn here and revisit
+  them as a class of micro-average failure modes in
+  Section~\ref{sec:tr-microavg}.
+
+First, \emph{per-metric averaging} is the smallest effect: the three
+  per-metric values cluster within $0.05$ of each other, so the
+  micro-average is close to any individual per-metric value.
+This is not the dominant problem.
+
+Second, \emph{degenerate-zero agreement} is the dominant effect.
+With the official run scoring $0.0$ on every row, every $\text{LOCAL}=0$
+  outcome counts as a $0=0$ agreement at \texttt{abs\_tol=0}.
+The $0.788$ thus reads as ``fraction of prompts on which the local
+  side also scored zero'', not ``fraction of cases where the two model
+  behaviours agree''.
+The local model also scores $0$ on $\sim 78\%$ of prompts (the model
+  is genuinely bad at the task at this scale), so $\sim 78\%$ of
+  rows are $0=0$ collisions.
+The remaining $\sim 22\%$ of rows are cases where the local model
+  scored above $0$ on a prompt that the official scored at $0$ ---
+  i.e., the local side did better than the official side on those
+  prompts.
+The $0.788$ is therefore not a ``$78.8\%$ reproducibility'' reading;
+  it is a ``$78.8\%$ both-failed-together'' reading.
+
+Third, \emph{aggregate-score divergence}: the run-level means from
+  \texttt{stats.json} are $0.000$ for the three set-match metrics
+  on the official side and $0.215$, $0.208$, $0.185$ on the local
+  side.
+At the leaderboard-cited number level, the two runs differ by the
+  entire model accuracy ($\sim 20$ percentage points absolute).
+The instance-level $0.788$ does not capture this gap.
+
+
+% =====================================================================
+\section{Case Study C: \texttt{wikifact} (~0.92 across all three
+        models) --- stochastic noise floor}
+\label{sec:tr-case-c}
+% =====================================================================
+
+The three \texttt{wikifact} cells agree at $0.920$, $0.922$, $0.927$
+  for Vicuna, Pythia, and Falcon respectively.
+The recipe (verified bytewise on both sides) is
+  \texttt{temperature=1.0, num\_outputs=5, max\_tokens=8,
+  stop\_sequences=[`\textbackslash n']}.
+HELM uses \texttt{temperature=1.0} on \texttt{wikifact} to draw five
+  diverse outputs for the \texttt{exact\_match@5} family of metrics.
+Two independent runs of a stochastic recipe are not bitwise
+  reproducible by construction, and we predict the observed $\approx
+  0.92$ from a Bernoulli model whose key identity is mechanically
+  proved in our companion Lean file
+  \texttt{wikifact\_consistency\_claim.lean}.
+
+\subsection{The Bernoulli model and its variance decomposition}
+\label{sec:tr-case-c-math}
+
+For a binary metric with per-prompt hit rate $p_i$ (defined as the
+  per-prompt probability that the metric scores $1$ on a single
+  stochastic run, i.e., the per-prompt \texttt{exact\_match@5}
+  success probability), the expected agreement of two independent
+  stochastic runs over a benchmark of $N$ prompts is
+\[
+  \mathbb{E}_i[\,\text{agree}(p_i)\,]
+  \;=\;
+  \mathbb{E}_i[\,p_i^2 + (1-p_i)^2\,].
+\]
+
+The Lean-verified central identity (theorem
+  \texttt{expectedAgreement\_eq\_uniformAgreement\_add\_variance}
+  in \texttt{wikifact\_consistency\_claim.lean}) decomposes this as
+\[
+  \mathbb{E}_i[\,\text{agree}(p_i)\,]
+  \;=\;
+  \text{agree}(\bar p)
+  \;+\; 2\,\mathrm{Var}_i(p_i),
+\]
+where $\bar p = \mathbb{E}_i[p_i]$ is the prompt-averaged hit rate
+  and $\mathrm{Var}_i(p_i) = \mathbb{E}_i[(p_i - \bar p)^2]$.
+The first term is the homogeneous-Bernoulli prediction one would
+  make if every prompt had the same hit rate $\bar p$; the second is
+  a non-negative variance term that captures prompt-level
+  heterogeneity.
+Together they imply (theorem
+  \texttt{uniformAgreement\_le\_expectedAgreement}) that
+  $\text{agree}(\bar p) \le \mathbb{E}_i[\text{agree}(p_i)]$: the
+  homogeneous prediction at the mean is a lower bound on the
+  heterogeneous expected agreement.
+
+\subsection{Numerical values for the homogeneous prediction}
+\label{sec:tr-case-c-numerics}
+
+The homogeneous prediction is
+$\text{agree}(p) = 2(p - \tfrac{1}{2})^2 + \tfrac{1}{2}$
+  (Lean theorem \texttt{agree\_centered}).
+Concrete values:
+
+\begin{table}[h]
+\centering
+\small
+\caption{Homogeneous Bernoulli agreement
+  $\text{agree}(p) = p^2 + (1-p)^2$ at representative hit rates.
+The left half of the table covers low-to-moderate hit rates; the
+  right half is the symmetric extension, since $\text{agree}(p)
+  = \text{agree}(1-p)$ exactly.
+Lean theorems \texttt{agree\_range\_85\_90} and
+  \texttt{not\_agree\_92\_on\_85\_90} together prove that
+  homogeneous $p \in [0.85, 0.90]$ produces agreement in
+  $[0.745, 0.82]$ and \emph{cannot} produce agreement $0.92$.}
+\label{tab:tr-agree-values}
+\begin{tabular}{rr}
+\toprule
+$p$ & $\text{agree}(p)$ \\
+\midrule
+0.50 & 0.500 \\
+0.60 (or 0.40) & 0.520 \\
+0.70 (or 0.30) & 0.580 \\
+0.80 (or 0.20) & 0.680 \\
+0.85 (or 0.15) & 0.745 \\
+0.90 (or 0.10) & 0.820 \\
+0.95 (or 0.05) & 0.905 \\
+1.00 (or 0.00) & 1.000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The implication is sharp: producing a heterogeneous expected
+  agreement of $\approx 0.92$ requires either extreme $\bar p$
+  (greater than $0.92$ or less than $0.08$) or non-trivial
+  $\mathrm{Var}_i(p_i)$.
+The latter --- prompt-level heterogeneity, with many prompts being
+  near-deterministic --- is what one would expect for a trained model
+  on a benchmark with prompt-dependent difficulty
+  (some prompts the model gets consistently right, others
+  consistently wrong).
+
+\subsection{Cross-model uniformity diagnostic}
+\label{sec:tr-case-c-uniformity}
+
+Our observed $\approx 0.92$ across all three models is consistent
+  with the latter regime, and the cross-model uniformity
+  (Pythia at $0.922$ vs.\ Vicuna at $0.920$ and Falcon at $0.927$)
+  is itself diagnostic: Pythia is a systematic outlier on every other
+  benchmark in the table (Section~\ref{sec:tr-pythia-pattern}), but
+  on \texttt{wikifact} it converges to the same $\approx 0.92$ the
+  instruction-tuned and Falcon variants achieve.
+This supports the interpretation that recipe-induced stochasticity
+  is the main driver of disagreement on this cell rather than any
+  model-specific backend effect.
+
+\subsection{The 1-vs-5 EEE \texttt{output.raw} converter cosmetic}
+\label{sec:tr-case-c-cosmetic}
+
+On the public HELM side, EEE's \texttt{output.raw} is a 1-element
+  list (e.g.\ \texttt{["New York City"]});
+on the local side it is a 5-element list
+  (e.g.\ \texttt{["New York City", "Newark", "Albany", "Brooklyn",
+  "Manhattan"]}).
+This is a converter cosmetic, not a HELM-side recipe difference:
+  HELM computed the \texttt{*@5} metrics with all 5 outputs at run
+  time and stored the resulting per-metric scores, which are
+  bitwise-equivalent in interpretation.
+The older \texttt{every\_eval\_ever} converter active when the
+  public EEE store was produced truncated \texttt{output.raw} to the
+  first generation for display; the current converter retains all 5.
+
+The diversity of the local \texttt{output.raw} list is itself the
+  evidence that \texttt{temperature>0} sampling was active --- a
+  helpful side-effect of preserving the full output set, since EEE's
+  \texttt{metadata} field does not record temperature explicitly.
+
+
+% =====================================================================
+\section{The Systematic Pythia-Together-vs-HuggingFace Pattern}
+\label{sec:tr-pythia-pattern}
+% =====================================================================
+
+\subsection{Sub-0.98 cells enumeration}
+\label{sec:tr-pythia-sub98}
+
+Eleven of the 39 present cells have agree\_ratio below $0.98$;
+  Table~\ref{tab:tr-sub98} enumerates them.
+Three of the eleven are the \texttt{wikifact} stochastic-floor cells
+  (Section~\ref{sec:tr-case-c}); the remaining eight are
+  Pythia-6.9B at \texttt{temperature=0} on benchmarks where Vicuna
+  and Falcon both achieve $\geq 0.98$.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Sub-0.98 cells in the slim heatmap, sorted by
+  agree\_ratio ascending.
+The three \texttt{wikifact} cells are recipe-level stochastic
+  (Case~C); the remaining eight cells are Pythia-6.9B at
+  \texttt{temperature=0}.}
+\label{tab:tr-sub98}
+\begin{tabular}{llll}
+\toprule
+benchmark & model & agree\_ratio & note \\
+\midrule
+SyntheticReasoning-Natural & Pythia-6.9B           & 0.788 & Case~B; broken official run \\
+NarrativeQA                & Pythia-6.9B           & 0.910 & Pythia outlier \\
+WikiFact                   & Vicuna-7B-v1.3        & 0.920 & Case~C; stochastic \\
+WikiFact                   & Pythia-6.9B           & 0.922 & Case~C; stochastic \\
+WikiFact                   & Falcon-7B             & 0.927 & Case~C; stochastic \\
+BoolQ                      & Pythia-6.9B           & 0.934 & Pythia outlier \\
+MMLU                       & Pythia-6.9B           & 0.935 & Pythia outlier \\
+CivilComments              & Pythia-6.9B           & 0.940 & Pythia outlier \\
+QuAC                       & Pythia-6.9B           & 0.942 & Pythia outlier \\
+LSAT-QA                    & Pythia-6.9B           & 0.960 & Pythia outlier \\
+TruthfulQA                 & Pythia-6.9B           & 0.977 & Pythia outlier \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Per-cell breakdown}
+\label{sec:tr-pythia-percell}
+
+For each of the eight Pythia outliers, the inputs are byte-identical
+  on both sides (the recipe and dataset agree, by construction of the
+  EEE-only join), and the EEE \texttt{output.raw} is non-empty on both
+  sides --- i.e., the SR-Natural empty-completion mechanism does not
+  apply.
+A spot check on the disagreement set for each cell shows the model
+  emitting \emph{different output tokens} on the two sides at
+  \texttt{temperature=0}; concrete examples are summarized in
+  Table~\ref{tab:tr-pythia-examples}.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Representative per-instance disagreements on the
+  Pythia-6.9B sub-0.98 cells.
+For each cell we show one prompt where the recipe is identical, the
+  prompt input is identical, and yet the official-side and local-side
+  Pythia models emit different greedy completions at
+  \texttt{temperature=0}.
+The disagreement pattern depends on the scorer's sensitivity:
+  multiple-choice scorers see a clean letter flip; short-answer
+  scorers see a label flip; free-form scorers see an early
+  divergence that propagates through the chain of thought.}
+\label{tab:tr-pythia-examples}
+\begin{tabular}{p{2.5cm}p{4.5cm}p{3cm}p{3cm}}
+\toprule
+benchmark & prompt suffix & off output & loc output \\
+\midrule
+BoolQ          & ``\dots president and his advisers.\textbackslash nQuestion: Does the president live in the white house?\textbackslash nAnswer:'' & ` No' & ` Yes' \\
+CivilComments  & ``\dots let's stick to the subject here.\textbackslash nQuestion: Is the passage above toxic?\textbackslash nAnswer:'' & ` False' & ` True' \\
+LSAT-QA        & ``\dots A. one\textbackslash n B. two\textbackslash n C. three\textbackslash n D. four\textbackslash n E. five\textbackslash nAnswer:'' & ` C' & ` B' \\
+MMLU           & ``\dots despotic character, which is rooted in a sense of its special mission\textbackslash nAnswer:'' & ` A' & ` B' \\
+QuAC           & ``Q: Who took the title after?\textbackslash nAnswer:'' & ` Graham lost the title to Bruno Sammartino on April 30, 1977,\dots' & ` CANNOTANSWER' \\
+NarrativeQA    & ``Q: What does Fra Luca reveal\dots about his adoptive father?\textbackslash nAnswer:'' & ` Fra Luca reveals that Baldassarre is his father.' & ` Fra Luca reveals that Baldassarre is his adoptive father.' \\
+TruthfulQA     & ``\dots A. \dots\textbackslash n B. \dots\textbackslash n C. \dots\textbackslash n D. \dots\textbackslash nAnswer:'' & (single letter; flips on $\sim 2\%$) & (single letter) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Pattern.}
+On multiple-choice cells (LSAT-QA, MMLU, TruthfulQA), the
+  disagreement manifests as a clean letter flip at the model's
+  greedy first generated token: the model emits one of A--E, and the
+  two backends disagree on which letter wins on a small fraction of
+  prompts (typically $4$--$6\%$).
+On short-answer cells (BoolQ, CivilComments), the disagreement is a
+  label flip (\texttt{Yes}/\texttt{No} or
+  \texttt{True}/\texttt{False}) at the same greedy first-token
+  position; same shape, different vocabulary, same $\sim 5\%$ rate.
+
+On free-form cells (QuAC, NarrativeQA), the divergence point is not
+  necessarily the first generated token.
+For example, in the QuAC sample shown the prompt-determined
+  prefix does not exist (the model is starting fresh after
+  ``Answer:''), but the model can either commit to an
+  off-topic generation or to the \texttt{CANNOTANSWER} stem; once
+  one or the other is chosen, the rest of the generation diverges.
+The mechanism is the same first-divergent-token argmax flip; what
+  differs is how late in the generation the divergence happens.
+For chain-of-thought cells (GSM, not at 0.98 boundary; see
+  Section~\ref{sec:tr-spot-check-near-perfect}), the divergence can
+  be 50 tokens or more into the response.
+
+\subsection{Spot-check: high-but-not-perfect cells (0.99x)}
+\label{sec:tr-spot-check-near-perfect}
+
+To verify that the Pythia outlier mechanism is the same as the
+  near-perfect cells, we spot-checked four high-agreement cells:
+  SR~$\times$~Falcon-7B (0.999), SR~$\times$~Vicuna-7B (0.997),
+  GSM~$\times$~Vicuna (0.990), and GSM~$\times$~Falcon (0.996).
+
+\paragraph{SR~$\times$~Falcon-7B (0.999).}
+Recipe: \texttt{temp=0.0, num\_outputs=1, max\_tokens=50}.
+Per-metric breakdown:
+  \texttt{exact\_match} agrees $1000/1000$;
+  \texttt{prefix\_exact\_match} agrees $999/1000$;
+  \texttt{quasi\_exact\_match} agrees $998/1000$;
+  \texttt{quasi\_prefix\_exact\_match} agrees $1000/1000$.
+The cell-level micro-average is $3997/4000 = 0.9992$.
+
+A direct count of bytewise-different \texttt{output.raw} between the
+  two sides reveals 10 of 1000 prompts ($1.0\%$) with divergent
+  outputs; only 3 of those 10 produce score disagreements across the
+  four core metrics, because on the other 7 divergent prompts both
+  outputs miss the gold reference and both score $0$.
+The cell value of $0.999$ thus hides a $\sim 10\times$ larger
+  output-divergence rate; we discuss this case as the canonical
+  example of \emph{both-wrong masking} in
+  Section~\ref{sec:tr-microavg}.
+
+\paragraph{SR~$\times$~Vicuna-7B (0.997).}
+Recipe: \texttt{temp=0.0, num\_outputs=1, max\_tokens=20}.
+$2/1000$ \texttt{exact\_match} rows disagree; both examples show
+  divergent first tokens (e.g., target
+  \texttt{`* = whale whale -'} --- official emits
+  \texttt{`* whale whale whale - = -'} (wrong), local emits
+  \texttt{`* = whale whale -'} (correct)).
+
+\paragraph{GSM~$\times$~Vicuna-7B (0.990).}
+Recipe: \texttt{temp=0.0, num\_outputs=1, max\_tokens=400,
+  stop\_sequences=['\textbackslash n\textbackslash n']} --- long
+  chain-of-thought.
+$10/1000$ \texttt{exact\_match\_indicator} rows disagree.
+Concrete example: a prompt about ``carrots \& sweet potatoes''
+  produces a chain whose first $\sim 70$ characters are byte-identical
+  on both sides
+  (``The total weight of the sweet potatoes is 2 \textbackslash * 5 =
+  $\langle\langle$2*5=10$\rangle\rangle$10 pounds The total weight of
+  the \dots''),
+  then official continues
+  ``\textbf{carro}[ts]'' (right path) and local continues
+  ``\textbf{potat}[oes]'' (wrong path).
+The divergence at character $\sim 70$ amplifies through the rest of
+  the generation; the F1 / \texttt{exact\_match\_indicator} metric
+  picks up the resulting score flip.
+
+\paragraph{GSM~$\times$~Falcon-7B (0.996).}
+Same recipe; $4/1000$ rows disagree; similar mid-chain divergence.
+
+The pattern is the same first-divergent-token-argmax-flip mechanism
+  across all four near-perfect cells, just at much smaller magnitude
+  than the Pythia outliers.
+
+\subsection{Logit-margin hypothesis}
+\label{sec:tr-pythia-logit-margin}
+
+We hypothesize that Pythia-6.9B's higher inference-stack sensitivity
+  reflects \emph{narrower per-token logit margins}.
+The mechanism: when one inference stack serves at \texttt{fp16} or
+  \texttt{bf16} and another at \texttt{fp32}, the resulting logit
+  perturbations between the two stacks are typically on the order of
+  $10^{-4}$ in the body of the next-token distribution.
+That perturbation flips the greedy argmax only when the top-1 and
+  top-2 logits at the relevant decoding position are within
+  $\sim 10^{-4}$ of each other.
+How often that happens depends on \emph{how peaked} the model's
+  next-token distribution is at the position in question, which in
+  turn depends on training compute and post-pretraining alignment.
+Table~\ref{tab:tr-pythia-factors} summarises the relevant axes for
+  the three slim-heatmap models.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Factors plausibly relevant to inference-stack sensitivity
+  for the three slim-heatmap models.
+The two axes most consistent with the observed sensitivity ranking
+  (Pythia $\gg$ Vicuna $>$ Falcon) are training compute and presence
+  of instruction tuning; both reduce the prevalence of close-margin
+  greedy decisions.}
+\label{tab:tr-pythia-factors}
+\begin{tabular}{lccc}
+\toprule
+factor & Pythia-6.9B & Vicuna-7B-v1.3 & Falcon-7B \\
+\midrule
+training compute (tokens) & $\sim$300\,B & 1\,T (LLaMA-1 base) + SFT & 1.5\,T \\
+instruction tuning        & none         & ShareGPT SFT             & none   \\
+attention                 & standard MHA & standard MHA             & multi-query attention \\
+tokenizer family          & GPT-NeoX BPE & LLaMA SentencePiece      & GPT-NeoX BPE \\
+observed Pythia-pattern sensitivity & high (3--15\%) & low (0.2--1\%) & very low (0--0.4\%) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The two axes consistent with our sensitivity ranking are training
+  compute and instruction tuning.
+Tokenizer family does \emph{not} explain the pattern (Pythia and
+  Falcon share the GPT-NeoX BPE tokenizer but show very different
+  sensitivities), and attention architecture is too entangled with
+  training-time effects to isolate from this evidence.
+
+\subsection{What we cannot rule out from three-model evidence}
+\label{sec:tr-pythia-confounds}
+
+The logit-margin hypothesis above is consistent with our observations
+  but not proven by them.
+Confounds we cannot rule out without further experiments:
+
+\begin{itemize}
+  \item \textbf{Different served checkpoint.}
+        Together may host a Pythia-6.9B revision or quantization that
+        differs from the HuggingFace Hub checkpoint our local audit
+        uses, in which case the divergence is partly a ``wrong
+        weights'' effect rather than a numerical-precision effect.
+        We did not directly compare the served weights.
+  \item \textbf{Different serving precision.}
+        We do not know the exact serving precision Together used for
+        Pythia-6.9B in the historical HELM Classic v0.3.0 runs.
+        Different precisions (\texttt{fp16}, \texttt{bf16},
+        \texttt{int8}) produce different perturbation magnitudes;
+        \texttt{int8} in particular would explain a much higher
+        sensitivity than \texttt{fp16}.
+  \item \textbf{Architecture-specific numerical sensitivity.}
+        Falcon's multi-query attention reduces the number of KV-heads
+        and is empirically more numerically stable under
+        \texttt{fp16} serving than standard multi-head attention.
+        Some of Falcon's apparent insensitivity may be the
+        architecture rather than the training compute or alignment.
+  \item \textbf{Generation-kernel differences.}
+        Together's hosted-inference stack and HuggingFace's
+        \texttt{transformers} use different fused-kernel paths for
+        attention and softmax; differences in those paths can produce
+        small per-position logit drift independently of the model's
+        precision.
+\end{itemize}
+
+Distinguishing among these would require A/B testing against
+  Together's current API at known precision, which we have not done.
+Such an experiment would not change the case-study claim --- that the
+  divergence exists, is detected by EEE's \texttt{sample\_hash}, is
+  consistent with a backend-substitution effect, and disproportionately
+  affects the model with the smallest training-compute budget and no
+  instruction tuning --- but would localize the proximate cause to one
+  of the four candidates above.
+
+
+% =====================================================================
+\section{Methodological Caveats: Micro-Averaged Agreement}
+\label{sec:tr-microavg}
+% =====================================================================
+
+The headline cell-level agree\_ratio is a micro-average over
+  \mbox{(sample, metric)} rows: the cell value is
+  $\sum \text{matched} / \sum \text{count}$ across all rows, weighting
+  each row equally.
+This is the right summary statistic for a reproducibility heatmap
+  whose readers want to know ``what fraction of per-instance per-metric
+  scores agree?''
+But three failure modes of this micro-average are visible in the slim
+  heatmap and worth surfacing for any reader of a reproducibility
+  report; all three flow from the same property: any $0=0$ (or
+  identical-score) collision between the two sides counts as a match,
+  even when the underlying outputs differ.
+
+\subsection{Failure mode I: degenerate-zero agreement (catastrophic)}
+\label{sec:tr-microavg-degenerate}
+
+When one side's run is degenerate
+  (e.g., the SR-Natural~$\times$~Pythia broken official run scoring
+  $0$ on every row), every \mbox{(sample, metric)} row where the
+  other side also scores $0$ counts as agreement at \texttt{abs\_tol=0}.
+The agreement rate then reads as ``fraction of prompts on which the
+  non-degenerate side also failed'', not ``fraction of cases where
+  the two model behaviours agree''.
+SR-Natural~$\times$~Pythia at $0.788$ is this case: every
+  ``agreement'' is a $0=0$ collision on a hard prompt, while the
+  underlying run-level means are $0.000$ official and $\approx 0.20$
+  local.
+
+\subsection{Failure mode II: both-wrong masking (mild)}
+\label{sec:tr-microavg-both-wrong}
+
+The same mechanism appears in milder form on cells where the model
+  is moderately bad at the benchmark and the metric scores $0$ on
+  most prompts.
+On SR~$\times$~Falcon-7B (cell agree\_ratio $0.999$), $10$ of
+  $1000$ prompts have bytewise-different \texttt{output.raw} between
+  Together and HF --- a $1.0\%$ true model-output divergence rate.
+But of those $10$ output-divergent prompts, only $3$ produce score
+  disagreements across the four core metrics
+  (\texttt{exact\_match}, \texttt{prefix\_exact\_match},
+  \texttt{quasi\_exact\_match}, \texttt{quasi\_prefix\_exact\_match})
+  $\times$ $1000$ prompts $=$ $4000$ score rows, because the other
+  $7$ output-divergent prompts produce outputs that both miss the
+  gold reference, so the score is $0=0$ on every metric and the row
+  counts as ``agreement''.
+The cell-level number $0.9992$ thus hides a $\sim 10\times$ larger
+  output-divergence rate.
+This is not a flaw in the metric --- it accurately reports score
+  agreement --- but a reader who interprets the cell as ``the models
+  emit nearly identical outputs'' is wrong by an order of magnitude.
+
+\subsection{Failure mode III: stochastic noise floor}
+\label{sec:tr-microavg-stochastic}
+
+For recipes with \texttt{temperature>0}, two independent runs are not
+  bitwise reproducible by design.
+The expected agreement under a per-prompt Bernoulli model with
+  per-prompt hit rate $p_i$ (the per-prompt
+  \texttt{exact\_match@k} probability) decomposes exactly as
+  $\mathbb{E}_i[\,\text{agree}(p_i)\,] = \text{agree}(\bar p) + 2\,
+  \mathrm{Var}_i(p_i)$
+  (Section~\ref{sec:tr-case-c}).
+\texttt{wikifact} at $\approx 0.92$ across all three models is
+  consistent with prompt-level heterogeneity in $p_i$ --- many prompts
+  near-deterministic, which is what one would expect for a trained
+  model on a benchmark with prompt-dependent difficulty.
+A reviewer who interprets the cell as ``92\% reproducibility'' rather
+  than ``stochastic recipe at the heterogeneity-corrected expected
+  agreement'' is missing the recipe-level non-determinism the
+  benchmark explicitly enables.
+
+\subsection{What honest reporting looks like}
+\label{sec:tr-microavg-honest}
+
+A reproducibility report that surfaces \texttt{agree\_ratio} alone
+  cannot distinguish the three cases above from a recipe-clean
+  near-perfect reproduction at $0.92$ or $0.999$.
+Honest reporting wants to surface, alongside \texttt{agree\_ratio},
+  at least three additional signals:
+
+\begin{enumerate}
+  \item Run-level mean per metric on each side, to expose the
+        degenerate-zero case.
+  \item The recipe's \texttt{temperature} setting, to expose the
+        stochastic-floor case.
+  \item The output-divergence rate
+        $\Pr_i[\,\texttt{output.raw}_{\mathrm{off}}^{(i)} \neq
+        \texttt{output.raw}_{\mathrm{loc}}^{(i)}\,]$,
+        to expose the both-wrong-masking case.
+\end{enumerate}
+
+The pipeline released alongside this report emits the first two
+  alongside the cell-level number; a future iteration of the heatmap
+  visualization could surface all three inline, e.g., as a per-cell
+  tuple of (micro-averaged agree\_ratio, official mean, local mean,
+  output-divergence rate), so a reader can flag cells where the
+  agreement reading is misleading without leaving the figure.
+
+
+% =====================================================================
+\section{EEE Audit/Forensics Scope}
+\label{sec:tr-scope-split}
+% =====================================================================
+
+\eee{} is sufficient for audit (detecting whether two runs agree, by
+  how much, on which instances, and at what cell-level granularity)
+  but not sufficient for forensics (identifying \emph{why} the
+  disagreement occurred).
+Each of the three case studies in this report made the
+  audit/forensics split visible in concrete terms:
+  Case~A's pandas-merge mechanism required inspecting HELM's
+  \texttt{run\_spec.json} adapter spec, the
+  \texttt{scenario\_state.json} per-instance ordering, and the
+  \texttt{entity\_matching\_scenario.py} source;
+  Case~B's Together-hosted-Pythia mechanism required HELM's
+  \texttt{auto\_client.py} dispatch logic;
+  Case~C's noise-floor diagnosis required the
+  \texttt{run\_spec.json} \texttt{temperature} field.
+
+\eee{} preserved the divergence signal on all three; it did not
+  preserve the upstream framework version, the inference backend
+  identity, or the precision/kernel of the generation step.
+
+\subsection{Per-question scope table}
+\label{sec:tr-scope-table}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Per-question audit/forensics scope split for \eee{}.
+The first half of the table (audit-side questions) is what \eee{}
+  is designed to answer; the second half (forensics-side questions)
+  is what typically requires upstream framework artifacts.}
+\label{tab:tr-scope-split}
+\begin{tabular}{ll}
+\toprule
+question & answerable from EEE alone? \\
+\midrule
+Did these two runs agree? & yes \\
+By how much do they disagree at instance level? & yes \\
+At which instances? & yes (\texttt{sample\_hash} join $\to$ per-instance abs\_delta) \\
+What did the model see? & yes (\texttt{input.raw}) \\
+What did the model output? & yes (\texttt{output.raw}) \\
+What did the evaluator extract? & yes (\texttt{answer\_attribution.extracted\_value}) \\
+What was the run-level mean per metric? & yes (\texttt{evaluation.score} $\to$ run-level mean) \\
+\midrule
+What was the inference backend (Together / vLLM / HF / \dots)? & no \\
+What was the runtime resolution of \texttt{model\_deployment} when null? & no \\
+What inference precision (fp32 / fp16 / bf16) and attention kernel? & no \\
+What \texttt{transformers} / \texttt{pandas} / \texttt{numpy} / framework versions? & partial: \texttt{eval\_library\_version} recorded but typically \texttt{"unknown"} \\
+Why do two runs of the same recipe diverge? & no --- typically requires upstream framework artifacts + source \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Why the split is a feature, not a flaw}
+\label{sec:tr-scope-feature}
+
+The audit layer is designed to be small, framework-neutral, and
+  stable across harness versions; the forensics layer is necessarily
+  framework-specific (different harnesses pin recipe in different ways)
+  and benefits from being kept separate so the audit format does not
+  have to track every harness's evolution.
+A version of \eee{} that preserved the framework run-time artifacts
+  would replicate the very provenance fragility the case studies
+  surface: the \texttt{run\_spec.json} schema evolves across HELM
+  releases, the \texttt{auto\_client.py} dispatch table changes, and
+  the field that determines deployment routing today may not exist a
+  year from now.
+The audit/forensics split protects \eee{} consumers from that
+  evolution: an EEE artifact computed today remains parsable and
+  auditable by a consumer five years from now even if HELM v1.x has
+  reorganized its source tree.
+
+
+% =====================================================================
+\section{Tooling Deliverables}
+\label{sec:tr-tooling}
+% =====================================================================
+
+The audit produced five reusable tools, all released alongside this
+  report under \texttt{dev/oneoff/} and \texttt{eval\_audit/} in the
+  repository.
+
+\subsection{\texttt{audit\_eee\_only\_run.py}}
+\label{sec:tr-tooling-audit-hook}
+
+The runtime EEE-only paper-validity hook described in
+  Section~\ref{sec:tr-paper-validity-guard}.
+Wraps a command (typically \texttt{20\_run.sh}) under a
+  \texttt{sitecustomize.py}-injected \texttt{sys.addaudithook} that
+  records every \texttt{open} / \texttt{os.open} event from every
+  child Python process to per-PID JSONL logs, classifies each
+  recorded path against a HELM-shape signature, and emits a
+  PASS/FAIL verdict.
+
+Verdict for the slim-paper run: PASS, $0$ flagged opens of
+  $205{,}798$ total events across $88$ child Python processes.
+
+\subsection{\texttt{em\_pandas\_mwe.sh} + \texttt{em\_pandas\_mwe\_run.py}}
+\label{sec:tr-tooling-em-pandas-mwe}
+
+The pure-pandas isolation reproducer for Case~A.
+Builds five venvs at distinct \mbox{(pandas, numpy)} version pairs,
+  runs only the merge sequence from
+  \texttt{EntityMatchingScenario.read\_blocked\_pairs} against the
+  byte-identical Abt-Buy deepmatcher CSVs, and reports a digest
+  comparison.
+The grid is laid out so the pandas-version axis can be isolated from
+  the numpy-version axis; on the slim-paper run, the digest collapses
+  to two distinct values across the five combos and the boundary is
+  purely pandas $2.0 \to 2.2$
+  (Section~\ref{sec:tr-case-a-pure-pandas-mwe},
+  Table~\ref{tab:tr-em-pandas-mwe}).
+
+\subsection{\texttt{em\_helm\_mwe.sh} + \texttt{em\_helm\_mwe\_run.py}}
+\label{sec:tr-tooling-em-helm-mwe}
+
+The end-to-end HELM-in-the-loop reproducer for Case~A.
+Builds a current venv and a v0.3.0-era venv
+  (\texttt{crfm-helm==0.3.0 + pandas==2.0.3 + numpy==1.23.5},
+  Python 3.10), runs the full HELM scenario chain
+  (\texttt{EntityMatchingScenario.get\_instances} $\to$
+  \texttt{with\_instance\_ids} $\to$
+  \texttt{downsample\_eval\_instances}) inside each, and diffs the
+  resulting ordered \mbox{(rank, id, content\_sig)} sequence against
+  captured \texttt{scenario\_state.json} files from real HELM runs.
+Emits a 4-cell verdict matrix
+  (Section~\ref{sec:tr-case-a-helm-mwe},
+  Table~\ref{tab:tr-em-helm-mwe-matrix}).
+
+\subsection{\texttt{diagnose\_entity\_matching\_join.py}}
+\label{sec:tr-tooling-em-diagnose}
+
+The Q1--Q5 diagnostic for the entity\_matching join failure
+  (read-only).
+Five questions: content-overlap (relabel vs.\ disjoint?), id
+  permutation (when shared content exists, what's the off~$\to$~loc
+  map?), \texttt{sample\_hash} function inspection, fewshot vs.\
+  test-pair stability, and HELM-shaped metadata sniff.
+Plus a cross-model diagnostic: whether \texttt{id<i>} on the
+  official side is internally consistent across all three model
+  conversions.
+The output of this diagnostic is what initially identified the
+  pandas-merge mechanism.
+
+\subsection{Metric-classifier patch + \texttt{no\_core\_metrics} status}
+\label{sec:tr-tooling-classifier}
+
+\paragraph{Set-match metric registration.}
+The metric classifier at \texttt{eval\_audit/helm/metrics.py} did
+  not list the \texttt{*\_set\_match} family in
+  \texttt{CORE\_PREFIXES}, so \texttt{f1\_set\_match},
+  \texttt{iou\_set\_match}, and \texttt{exact\_set\_match} (the
+  metrics used by \texttt{synthetic\_reasoning\_natural}) were
+  classified as \texttt{untracked} and the comparator's class
+  filter dropped 100\% of the rows.
+The result was a \texttt{join\_failed} render despite the
+  \texttt{sample\_hash} overlap being $1000/1000$.
+The fix (commit \texttt{36fc52e}) added the three prefixes to
+  \texttt{CORE\_PREFIXES}.
+
+\paragraph{New \texttt{no\_core\_metrics} status.}
+The same commit added a fourth heatmap status (after
+  \texttt{present}, \texttt{join\_failed}, \texttt{missing}) that
+  distinguishes ``data joined but classifier filter dropped all
+  rows'' from ``data didn't join''.
+The status is only emitted when \texttt{n\_joined\_pairs > 0} but
+  \texttt{count == 0}.
+On the slim-paper run, the metric-classifier fix landed first and
+  the \texttt{synthetic\_reasoning\_natural} cells turned from
+  \texttt{join\_failed} to \texttt{present}; no cell on the slim grid
+  currently renders as \texttt{no\_core\_metrics}.
+The status remains in the heatmap collector for future runs where the
+  classifier may be missing a metric family.
+
+The new status required threading a pre-classifier-filter join count
+  (\texttt{n\_joined\_pairs}) through the pipeline:
+  \texttt{eval\_audit/normalized/compare.py} emits it,
+  \texttt{eval\_audit/reports/core\_metrics.py} writes it into
+  \texttt{core\_metric\_report.json}, and
+  \texttt{eval\_audit/reports/eee\_only\_heatmap.py} reads it from
+  the per-pair report and assigns the new status when appropriate.
+A subsequent commit (\texttt{77d90af}) propagated the field into
+  \texttt{cell\_data.json} so downstream consumers can read it
+  without re-walking the per-pair reports.
+
+\subsection{\texttt{redraw\_plots.sh} auto-generation}
+\label{sec:tr-tooling-redraw-plots}
+
+The heatmap renderer
+  (\texttt{eval\_audit/reports/eee\_only\_heatmap.py}) now drops a
+  self-contained \texttt{redraw\_plots.sh} into the heatmap output
+  directory at every render.
+The script captures the exact invocation used to produce the
+  outputs (\texttt{--analysis-root}, \texttt{--abs-tol},
+  \texttt{--title}, \texttt{--per-metric} flag) and forwards
+  \texttt{"\$@"} so the user can override at re-run time.
+Output dir is resolved as the script's own \texttt{\$SCRIPT\_DIR},
+  so the script remains valid if the heatmap dir is copied or moved.
+The repo-root resolution uses the same
+  \texttt{portable\_repo\_root\_lines} helper as the per-packet
+  reproduce scripts emitted by \texttt{rebuild\_core\_report.py}.
+
+The script also captures the colour-scale env vars
+  (\texttt{EVAL\_AUDIT\_HEATMAP\_VMIN} /
+  \texttt{EVAL\_AUDIT\_HEATMAP\_VMAX}) at generation time via the
+  \texttt{\${VAR:-default}} indirection, so re-runs match the
+  original colour scale unless the user explicitly overrides via the
+  same env vars.
+
+\subsection{Heatmap colour-scale + dynamic legend}
+\label{sec:tr-tooling-heatmap-ux}
+
+For paper presentation we tightened the heatmap colour scale and
+  cleaned up the legend.
+The colour scale defaults to \texttt{vmin=0.7, vmax=1.0} (configurable
+  via env vars), so the actual data range $[0.788, 1.000]$ spans the
+  full gradient instead of clustering in the green band.
+The legend is built dynamically from the cell statuses actually
+  present in the heatmap: the slim-paper render shows just
+  \texttt{present} + \texttt{join\_failed}; \texttt{no\_core\_metrics}
+  and \texttt{missing} are correctly omitted because no cell on this
+  grid has those statuses.
+The \texttt{present} legend swatch uses \texttt{cmap(vmax)} (deep
+  green) so it matches what readers see on the actual high-agreement
+  cells.
+
+
+% =====================================================================
+\section{Reproducing This Report}
+\label{sec:tr-reproduce}
+% =====================================================================
+
+The audit is fully reproducible from the released code.
+End-to-end:
+
+\begin{lstlisting}[style=shell, caption={Reproducing the slim-paper
+  EEE-only HELM audit end-to-end.\label{lst:tr-reproduce}}]
+# Set the strict EEE-only behaviour guard + perf flags.
+export EVAL_AUDIT_EEE_STRICT=1
+export EVAL_AUDIT_TRUST_EEE_SCHEMA=1
+export EVAL_AUDIT_SKIP_HELM_DIAGNOSIS=1
+export EVAL_AUDIT_SKIP_LOCAL_REPEAT=1
+export EVAL_AUDIT_NO_PLOTS=1
+export OUT_ROOT=/data/crfm-helm-audit-store/eee-only-reproducibility-heatmap-paper-slim
+
+# Stage 1: link tree (cheap; not under audit hook).
+bash reproduce/eee_only_reproducibility_heatmap/10_link_tree.sh
+
+# Stage 2: analysis under runtime EEE-only audit hook.
+# --require-strict-flag refuses to run if EVAL_AUDIT_EEE_STRICT is unset.
+FAST_AGG_SUMMARY=1 \
+python3 dev/oneoff/audit_eee_only_run.py \
+    --log-dir "$OUT_ROOT/audit" \
+    --require-strict-flag \
+    -- bash reproduce/eee_only_reproducibility_heatmap/20_run.sh
+
+# Stage 3: heatmap render (reads only cell_data.json from stage 2).
+PER_METRIC=1 \
+bash reproduce/eee_only_reproducibility_heatmap/30_heatmap.sh
+
+# Pandas-merge MWE (Case A pure-pandas evidence; 5 venvs).
+bash dev/oneoff/em_pandas_mwe.sh
+
+# End-to-end HELM scenario MWE (Case A verdict matrix; 2 venvs).
+bash dev/oneoff/em_helm_mwe.sh
+
+# Pythia per-cell diagnostic (read-only).
+python3 dev/oneoff/diagnose_entity_matching_join.py
+\end{lstlisting}
+
+\paragraph{Time and resource budget.}
+Stage 1 (link tree): seconds.
+Stage 2 (analysis under audit hook): 2--4 minutes wall-clock on a
+  single host, dominated by EEE-side per-pair report rendering.
+Stage 3 (heatmap render): seconds.
+The Case~A reproducers each take 3--6 minutes on the first run
+  (dominated by venv creation and pip resolution for the older HELM
+  / pandas combinations); subsequent runs reuse cached venvs and take
+  seconds.
+None of the audit stages require GPU access; the local-audit HELM
+  runs themselves (which produced the local EEE artifacts the pipeline
+  consumes) do require GPUs and are reproduced by a separate runbook.
+
+\paragraph{Output artifacts.}
+The audit-hook report at
+  \texttt{\$OUT\_ROOT/audit/audit\_eee\_only\_run.report.json}
+  contains the per-PID file-open log and the verdict
+  (\texttt{n\_flagged\_opens=0} on a successful EEE-only run).
+The Case~A reproducer outputs at
+  \texttt{em\_pandas\_mwe\_out/} and \texttt{em\_helm\_mwe\_out/}
+  contain the digest tables and the rank-by-rank verdict matrix
+  respectively.
+The slim-paper heatmap PNG is at
+  \texttt{\$OUT\_ROOT/heatmap/reproducibility\_heatmap.png} with
+  per-metric drill-downs in the sibling
+  \texttt{reproducibility\_heatmap\_per\_metric/} directory.
+The output dir also contains a self-emitted
+  \texttt{redraw\_plots.sh} for fast styling iteration.
+
+
+% =====================================================================
+\section{Limitations and Follow-Ups}
+\label{sec:tr-limitations}
+% =====================================================================
+
+\subsection{Limitations of this audit}
+\label{sec:tr-limitations-list}
+
+\begin{itemize}
+  \item \textbf{Closed-API and hosted-only models.}
+        The audit covers only open-weight models for which a local
+        re-execution is meaningful; we did not attempt to audit
+        Together-hosted-only or API-only models.
+        Auditing them would require endpoint snapshotting, which is
+        its own provenance-preservation problem.
+  \item \textbf{Multi-turn and agentic evaluations.}
+        HELM's multi-turn and agent-tool scenario classes introduce
+        additional provenance layers (agent scaffold version, tool
+        registry, sandbox snapshot) not exercised here.
+        The slim grid is single-turn only.
+  \item \textbf{Cross-harness alignment.}
+        The audit does not align HELM scores against
+        \texttt{lm-eval-harness} or \texttt{Inspect-AI} scores for
+        the same model and benchmark, which would introduce a second
+        axis of harness-level provenance drift.
+  \item \textbf{Together-side direct verification of Case~B.}
+        We have direct evidence that the public-side Pythia run was
+        Together-routed (HELM v0.3.0 \texttt{auto\_client.py}
+        dispatch logic) and that its outputs match the
+        empty-completion pattern, but we did not call Together's API
+        directly to verify that today's Together-hosted Pythia
+        reproduces the 2023-era empty-completion behaviour.
+        Such a verification would be a useful follow-on if a reviewer
+        pushes back on the Case~B mechanism, but is not strictly
+        required for the audit-level claim that the public HELM
+        Classic v0.3.0 SR-Natural~$\times$~Pythia score is an
+        artifact rather than a capability measurement.
+  \item \textbf{Quantification of the systematic Pythia pattern.}
+        Section~\ref{sec:tr-pythia-pattern} characterizes the eight
+        Pythia outlier cells qualitatively, but does not produce a
+        per-cell quantification of how much of each agreement gap is
+        attributable to backend substitution versus any other
+        effect.
+        A more thorough version would re-run each Pythia cell on a
+        HuggingFace-deployment-only public-side mirror (if one were
+        available) and quantify the residual.
+  \item \textbf{Cross-machine validation.}
+        The local audit was run on a single host (\texttt{aiq-gpu});
+        cross-machine validation (running the same scope on a
+        different host with different hardware) was not exercised
+        for this report.
+  \item \textbf{Single time-point.}
+        The Case~B Together-routing finding is anchored in HELM v0.3.0
+        (Nov 2023) and HELM v0.5.x (current); we did not test
+        intermediate HELM versions or verify against historical
+        Together API behaviour.
+\end{itemize}
+
+\subsection{Follow-up experiments}
+\label{sec:tr-followups}
+
+\begin{itemize}
+  \item \textbf{Direct Together API call.}
+        Inference Pythia-6.9B against today's Together API at known
+        precision and compare the first-token distribution to our
+        local HuggingFace serving.
+        Would localize the proximate cause of the Pythia divergence
+        to one of the four candidates listed in
+        Section~\ref{sec:tr-pythia-confounds}.
+  \item \textbf{Bisect the exact pandas commit.}
+        Narrow the Case~A pandas-merge boundary from
+        $2.0 \to 2.2$ to a specific point release and ideally the
+        upstream commit that introduced the merge-ordering change.
+        Would let us file a precise upstream bug or document a
+        specific compatibility note.
+  \item \textbf{Cross-harness audit.}
+        Run the same three-model slim grid through
+        \texttt{lm-eval-harness} or \texttt{Inspect-AI} and align
+        per-instance scores against the HELM-side records via
+        \eee{}.
+        Would surface a second axis of harness-level drift and
+        validate \eee{}'s cross-harness comparability claim from a
+        different angle.
+  \item \textbf{Heatmap UX with output-divergence rate inline.}
+        The methodological caveats in
+        Section~\ref{sec:tr-microavg} would benefit from being
+        surfaced inline in the heatmap, e.g.\ as a per-cell tuple of
+        (micro-averaged agree\_ratio, official mean, local mean,
+        output-divergence rate).
+        A future iteration of the heatmap renderer could compute
+        and display all four.
+\end{itemize}
+
+
+\end{document}
