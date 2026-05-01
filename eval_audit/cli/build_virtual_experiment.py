@@ -117,7 +117,24 @@ def main(argv: list[str] | None = None) -> None:
     # build_reports_summary can then render Sankey A (Universe -> Scope)
     # using this scoped inventory and naturally show the manifest scope
     # as the terminal gate of the funnel.
+    #
+    # If the manifest has *no* pre_filter, we delete any stale
+    # scoped_filter_inventory.json from a previous compose. Otherwise
+    # build_summary.sh would pick up the stale file via its existence
+    # check and apply yesterday's filtering to today's scope — a
+    # silent footgun that already cost us a session of debugging
+    # ("why is Falcon excluded from the slim heatmap?").
     scoped_filter_inventory_fpath: Path | None = None
+    stale_scoped_inv = output_root / "scoped_filter_inventory.json"
+    has_pre_filter = any(
+        src.pre_filter is not None for src in manifest.official_sources
+    )
+    if not has_pre_filter and stale_scoped_inv.is_file():
+        stale_scoped_inv.unlink()
+        logger.info(
+            f"Removed stale scoped_filter_inventory.json from a previous "
+            f"compose with a different pre_filter setting: {rich_link(stale_scoped_inv)}"
+        )
     for src in manifest.official_sources:
         if src.pre_filter is None:
             continue
