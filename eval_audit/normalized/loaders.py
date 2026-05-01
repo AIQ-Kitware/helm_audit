@@ -150,8 +150,13 @@ class EeeArtifactLoader(Loader):
             # validation errors here points at a broken converter output
             # rather than a hot-loop concern. The expensive loop is the
             # samples.jsonl one below.
+            #
+            # Split read+parse so the line profiler can attribute disk
+            # I/O independently from pydantic validation when this dir
+            # contains many candidates (pre-dedupe).
             try:
-                log = EvaluationLog.model_validate_json(p.read_text())
+                aggregate_text = p.read_text()
+                log = EvaluationLog.model_validate_json(aggregate_text)
             except Exception:
                 continue
             candidates.append((log, p))
@@ -209,31 +214,51 @@ class EeeArtifactLoader(Loader):
             _trust = os.environ.get(
                 "EVAL_AUDIT_TRUST_EEE_SCHEMA", ""
             ).strip().lower() in {"1", "true", "yes"}
+            # Read the file once outside the branches so the profile
+            # attributes disk I/O to its own line and the split() call
+            # to a separate line. Previously each branch had
+            # ``samples_path.read_bytes().split(b"\n")`` collapsed onto
+            # the for-loop line, which conflated three operations.
+            samples_bytes = samples_path.read_bytes()
+            samples_lines = samples_bytes.split(b"\n")
             if _trust:
-                for raw in samples_path.read_bytes().split(b"\n"):
+                for raw in samples_lines:
                     if not raw or raw.isspace():
                         continue
                     try:
                         d = _loads(raw)
                         ev = d["evaluation"]
-                        instances.append(InstanceRecord(
-                            sample_id=d["sample_id"],
-                            sample_hash=d.get("sample_hash"),
-                            metric_id=d.get("evaluation_result_id") or d.get("evaluation_name"),
+                        # Pre-extract every dict field so the profile
+                        # can attribute the dict lookups independently
+                        # from the InstanceRecord construction.
+                        sample_id = d["sample_id"]
+                        sample_hash = d.get("sample_hash")
+                        metric_id = d.get("evaluation_result_id") or d.get("evaluation_name")
+                        score = float(ev["score"])
+                        is_correct = ev.get("is_correct")
+                        rec = InstanceRecord(
+                            sample_id=sample_id,
+                            sample_hash=sample_hash,
+                            metric_id=metric_id,
                             metric_kind=None,
-                            score=float(ev["score"]),
-                            is_correct=ev.get("is_correct"),
+                            score=score,
+                            is_correct=is_correct,
                             record=None,
-                        ))
+                        )
+                        instances.append(rec)
                     except Exception:
                         continue
             else:
                 instance_validate = InstanceLevelEvaluationLog.model_validate
-                for raw in samples_path.read_bytes().split(b"\n"):
+                for raw in samples_lines:
                     if not raw or raw.isspace():
                         continue
                     try:
-                        rec = instance_validate(_loads(raw))
+                        # Split parse from validate so the profile
+                        # shows orjson cost independently from the
+                        # pydantic schema check.
+                        parsed = _loads(raw)
+                        rec = instance_validate(parsed)
                     except Exception:
                         continue
                     instances.append(_instance_record_from_eee(rec))

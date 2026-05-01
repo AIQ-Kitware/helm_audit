@@ -140,7 +140,8 @@ def main(argv: list[str] | None = None) -> None:
     _csv_buf = _io.StringIO()
     table.to_csv(_csv_buf, index=False)
     write_text_atomic(csv_fpath, _csv_buf.getvalue())
-    write_text_atomic(md_fpath, table.to_markdown(index=False) + '\n')
+    md_text = table.to_markdown(index=False)
+    write_text_atomic(md_fpath, md_text + '\n')
 
     lines = []
     lines.append('Overall Reproducibility Assessment')

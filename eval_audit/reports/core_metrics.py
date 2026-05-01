@@ -460,7 +460,13 @@ def _group_quantiles(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def _metric_quantiles(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_metric: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        by_metric.setdefault(str(row['metric']), []).append(row)
+        # Split into separate statements so the line profiler can
+        # attribute the dict-key cast, the ``setdefault`` lookup, and
+        # the list append independently. ``setdefault(...).append(...)``
+        # collapses three operations onto one line.
+        metric_key = str(row['metric'])
+        bucket = by_metric.setdefault(metric_key, [])
+        bucket.append(row)
     out = []
     for metric, items in sorted(by_metric.items()):
         info = _group_quantiles(items)
@@ -567,17 +573,22 @@ def _agreement_curve(rows: list[dict[str, Any]], thresholds: list[float]) -> lis
     """Count abs_delta-≤-threshold for each threshold via a single sort + searchsorted.
 
     Previously did ``sum(v <= t for v in vals)`` inside a per-threshold
-    Python loop — O(N × K) Python comparisons per call. With ~7000 rows
-    × 13 thresholds × ~1400 calls per heatmap run it accounted for ~10s
-    of pure interpreter loop overhead.
+    Python loop — O(N × K) Python comparisons per call. np.searchsorted
+    on a sorted array does each threshold's count in O(log N) (binary
+    search). For "≤ t" we use side='right': the rightmost insertion
+    point equals the number of values ≤ t.
 
-    np.searchsorted on a sorted array does each threshold's count in
-    O(log N) (binary search). For "≤ t" we use side='right': the
-    rightmost insertion point equals the number of values ≤ t.
+    Each subexpression is on its own line so the line profiler can
+    attribute the dict-extract, the sort, the searchsorted, the ratio
+    division, and the dict construction independently.
     """
     if not rows:
         return []
     n = len(rows)
+    # Pull the numerical column. ``np.fromiter`` avoids materializing
+    # an intermediate Python list at the cost of a generator-driven
+    # fill; for n in the thousands the difference is small but it
+    # keeps the GC heap quieter.
     arr = np.fromiter(
         (float(r['abs_delta']) for r in rows),
         dtype=np.float64,
@@ -585,15 +596,25 @@ def _agreement_curve(rows: list[dict[str, Any]], thresholds: list[float]) -> lis
     )
     arr.sort()
     thresh_arr = np.asarray(thresholds, dtype=np.float64)
+    # side='right' = count of values ≤ t (rightmost insertion point).
     counts = np.searchsorted(arr, thresh_arr, side='right')
+    # Ratios in one vector op rather than per-element division in
+    # the comprehension below.
+    ratios = counts / n
+    # Pre-cast counts to a Python list so the per-element ``int(...)``
+    # in the loop becomes a list-element fetch (numpy ints would JSON-
+    # serialize fine but downstream consumers expect Python ints).
+    counts_py = counts.tolist()
+    thresholds_py = thresh_arr.tolist()
+    ratios_py = ratios.tolist()
     return [
         {
-            'abs_tol': float(t),
-            'agree_ratio': int(c) / n,
-            'matched': int(c),
+            'abs_tol': t,
+            'agree_ratio': r,
+            'matched': c,
             'count': n,
         }
-        for t, c in zip(thresh_arr, counts)
+        for t, c, r in zip(thresholds_py, counts_py, ratios_py)
     ]
 
 
@@ -1466,7 +1487,13 @@ def _write_three_run_runlevel_table(
     md_fpath = out_dpath / f'core_runlevel_table.md'
     table.to_csv(csv_fpath, index=False)
     try:
-        write_text_atomic(md_fpath, table.to_markdown(index=False) + '\n')
+        # Split for line-profiler attribution: the markdown render is
+        # the dominant cost (it walks every cell to compute column
+        # widths), and we want it visible separately from the
+        # subsequent atomic write.
+        md_text = table.to_markdown(index=False)
+        md_payload = md_text + '\n'
+        write_text_atomic(md_fpath, md_payload)
     except ImportError:
         md_fpath = None
     return csv_fpath, md_fpath
@@ -1498,7 +1525,13 @@ def _write_two_run_runlevel_table(
     md_fpath = out_dpath / f'core_runlevel_table.md'
     table.to_csv(csv_fpath, index=False)
     try:
-        write_text_atomic(md_fpath, table.to_markdown(index=False) + '\n')
+        # Split for line-profiler attribution: the markdown render is
+        # the dominant cost (it walks every cell to compute column
+        # widths), and we want it visible separately from the
+        # subsequent atomic write.
+        md_text = table.to_markdown(index=False)
+        md_payload = md_text + '\n'
+        write_text_atomic(md_fpath, md_payload)
     except ImportError:
         md_fpath = None
     return csv_fpath, md_fpath
@@ -1777,7 +1810,13 @@ def _write_comparison_runlevel_table(
     md_fpath = out_dpath / f'core_runlevel_table.md'
     table.to_csv(csv_fpath, index=False)
     try:
-        write_text_atomic(md_fpath, table.to_markdown(index=False) + '\n')
+        # Split for line-profiler attribution: the markdown render is
+        # the dominant cost (it walks every cell to compute column
+        # widths), and we want it visible separately from the
+        # subsequent atomic write.
+        md_text = table.to_markdown(index=False)
+        md_payload = md_text + '\n'
+        write_text_atomic(md_fpath, md_payload)
     except ImportError:
         md_fpath = None
     return csv_fpath, md_fpath
