@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import shlex
 from pathlib import Path
 from typing import Any
@@ -473,22 +474,40 @@ def main(argv: list[str] | None = None) -> None:
         for component in components
         if component.get("component_id")
     }
-    for comparison in enabled_comparisons:
-        component_ids = comparison.get("component_ids") or []
-        if len(component_ids) != 2:
-            continue
-        left_component = component_lookup.get(component_ids[0]) or {}
-        right_component = component_lookup.get(component_ids[1]) or {}
-        run_a = left_component.get("run_path")
-        run_b = right_component.get("run_path")
-        if not run_a or not run_b:
-            continue
-        pair_samples.write_pair_samples(
-            run_a=str(run_a),
-            run_b=str(run_b),
-            label=str(comparison["comparison_id"]),
-            report_dpath=report_dpath,
+    # pair_samples writes per-pair instance-comparison TEXT reports
+    # (top-N mismatches etc.) via HelmRunDiff.summarize_instances. That
+    # path is HELM-shaped (helm_view_from_path → run_spec.json fallback)
+    # and represents ~14% of total wall-clock per the latest profile.
+    # Honor the same env var that gates the diagnosis dict in
+    # _build_pair: when EVAL_AUDIT_SKIP_HELM_DIAGNOSIS=1 is set, the
+    # caller has declared "no HELM-derived analysis output" — pair
+    # samples are HELM-derived too, so skip them. The agreement-ratio
+    # numbers and the runlevel-table CSV/MD still write normally.
+    _skip_pair_samples = os.environ.get(
+        "EVAL_AUDIT_SKIP_HELM_DIAGNOSIS", ""
+    ).strip().lower() in {"1", "true", "yes"}
+    if _skip_pair_samples:
+        logger.info(
+            "EVAL_AUDIT_SKIP_HELM_DIAGNOSIS=1 → skipping pair_samples writer "
+            "(HelmRunDiff-derived per-pair instance comparison text)."
         )
+    else:
+        for comparison in enabled_comparisons:
+            component_ids = comparison.get("component_ids") or []
+            if len(component_ids) != 2:
+                continue
+            left_component = component_lookup.get(component_ids[0]) or {}
+            right_component = component_lookup.get(component_ids[1]) or {}
+            run_a = left_component.get("run_path")
+            run_b = right_component.get("run_path")
+            if not run_a or not run_b:
+                continue
+            pair_samples.write_pair_samples(
+                run_a=str(run_a),
+                run_b=str(run_b),
+                label=str(comparison["comparison_id"]),
+                report_dpath=report_dpath,
+            )
 
     heavy_plots_cmd_parts = [
         "-m",
