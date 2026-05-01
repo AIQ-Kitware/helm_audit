@@ -21,6 +21,7 @@ from __future__ import annotations
 import abc
 import importlib.metadata
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -171,7 +172,24 @@ class EeeArtifactLoader(Loader):
         # converted public/local artifacts. Use raw HELM per_instance_stats
         # whenever provenance is available so official/local instance joins
         # remain comparable and drill back to the original evidence.
-        if ref.origin.helm_run_path is not None:
+        #
+        # *** PAPER VALIDITY GUARD ***
+        # The block below silently overwrites the EEE-derived instances with
+        # HELM-derived instances when the HELM run dir is also on disk. For
+        # the EEE-only paper claim, this fallback must be off so the
+        # analysis honestly uses *only* EEE data. Set
+        # EVAL_AUDIT_EEE_STRICT={1,true,yes} (or pass the flag at the entry
+        # point that propagates here) to skip the HELM fallback. With it
+        # set, instance joins that depend on stable HELM sample ids
+        # gracefully fail to ``join_failed`` cells in the heatmap — which
+        # is the *honest* EEE-only signal. See
+        # docs/eee-only-hard-split-todo.md for the full architectural fix
+        # (lifting the recipe facts into the EEE schema so the fallback
+        # is never needed).
+        _eee_strict = os.environ.get(
+            "EVAL_AUDIT_EEE_STRICT", ""
+        ).strip().lower() in {"1", "true", "yes"}
+        if not _eee_strict and ref.origin.helm_run_path is not None:
             raw_instances = _instances_from_raw_helm(ref.origin.helm_run_path, chosen_log)
             if raw_instances:
                 instances = raw_instances

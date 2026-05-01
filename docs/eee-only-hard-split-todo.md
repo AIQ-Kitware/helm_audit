@@ -34,6 +34,41 @@ external-EEE-only sources) should be physically incapable of importing
 `eval_audit.helm.*`. Then "did this analysis use HELM?" becomes a
 trivial `grep` instead of a code review.
 
+## ⚠️ Hot finding (must address before publishing the analysis)
+
+[`eval_audit/normalized/loaders.py`](../eval_audit/normalized/loaders.py)
+contains a **silent HELM fallback inside the EEE artifact loader**.
+When `EeeArtifactLoader.load` is called on an EEE artifact and
+`ref.origin.helm_run_path is not None`, the loader reads
+`per_instance_stats.json` and `scenario_state.json` from the HELM run
+dir and **overwrites the EEE-derived `instances` list** with the
+HELM-derived list (so per-pair joins use stable HELM sample ids).
+
+What this means for the paper:
+
+> Same EEE artifact path, same code, same input — but the analysis
+> produces *different* numbers depending on whether HELM run dirs are
+> also on disk. On the audit host (where they are), the analysis is
+> using HELM data even when `artifact_format='eee'`. On a fresh host
+> with only the EEE artifacts, the analysis would use EEE data and
+> some cells might land in `join_failed` instead of `present`.
+
+**Mitigation now in place** (commit pending alongside this doc
+update): set `EVAL_AUDIT_EEE_STRICT={1,true,yes}` to disable the
+fallback. With it set, the EEE loader uses *only* EEE-derived
+instances; the analysis becomes honestly EEE-only.
+
+**Required for the paper analysis run**: set
+`EVAL_AUDIT_EEE_STRICT=1` for the run whose numbers you publish.
+Compare against a baseline run with the variable unset to surface
+which cells (if any) join differently between the two modes — that
+diff is itself a paper artifact.
+
+The longer-term hard-split (work plan §3 below) removes the
+fallback entirely — the EEE-only loader simply doesn't read HELM
+JSONs ever. Until that lands, `EVAL_AUDIT_EEE_STRICT=1` is the
+short-term guarantee.
+
 ## Current state (post-`--skip-diagnosis`)
 
 What `EVAL_AUDIT_SKIP_HELM_DIAGNOSIS=1` covers:
