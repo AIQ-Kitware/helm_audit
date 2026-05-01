@@ -112,14 +112,31 @@ echo "=========================================="
 echo "[em-helm-mwe] Pass 2: v0.3.0-era venv"
 echo "=========================================="
 HELM_OLD_VENV="$OUT_DIR/venv-helm-0.3.0"
-HELM_OLD_PY="3.11"   # safe Python that supports both pandas 2.0.3 and old numpy
+# HELM v0.3.0 setup.cfg: python_requires = >=3.8,<3.11.
+# pyext 0.7 (transitive dep) uses inspect.getargspec which was removed
+# in Python 3.11, so 3.11+ definitely fails. 3.10 is the most recent
+# supported.
+HELM_OLD_PY="3.10"
 
 have_uv=0
 if command -v uv >/dev/null 2>&1; then have_uv=1; fi
 
-if [[ -d "$HELM_OLD_VENV" ]]; then
+# Reuse only if the venv exists AND has helm importable; otherwise nuke
+# and rebuild. (A previous run with an unsupported Python may have
+# created the venv but failed to install crfm-helm.)
+HELM_OLD_VENV_OK=0
+if [[ -d "$HELM_OLD_VENV" ]] \
+        && "$HELM_OLD_VENV/bin/python" -c "import helm" 2>/dev/null; then
+    HELM_OLD_VENV_OK=1
+fi
+if [[ $HELM_OLD_VENV_OK -eq 1 ]]; then
     echo "[em-helm-mwe] reusing $HELM_OLD_VENV"
 else
+    if [[ -d "$HELM_OLD_VENV" ]]; then
+        echo "[em-helm-mwe] $HELM_OLD_VENV exists but lacks importable helm"
+        echo "[em-helm-mwe] removing and rebuilding"
+        rm -rf "$HELM_OLD_VENV"
+    fi
     if [[ $have_uv -eq 1 ]]; then
         uv venv "$HELM_OLD_VENV" --python "$HELM_OLD_PY"
         VIRTUAL_ENV="$HELM_OLD_VENV" uv pip install \
