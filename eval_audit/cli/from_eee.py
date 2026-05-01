@@ -459,6 +459,20 @@ def main(argv: list[str] | None = None) -> None:
             "filter sankey to fold in."
         ),
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help=(
+            "Number of packets to render concurrently. Each packet runs the "
+            "core_metrics CLI in its own subprocess, so the OS handles "
+            "scheduling — set this to roughly half your physical cores when "
+            "joining new-format EEE artifacts (those have 21x the records of "
+            "old-format files and saturate a core for several minutes per "
+            "packet). Default 1 (serial) preserves the original behavior. "
+            "Use 0 to mean ``os.cpu_count() // 2``."
+        ),
+    )
     args, plot_layout_args = parser.parse_known_args(argv)
 
     eee_root = Path(args.eee_root).expanduser().resolve()
@@ -493,18 +507,82 @@ def main(argv: list[str] | None = None) -> None:
     )
     print(f"planner: {n_packets} packets, {n_pairs} pairwise comparisons")
 
-    rendered = []
-    for entry in _packets_with_manifests(planning_artifact):
-        report_dpath = _render_packet(
-            packet=entry,
-            out_root=out_dir,
-            components_manifest_fpath=Path(),  # constructed inline
-            comparisons_manifest_fpath=Path(),
-            plot_layout_args=plot_layout_args,
-            render_heavy_plots=args.render_heavy_pairwise_plots,
+    # Resolve --workers. ``0`` means "auto" -> half of cpu_count (rounded up,
+    # at least 1) so we leave headroom for the OS, the user's other work,
+    # and the per-subprocess pandas/matplotlib spike. Negative values pin
+    # to 1 with a warning.
+    if args.workers == 0:
+        worker_count = max(1, (os.cpu_count() or 2) // 2)
+    elif args.workers < 0:
+        print(
+            f"  WARN: --workers={args.workers} is invalid; using 1 (serial).",
+            file=sys.stderr,
         )
-        rendered.append(report_dpath)
-        print(f"  rendered: {report_dpath}")
+        worker_count = 1
+    else:
+        worker_count = args.workers
+    print(f"rendering: {worker_count} worker(s) (--workers={args.workers})")
+
+    rendered: list[Path] = []
+    packet_entries = list(_packets_with_manifests(planning_artifact))
+    if worker_count <= 1:
+        # Original serial path. Preserved verbatim so the behavior of the
+        # default invocation does not change.
+        for entry in packet_entries:
+            report_dpath = _render_packet(
+                packet=entry,
+                out_root=out_dir,
+                components_manifest_fpath=Path(),  # constructed inline
+                comparisons_manifest_fpath=Path(),
+                plot_layout_args=plot_layout_args,
+                render_heavy_plots=args.render_heavy_pairwise_plots,
+            )
+            rendered.append(report_dpath)
+            print(f"  rendered: {report_dpath}")
+    else:
+        # Parallel path. ThreadPoolExecutor (not ProcessPool) because each
+        # _render_packet already spawns a core_metrics subprocess; we just
+        # need to keep N of them in flight without blocking. Each thread
+        # does almost no in-process work, so the GIL is irrelevant.
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # We collect any rendering failures and re-raise the first one
+        # *after* all in-flight workers finish, so the user gets a
+        # complete picture of what did/didn't render rather than a
+        # mid-flight crash. ``check=True`` inside ``_render_packet`` will
+        # propagate CalledProcessError, which we catch per-future.
+        first_failure: tuple[str, BaseException] | None = None
+        with ThreadPoolExecutor(max_workers=worker_count) as pool:
+            future_to_packet_id = {
+                pool.submit(
+                    _render_packet,
+                    packet=entry,
+                    out_root=out_dir,
+                    components_manifest_fpath=Path(),
+                    comparisons_manifest_fpath=Path(),
+                    plot_layout_args=plot_layout_args,
+                    render_heavy_plots=args.render_heavy_pairwise_plots,
+                ): entry["packet_id"]
+                for entry in packet_entries
+            }
+            for future in as_completed(future_to_packet_id):
+                packet_id = future_to_packet_id[future]
+                try:
+                    report_dpath = future.result()
+                except BaseException as exc:  # noqa: BLE001
+                    print(f"  FAILED:   {packet_id}: {exc}", file=sys.stderr)
+                    if first_failure is None:
+                        first_failure = (packet_id, exc)
+                else:
+                    rendered.append(report_dpath)
+                    print(f"  rendered: {report_dpath}  ({len(rendered)}/{len(packet_entries)})")
+        if first_failure is not None:
+            packet_id, exc = first_failure
+            raise RuntimeError(
+                f"per-packet rendering failed for {packet_id}; "
+                f"{len(packet_entries) - len(rendered)} packet(s) did not "
+                f"complete; first failure was: {exc}"
+            ) from exc
 
     print(f"\nDONE: {len(rendered)} per-pair core-metric reports under {out_dir}/<experiment>/core-reports/")
 

@@ -28,9 +28,16 @@ echo "  tree:   $OUT_TREE"
 echo "  output: $FROM_EEE_OUT"
 echo
 
+# Default to half the host's CPU cores (rounded down) so packet
+# rendering parallelizes without starving the OS / your editor.
+# Override by exporting WORKERS=N before invoking 20_run.sh.
+WORKERS="${WORKERS:-$(( $(nproc 2>/dev/null || echo 2) / 2 ))}"
+echo "Parallelism: WORKERS=$WORKERS  (set WORKERS=1 to serialize, =0 for auto)"
+
 eval-audit-from-eee \
   --eee-root "$OUT_TREE" \
   --out-dpath "$FROM_EEE_OUT" \
+  --workers "$WORKERS" \
   --clean \
   --build-aggregate-summary
 
