@@ -213,3 +213,81 @@ for an end-to-end test.
 
 Run them with `pytest --run-slow` (slow-marked because they shell out
 to the analysis pipeline).
+
+## Audit vs forensics: scope distinction
+
+EEE is **sufficient for audit** (do two runs of the same recipe agree,
+where do they diverge, by how much, on which instances?) but
+**insufficient for forensics** (why do they diverge?). That's a
+deliberate scope decision, not an oversight: EEE captures the model's
+input-output behavior in a framework-neutral way, but does not
+preserve the upstream framework's internal state needed to reconstruct
+mechanism.
+
+Concretely, given only EEE artifacts (and `recipe_facts` / sidecar
+`run_spec.json` when available):
+
+| Question | Answerable from EEE alone? |
+|---|---|
+| Did these two runs agree? | ✅ |
+| By how much do they disagree at instance level? | ✅ |
+| At which instances? | ✅ (`sample_hash` join → per-instance abs_delta) |
+| What did the model see? | ✅ (`input.raw`) |
+| What did the model output? | ✅ (`output.raw`) |
+| What did the evaluator extract from the output? | ✅ (`answer_attribution.extracted_value`) |
+| What was the run-level mean per metric? | ✅ (`evaluation.score` → run-level mean) |
+| What was the inference backend (Together API / vLLM / HF transformers / …)? | ❌ |
+| What was the runtime resolution of `model_deployment` when null? | ❌ |
+| What inference precision (fp32 / fp16 / bf16) and attention kernel? | ❌ |
+| What `transformers` / `pandas` / `numpy` / framework versions were active? | ❌ partial — `eval_library_version` recorded but typically `"unknown"` |
+| Why do two runs of the same recipe diverge? | ❌ — typically requires upstream framework artifacts + source |
+
+Surfaced by the slim-heatmap case studies (see
+[`paper_draft/2026-05-01_session_log.md`](../paper_draft/2026-05-01_session_log.md)
+for the full investigation):
+
+- **`entity_matching` zero hash overlap**: detected from EEE
+  (`sample_hash` set has zero intersection between sides). Mechanism
+  required HELM's `run_spec.json`, `scenario_state.json`, and the
+  `helm.benchmark.scenarios.entity_matching_scenario` source to
+  identify pandas `pd.merge` row-ordering as version-dependent
+  between pandas 2.0.x and 2.2.x+. EEE alone could not have surfaced
+  the pandas-version mechanism.
+- **`synthetic_reasoning_natural × pythia-6.9b` (0.788)**: detected
+  from EEE (aggregate scores 0% vs ~20% with high instance-level
+  disagreement). Mechanism — Pythia's first generated token is `\n`
+  on Together-hosted inference but `'The'` on local HuggingFace
+  inference, interacting with `stop_sequences=['\n']` to zero out
+  the OFFICIAL completion text — required HELM's `scenario_state.
+  json` (raw token stream) and `auto_client.py` deployment routing
+  source. EEE preserved the empty completions faithfully but did not
+  preserve which backend served the inference.
+
+### Caveats when interpreting micro-averaged instance-level agreement
+
+`agree_ratio = matched / count` averaged across (sample, metric) rows
+has two failure modes worth flagging in any reproducibility report:
+
+1. **Degenerate-zero agreement.** When one side's run is degenerate
+   (always emits 0 — e.g., the broken Pythia SR-Natural OFFICIAL run
+   above), every (sample, metric) row where the other side also
+   scored 0 counts as agreement. The "agreement rate" then reads as
+   "fraction of cases where the non-degenerate side also failed",
+   not "fraction of cases where the model behaviors agree". For SR-
+   Natural × Pythia: instance-level `agree_ratio = 0.788` while the
+   run-level means are 0.0 (off) vs ~0.20 (loc) — the 0.788 entirely
+   reflects 0=0 collisions on the 78% of prompts the local model
+   also got wrong.
+2. **Stochastic noise floor.** When the recipe specifies
+   `temperature > 0` (e.g., WikiFact at temperature=1.0), independent
+   runs are not bit-reproducible by design. The agreement rate
+   converges to `p² + (1-p)²` for a binary metric with hit rate
+   `p` — typically 90-95% for realistic hit rates, regardless of
+   any reproducibility issue. WikiFact's ~0.92 across all three
+   models in the slim heatmap is the noise floor, not a finding.
+
+Honest reporting therefore wants to surface, alongside `agree_ratio`,
+both run-level means (to expose case 1) and the recipe's
+`temperature` / sampling configuration (to expose case 2). The
+existing per-metric drill-down panels already cover (1) when paired
+with the run-level table; case (2) is currently implicit.
