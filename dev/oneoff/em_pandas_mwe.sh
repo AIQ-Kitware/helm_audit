@@ -50,7 +50,7 @@ COMBOS=(
 DEEPMATCHER_URL="http://pages.cs.wisc.edu/~anhai/data1/deepmatcher_data/Textual/Abt-Buy/abt_buy_exp_data.zip"
 
 OUT_DIR="${OUT_DIR:-$PWD/em_pandas_mwe_out}"
-DATA_DIR="$OUT_DIR/data/Abt-Buy"
+EXTRACT_DIR="$OUT_DIR/data"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_PY="$SCRIPT_DIR/em_pandas_mwe_run.py"
 
@@ -59,25 +59,35 @@ if [[ ! -f "$RUN_PY" ]]; then
     exit 1
 fi
 
-mkdir -p "$OUT_DIR"
+mkdir -p "$EXTRACT_DIR"
 
 # 1. Fetch + unpack the deepmatcher ZIP (idempotent).
-if [[ -f "$DATA_DIR/tableA.csv" ]]; then
-    echo "[em-mwe] data already present at $DATA_DIR — skipping download"
-else
+# Layout-tolerant: the zip may put CSVs at root, in an "exp_data/"
+# subdir, or in some other vendor-specific subdir. We locate
+# tableA.csv after extraction and treat its parent as DATA_DIR.
+ZIP_PATH="$EXTRACT_DIR/abt_buy_exp_data.zip"
+if [[ ! -f "$ZIP_PATH" ]]; then
     echo "[em-mwe] downloading $DEEPMATCHER_URL"
-    mkdir -p "$DATA_DIR"
-    cd "$OUT_DIR/data"
-    curl -fsSL -o abt_buy_exp_data.zip "$DEEPMATCHER_URL"
-    unzip -o -q abt_buy_exp_data.zip
-    cd - >/dev/null
+    curl -fsSL -o "$ZIP_PATH" "$DEEPMATCHER_URL"
 fi
 
-if [[ ! -f "$DATA_DIR/tableA.csv" ]]; then
-    echo "ERROR: $DATA_DIR/tableA.csv missing after extract." >&2
-    ls "$DATA_DIR" || true
+# Find tableA.csv anywhere in EXTRACT_DIR; if missing, extract.
+TABLEA="$(find "$EXTRACT_DIR" -name 'tableA.csv' -type f -print -quit 2>/dev/null || true)"
+if [[ -z "$TABLEA" ]]; then
+    echo "[em-mwe] extracting $ZIP_PATH into $EXTRACT_DIR"
+    unzip -o -q "$ZIP_PATH" -d "$EXTRACT_DIR"
+    TABLEA="$(find "$EXTRACT_DIR" -name 'tableA.csv' -type f -print -quit 2>/dev/null || true)"
+fi
+
+if [[ -z "$TABLEA" ]]; then
+    echo "ERROR: tableA.csv not found anywhere under $EXTRACT_DIR after extract." >&2
+    echo "       Zip contents:" >&2
+    unzip -l "$ZIP_PATH" >&2 | head -30
     exit 1
 fi
+
+DATA_DIR="$(dirname "$TABLEA")"
+echo "[em-mwe] DATA_DIR=$DATA_DIR"
 
 # Bytes-confirmation: record the same dataset went into every venv.
 echo "[em-mwe] data digests:"

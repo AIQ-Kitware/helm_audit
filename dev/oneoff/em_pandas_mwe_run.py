@@ -45,12 +45,30 @@ def main() -> int:
     # Library banner so the diff between runs immediately shows the
     # pandas / numpy versions that produced each output.
     import numpy as np
+    data_dir = args.data_dir.resolve()
     print(f"# pandas={pd.__version__}  numpy={np.__version__}  "
-          f"split={args.split!r}  data_dir={args.data_dir}")
+          f"split={args.split!r}  data_dir={data_dir}")
 
-    tableA = pd.read_csv(args.data_dir / "tableA.csv")
-    tableB = pd.read_csv(args.data_dir / "tableB.csv")
-    labels = pd.read_csv(args.data_dir / f"{args.split}.csv")
+    # Up-front layout check with a helpful message. If tableA.csv isn't
+    # at data_dir/, search recursively and suggest the correct path.
+    if not (data_dir / "tableA.csv").exists():
+        candidates = list(data_dir.rglob("tableA.csv"))
+        if candidates:
+            print(f"ERROR: data_dir/tableA.csv not found, but tableA.csv exists at:",
+                  file=sys.stderr)
+            for c in candidates[:5]:
+                print(f"  {c.parent}", file=sys.stderr)
+            print(f"Re-run with one of those paths as data_dir.", file=sys.stderr)
+        else:
+            print(f"ERROR: tableA.csv not found anywhere under {data_dir}.",
+                  file=sys.stderr)
+            print(f"Expected unpacked deepmatcher Abt-Buy dir with tableA.csv,"
+                  f" tableB.csv, train.csv, valid.csv, test.csv.", file=sys.stderr)
+        return 2
+
+    tableA = pd.read_csv(data_dir / "tableA.csv")
+    tableB = pd.read_csv(data_dir / "tableB.csv")
+    labels = pd.read_csv(data_dir / f"{args.split}.csv")
 
     print(f"# n_tableA={len(tableA)}  n_tableB={len(tableB)}  n_labels={len(labels)}")
 
