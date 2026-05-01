@@ -31,11 +31,20 @@ from eval_audit.normalized.joins import (
 )
 from eval_audit.normalized.model import InstanceRecord, NormalizedRun
 
+# Zero-overhead in normal runs; line_profiler swaps in a real profiler when
+# the LINE_PROFILE env var is set.
+try:
+    from line_profiler import profile  # type: ignore[import-not-found]
+except ImportError:
+    def profile(func):  # type: ignore[no-redef]
+        return func
+
 
 # ---------------------------------------------------------------------------
 # Run-level + instance-level core rows
 # ---------------------------------------------------------------------------
 
+@profile
 def run_level_core_rows(
     run_a: NormalizedRun,
     run_b: NormalizedRun,
@@ -72,6 +81,7 @@ def run_level_core_rows(
     return rows
 
 
+@profile
 def instance_level_core_rows(
     run_a: NormalizedRun,
     run_b: NormalizedRun,
@@ -80,12 +90,19 @@ def instance_level_core_rows(
 ) -> list[dict[str, Any]]:
     """Per-(sample, metric) rows for matching instances and core metrics."""
     rows: list[dict[str, Any]] = []
+    classify = helm_metrics.classify_metric
     for key, rec_a, rec_b in join_instances(run_a, run_b):
-        if rec_a.metric_id is None or rec_b.metric_id is None:
+        # join_instances pairs records by (sample_hash_or_id, metric_id),
+        # so rec_a.metric_id == rec_b.metric_id whenever a key materialized.
+        # That means a single classify_metric call covers both sides; the
+        # previous code did it twice per row × ~1.4M rows = wasted work.
+        # The metric_id-is-None branch is also unreachable post-join (the
+        # key would have a None component) but kept defensively.
+        metric_id = rec_a.metric_id
+        if metric_id is None or rec_b.metric_id is None:
             continue
-        cls_a, _ = helm_metrics.classify_metric(rec_a.metric_id)
-        cls_b, _ = helm_metrics.classify_metric(rec_b.metric_id)
-        if cls_a != metric_class or cls_b != metric_class:
+        cls, _ = classify(metric_id)
+        if cls != metric_class:
             continue
         a_val = rec_a.score
         b_val = rec_b.score
@@ -95,8 +112,8 @@ def instance_level_core_rows(
             "key": key,
             "sample_id": rec_a.sample_id,
             "sample_hash": rec_a.sample_hash or rec_b.sample_hash,
-            "metric": rec_a.metric_id,
-            "metric_class": cls_a,
+            "metric": metric_id,
+            "metric_class": cls,
             "a": a_val,
             "b": b_val,
             "abs_delta": abs_delta,

@@ -13,6 +13,7 @@ without import-time side effects.
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Optional
 
 
@@ -70,10 +71,19 @@ class METRIC_PREFIXES:
     )
 
 
+@lru_cache(maxsize=8192)
 def classify_metric(metric_name: Optional[str]) -> tuple[str, str | None]:
     """Return (metric_class, matched_prefix).
 
     metric_class ∈ {'core', 'bookkeeping', 'untracked'}
+
+    Cached: this function is called millions of times during pair
+    analysis (every joined (sample, metric) row triggers a lookup),
+    but the input domain is tiny — typically <50 distinct metric
+    names per run. The cache turns each call after the first into a
+    dict lookup. Cache size is generous so a multi-suite run never
+    evicts. Pure function; cache is safe for the lifetime of the
+    process.
     """
     if not metric_name:
         return ('untracked', None)
