@@ -553,9 +553,18 @@ def _render_heatmap(
     fig_h = max(5.0, 0.5 * n_bench + 1.5)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
-    # Colormap: RdYlGn for agreement (red=0, green=1)
+    # Colormap: RdYlGn for agreement (red=low, green=high). The default
+    # range is tightened to [0.7, 1.0] because for the slim-paper heatmap
+    # every present cell sits in [0.788, 1.000] — using vmin=0 wastes
+    # most of the gradient on values that never occur and leaves the
+    # actual data clustered in the green band where small differences
+    # are imperceptible. Override per-render via env vars
+    # EVAL_AUDIT_HEATMAP_VMIN / EVAL_AUDIT_HEATMAP_VMAX.
+    import os
+    cmap_vmin = float(os.environ.get("EVAL_AUDIT_HEATMAP_VMIN", "0.7"))
+    cmap_vmax = float(os.environ.get("EVAL_AUDIT_HEATMAP_VMAX", "1.0"))
     cmap = plt.get_cmap("RdYlGn")
-    cmap_norm = mcolors.Normalize(vmin=0.0, vmax=1.0)
+    cmap_norm = mcolors.Normalize(vmin=cmap_vmin, vmax=cmap_vmax)
     cmap_scalar = plt.cm.ScalarMappable(norm=cmap_norm, cmap=cmap)
 
     # Background defaults to the "missing" color so any cell we don't
@@ -584,11 +593,11 @@ def _render_heatmap(
                     edgecolor="white", linewidth=0.5,
                 )
                 ax.add_patch(rect)
-                text_color = (
-                    "black" if 0.3 < val < 0.8
-                    else "white" if val <= 0.3
-                    else "black"
-                )
+                # Pick text color based on the *normalized* position
+                # (0..1) within the cmap range so the choice tracks the
+                # actual cell color regardless of vmin/vmax.
+                norm_val = float(cmap_norm(val))
+                text_color = "white" if (norm_val < 0.2 or norm_val > 0.85) else "black"
                 ax.text(
                     j, i,
                     f"{val:.3f}",
@@ -668,24 +677,45 @@ def _render_heatmap(
     cbar.set_label("agree_ratio", fontsize=8)
     cbar.ax.tick_params(labelsize=7)
 
-    # Four-state legend just below the title.
+    # Build the legend dynamically: only include status entries that
+    # actually appear in this heatmap. For the slim-paper render, that
+    # typically means just `present` + `join_failed`, with
+    # `no_core_metrics` and `missing` omitted (they exist as fallbacks
+    # for other heatmaps but aren't relevant here).
     from matplotlib.patches import Patch
+    statuses_present = {c.get("status") for c in cells.values() if c}
+    has_missing_in_grid = any(
+        cells.get((m, b)) is None
+        for m in models for b in benchmarks
+    )
+    # Use a high-end swatch for `present` so it visually matches what
+    # readers see on the actual cells (deep green, not the gradient
+    # midpoint which lands in yellow with a tightened vmin).
     legend_handles = [
-        Patch(facecolor=cmap(cmap_norm(0.5)), edgecolor="white",
+        Patch(facecolor=cmap(cmap_norm(cmap_vmax)), edgecolor="white",
               label="present (agree_ratio shown)"),
-        Patch(facecolor=_JOIN_FAILED_COLOR, edgecolor="white",
-              hatch="////",
-              label="join_failed (no hash overlap; upstream)"),
-        Patch(facecolor=_NO_CORE_METRICS_COLOR, edgecolor="white",
-              hatch="....",
-              label="no_core_metrics (joined; classifier gap)"),
-        Patch(facecolor=_MISSING_COLOR, edgecolor="white",
-              label="missing (no packet for this cell)"),
     ]
+    if "join_failed" in statuses_present:
+        legend_handles.append(
+            Patch(facecolor=_JOIN_FAILED_COLOR, edgecolor="white",
+                  hatch="////",
+                  label="join_failed (no hash overlap; upstream)")
+        )
+    if "no_core_metrics" in statuses_present:
+        legend_handles.append(
+            Patch(facecolor=_NO_CORE_METRICS_COLOR, edgecolor="white",
+                  hatch="....",
+                  label="no_core_metrics (joined; classifier gap)")
+        )
+    if has_missing_in_grid:
+        legend_handles.append(
+            Patch(facecolor=_MISSING_COLOR, edgecolor="white",
+                  label="missing (no packet for this cell)")
+        )
     ax.legend(
         handles=legend_handles,
         loc="upper center", bbox_to_anchor=(0.5, -0.08),
-        ncol=2, fontsize=7, frameon=False,
+        ncol=min(len(legend_handles), 3), fontsize=7, frameon=False,
     )
 
     sub = subtitle if subtitle is not None else (
