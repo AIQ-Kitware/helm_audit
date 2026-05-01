@@ -1,13 +1,18 @@
 [build-system]
-requires = ["setuptools>=69"]
-build-backend = "setuptools.build_meta"
+# uv_build is uv's native PEP 517 backend — drops editable install
+# time from 30-60s (setuptools' build_editable walking the tree and
+# generating _distutils_hack shims) to under a second. Trade-off:
+# only `uv pip install` understands the metadata; plain `pip install`
+# still works (it falls back to PEP 660 generic editable handling).
+requires = ["uv_build"]
+build-backend = "uv_build"
 
 [project]
 name = "eval-audit"
 version = "0.0.1"
 description = "Python-first HELM audit and reproducibility workflow"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 dependencies = [
     "crfm-helm>=0.5.8",
@@ -23,7 +28,6 @@ dependencies = [
     "numexpr>=2.11.0",
     "numpy>=1.26",
     "orjson>=3.10.15",
-    "pandas>=2",
     "pandas>=2.2.3",
     "plotly>=6.0.0",
     "pygtrie>=2.5.0",
@@ -59,8 +63,12 @@ eval-audit-build-virtual-experiment = "eval_audit.cli.build_virtual_experiment:m
 eval-audit-from-eee = "eval_audit.cli.from_eee:main"
 eval-audit-compare-pair-eee = "eval_audit.cli.compare_pair_eee:main"
 
-[tool.setuptools.packages.find]
-include = ["eval_audit*"]
+[tool.uv.build-backend]
+# Flat layout: the package lives at the repo root as ``eval_audit/``,
+# not under ``src/``. Without this override, uv_build defaults to
+# ``src`` and would fail to find the module.
+module-root = ""
+module-name = "eval_audit"
 
 [tool.pytest.ini_options]
 # Collect tests from these roots only. Without this, pytest walks the entire

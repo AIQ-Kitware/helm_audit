@@ -164,29 +164,6 @@ python -m py_compile eval_audit/workflows/build_reports_summary.py
 
 ### `aivm-2404` constraints (from operational experience)
 
-- **`/` is at ~95% utilization** (43 GB total, ~2 GB free). The dominant
-  consumer is `~/.cache/uv` (~14 GB). HF cache is small (~2.5 GB) — *do
-  not* download new HF models or torch checkpoints on this VM; do that
-  work on a stronger external machine. The `eval_audit` slow-tests
-  themselves *don't* pull HF/torch — they only exercise the planner +
-  core-metrics + summary against synthetic EEE artifacts in
-  `tests/fixtures/`.
-- **Run pytest serially, never in parallel.** Stacking multiple
-  `pytest --run-slow` invocations (or pytest-xdist) hits an I/O
-  bottleneck on the near-full disk: page-cache thrash + dirty-write
-  throttling collapse throughput, and a single
-  `build_reports_summary` subprocess that normally takes <90s can
-  stretch to 20+ minutes wall-clock at single-digit CPU%. Same code
-  on a less-pressured machine finishes 185 tests in ~6 min.
-  Symptom to watch for: a Python child holding ~30s of CPU after
-  several wall-clock minutes — that's I/O wait, not a real hang.
-- **Slow-test runs longer than ~3 min in foreground should be
-  delegated to the user's external machine** rather than retried on
-  this VM. The user has a faster box and has explicitly offered to
-  run pytest there. Ask them rather than burning hours on retries.
-- Want to recover disk on this VM if it gets in the way?
-  `uv cache prune` reclaims ~10 GB. Don't wipe HF — it's small and
-  the user may need cached weights.
 - **`OSError: [Errno 24] Too many open files` / `ln: Too many open files`
   on this VM is an environment problem, not a code bug.** It can hit
   even simple operations (a single `ln -sf`, `import pandas`) and is
