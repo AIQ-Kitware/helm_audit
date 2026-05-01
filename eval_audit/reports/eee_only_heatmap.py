@@ -866,6 +866,7 @@ def _save_cell_data(
                         "count": None,
                         "n_pairs_with_data": 0,
                         "n_pairs_total": 0,
+                        "n_joined_pairs": 0,
                         "n_packets": 0,
                     }
                 )
@@ -881,6 +882,7 @@ def _save_cell_data(
                         "count": cell["count"],
                         "n_pairs_with_data": cell.get("n_pairs_with_data", 0),
                         "n_pairs_total": cell.get("n_pairs_total", 0),
+                        "n_joined_pairs": cell.get("n_joined_pairs", 0),
                         "n_packets": cell.get("n_packets", 0),
                     }
                 )
