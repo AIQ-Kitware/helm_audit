@@ -757,7 +757,7 @@ def _build_pair(
         )
         diagnosis = diff.summary_dict(level=20).get('diagnosis', {})
     run_rows = ncompare.run_level_core_rows(nrun_a, nrun_b)
-    inst_rows = ncompare.instance_level_core_rows(nrun_a, nrun_b)
+    inst_rows, inst_stats = ncompare.instance_level_core_rows(nrun_a, nrun_b)
 
     # Calculate per-metric agreement curves for instance level
     per_metric_curves = {}
@@ -787,6 +787,12 @@ def _build_pair(
         },
         'instance_level': {
             'n_rows': len(inst_rows),
+            # Pre-filter join count from join_instances. Lets the
+            # heatmap distinguish "no hash overlap" (n_joined_pairs==0)
+            # from "hashes overlapped but no core metrics survived
+            # classify_metric" (n_joined_pairs>0 && n_rows==0). See
+            # eval_audit.normalized.compare.instance_level_core_rows.
+            'n_joined_pairs': int(inst_stats.get('n_joined_pairs', 0)),
             'overall_quantiles': _group_quantiles(inst_rows),
             'by_metric': _metric_quantiles(inst_rows),
             'agreement_vs_abs_tol': _agreement_curve(inst_rows, thresholds),

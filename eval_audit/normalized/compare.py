@@ -87,11 +87,31 @@ def instance_level_core_rows(
     run_b: NormalizedRun,
     *,
     metric_class: str = "core",
-) -> list[dict[str, Any]]:
-    """Per-(sample, metric) rows for matching instances and core metrics."""
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Per-(sample, metric) rows for matching instances and core metrics.
+
+    Returns ``(rows, stats)`` where ``stats`` carries pre-filter counts
+    so callers can distinguish two distinct failure modes that both
+    produce ``len(rows) == 0``:
+
+    * ``stats["n_joined_pairs"] == 0`` — no overlap from
+      :func:`join_instances` (sample_hashes / sample_ids never matched).
+      Upstream data problem: investigate the converter, scenario,
+      dataset version, or HELM RNG.
+    * ``stats["n_joined_pairs"] > 0`` but ``rows == []`` — data joined
+      fine but every row was filtered by ``classify_metric`` (no
+      :data:`metric_class` metrics survived). Analyzer-side gap:
+      :data:`eval_audit.helm.metrics.METRIC_PREFIXES.CORE_PREFIXES` is
+      missing a metric family.
+
+    Downstream consumers (per-pair report → heatmap collector) use
+    ``n_joined_pairs`` to assign the heatmap status label.
+    """
     rows: list[dict[str, Any]] = []
     classify = helm_metrics.classify_metric
+    n_joined_pairs = 0
     for key, rec_a, rec_b in join_instances(run_a, run_b):
+        n_joined_pairs += 1
         # join_instances pairs records by (sample_hash_or_id, metric_id),
         # so rec_a.metric_id == rec_b.metric_id whenever a key materialized.
         # That means a single classify_metric call covers both sides; the
@@ -119,7 +139,7 @@ def instance_level_core_rows(
             "abs_delta": abs_delta,
             "rel_delta": abs_delta / denom,
         })
-    return rows
+    return rows, {"n_joined_pairs": n_joined_pairs}
 
 
 # ---------------------------------------------------------------------------

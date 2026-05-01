@@ -51,12 +51,14 @@ def test_run_level_self_pair_zero_delta(nrun) -> None:
 
 
 def test_instance_level_self_pair_zero_delta(nrun) -> None:
-    rows = ncompare.instance_level_core_rows(nrun, nrun)
+    rows, stats = ncompare.instance_level_core_rows(nrun, nrun)
     assert rows, "expected at least one core instance-level row"
     assert all(row["abs_delta"] == 0.0 for row in rows)
     metrics = {row["metric"] for row in rows}
     # The MMLU fixture has multiple core metrics (exact_match family).
     assert any(m.startswith("exact_match") for m in metrics)
+    # Self-pair must show non-zero pre-filter join count.
+    assert stats["n_joined_pairs"] >= len(rows)
 
 
 def test_core_metric_keys_are_core_classified(nrun) -> None:

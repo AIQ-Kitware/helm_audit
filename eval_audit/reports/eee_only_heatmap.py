@@ -179,17 +179,30 @@ def _collect_cells(
                                         # instance_level.n_rows > 0
             "n_pairs_total": int,       # all official_vs_local pairs we saw,
                                         # including ones with 0 instance rows
+            "n_joined_pairs": int,      # sum of instance_level.n_joined_pairs
+                                        # across all official_vs_local pairs.
+                                        # Pre-classifier-filter join count
+                                        # used to discriminate join_failed vs
+                                        # no_core_metrics.
             "n_packets": int,           # number of distinct packet json files
                                         # that targeted this (model, bench)
-            "status": str,              # "present" / "join_failed" / "missing"
+            "status": str,              # "present" / "join_failed" /
+                                        # "no_core_metrics" / "missing"
                                         # (missing == cell absent from result)
         }
 
-    The three statuses are the heatmap's main job: distinguishing cells
-    where we just don't have artifacts (``missing``) from cells where we
-    do but the instance-level join produced no rows (``join_failed`` —
-    investigate the converter / instance-id scheme), from cells with
-    real numbers (``present``).
+    The four statuses distinguish:
+
+    * ``present`` — data joined and at least one core metric scored.
+    * ``join_failed`` — ``n_joined_pairs == 0``: sample_hashes never
+      overlapped between official and local. **Upstream data problem**;
+      investigate converter / scenario / dataset version / HELM RNG.
+    * ``no_core_metrics`` — ``n_joined_pairs > 0`` but ``count == 0``:
+      data joined fine, but every row was filtered by ``classify_metric``
+      because no metric in the run had a prefix in
+      :data:`eval_audit.helm.metrics.METRIC_PREFIXES.CORE_PREFIXES`.
+      **Analyzer-side gap**: register the missing metric family.
+    * ``missing`` — cell absent from the result dict (no packet at all).
     """
     cells: dict[tuple[str, str], dict[str, Any]] = defaultdict(
         lambda: {
@@ -197,6 +210,7 @@ def _collect_cells(
             "count": 0,
             "n_pairs_with_data": 0,
             "n_pairs_total": 0,
+            "n_joined_pairs": 0,
             "n_packets": 0,
         }
     )
@@ -242,6 +256,13 @@ def _collect_cells(
             cells[key]["n_pairs_total"] += 1
 
             il = pair.get("instance_level") or {}
+            # Pre-classifier-filter join count. Older reports without
+            # this field default to 0; the resulting status defaults to
+            # the conservative join_failed case (no upgrade to
+            # no_core_metrics without explicit evidence). Re-render the
+            # packet to populate this field.
+            cells[key]["n_joined_pairs"] += int(il.get("n_joined_pairs", 0))
+
             avs = il.get("agreement_vs_abs_tol") or []
             if not avs:
                 # Pair was disabled or never executed — no rows.
@@ -253,8 +274,9 @@ def _collect_cells(
                 continue
             if best_row.get("count", 0) == 0:
                 # Pair ran but the official↔local instance join produced
-                # zero overlapping records. This is the "join_failed"
-                # signal; we count the pair but don't accumulate matches.
+                # zero overlapping records (or the classifier filtered
+                # everything out). The cell-level status code below
+                # disambiguates these via n_joined_pairs.
                 continue
 
             cells[key]["matched"] += best_row["matched"]
@@ -267,12 +289,18 @@ def _collect_cells(
         if cell["count"] > 0:
             ratio: float | None = cell["matched"] / cell["count"]
             status = "present"
+        elif cell["n_joined_pairs"] > 0:
+            ratio = None
+            # Sample_hashes overlapped between official and local, but
+            # every row was filtered by classify_metric. Means
+            # eval_audit.helm.metrics.CORE_PREFIXES is missing a
+            # metric family used by this benchmark.
+            status = "no_core_metrics"
         else:
             ratio = None
-            # We saw a packet for this cell but the join produced no
-            # instance-level rows. That's join_failed (distinct from
-            # the cell being absent entirely, which we represent as
-            # missing-from-the-result-dict).
+            # No overlap at the join key level — sample_hashes (or
+            # sample_ids in the fallback) never matched. Real upstream
+            # data problem.
             status = "join_failed"
         result[key] = {
             "matched": cell["matched"],
@@ -280,6 +308,7 @@ def _collect_cells(
             "agree_ratio": ratio,
             "n_pairs_with_data": cell["n_pairs_with_data"],
             "n_pairs_total": cell["n_pairs_total"],
+            "n_joined_pairs": cell["n_joined_pairs"],
             "n_packets": cell["n_packets"],
             "status": status,
         }
@@ -423,13 +452,15 @@ def _render_text_table(
     benchmarks: list[str],
     abs_tol: float,
 ) -> str:
-    """Render a fixed-width table with three cell states::
+    """Render a fixed-width table with four cell states::
 
         0.987    -> present (number is the agree_ratio at abs_tol)
-        join0/3  -> join_failed: 0 of 3 official_vs_local pairs joined
-                    (data exists on both sides but instance-id join
-                    produced 0 overlapping rows; investigate the
-                    converter / id scheme)
+        join0/3  -> join_failed: sample_hashes never overlapped between
+                    official and local. Upstream data problem.
+        nocore   -> no_core_metrics: data joined but every row was
+                    filtered by classify_metric. Analyzer-side gap;
+                    register the missing metric family in
+                    eval_audit/helm/metrics.py:CORE_PREFIXES.
         --       -> missing: no packet exists for this (model, bench)
     """
     lines: list[str] = [
@@ -438,7 +469,8 @@ def _render_text_table(
         "",
         "Cell legend:",
         "  0.987    instance-level agree_ratio at the chosen abs_tol",
-        "  join0/N  packet exists; 0 of N official_vs_local pairs joined",
+        "  join0/N  no hash overlap (upstream data problem)",
+        "  nocore   joined but no recognized core metrics (analyzer gap)",
         "  --       no packet for this (model, benchmark)",
         "",
     ]
@@ -455,22 +487,27 @@ def _render_text_table(
             cell = cells.get((m, bench))
             if cell is None:
                 row += f"{'--':>{col_w}}"
-            elif cell.get("status") == "present":
-                row += f"{cell['agree_ratio']:>{col_w}.3f}"
             else:
-                # join_failed
-                marker = f"join0/{cell.get('n_pairs_total', 0)}"
-                row += f"{marker:>{col_w}}"
+                status = cell.get("status")
+                if status == "present":
+                    row += f"{cell['agree_ratio']:>{col_w}.3f}"
+                elif status == "no_core_metrics":
+                    row += f"{'nocore':>{col_w}}"
+                else:
+                    marker = f"join0/{cell.get('n_pairs_total', 0)}"
+                    row += f"{marker:>{col_w}}"
         lines.append(row)
     lines.append("")
     # Coverage summary: how many cells in each state.
     n_present = sum(1 for c in cells.values() if c.get("status") == "present")
     n_join_failed = sum(1 for c in cells.values() if c.get("status") == "join_failed")
+    n_no_core = sum(1 for c in cells.values() if c.get("status") == "no_core_metrics")
     n_total = len(models) * len(benchmarks)
-    n_missing = n_total - n_present - n_join_failed
+    n_missing = n_total - n_present - n_join_failed - n_no_core
     lines.append(
         f"Coverage: {n_present} present / {n_join_failed} join_failed / "
-        f"{n_missing} missing  (of {n_total} cells)"
+        f"{n_no_core} no_core_metrics / {n_missing} missing  "
+        f"(of {n_total} cells)"
     )
     lines.append("")
     return "\n".join(lines)
@@ -527,6 +564,11 @@ def _render_heatmap(
     _JOIN_FAILED_COLOR = "#fff4d6"  # light amber — not red (it's not bad
                                      # data, just unavailable for analysis
                                      # until the converter mismatch is fixed)
+    _NO_CORE_METRICS_COLOR = "#e1bee7"  # light purple — distinct from amber
+                                         # so a reviewer can tell at a glance
+                                         # that the failure is analyzer-side
+                                         # (missing metric registration), not
+                                         # an upstream data problem.
     ax.set_facecolor(_MISSING_COLOR)
 
     # Draw each cell explicitly so the three statuses get distinct visuals.
@@ -554,9 +596,10 @@ def _render_heatmap(
                     fontsize=8, color=text_color, fontweight="bold",
                 )
             elif cell is not None and cell.get("status") == "join_failed":
-                # Light amber + diagonal hatching → "data exists but no
-                # join". Distinct from missing (solid gray) so a quick
-                # glance tells you which gap is fixable.
+                # Light amber + diagonal hatching → "no hash overlap"
+                # (upstream data problem). Distinct from missing
+                # (solid gray) so a quick glance tells you which gap
+                # is fixable.
                 rect = plt.Rectangle(
                     (j - 0.5, i - 0.5), 1, 1,
                     facecolor=_JOIN_FAILED_COLOR,
@@ -570,6 +613,24 @@ def _render_heatmap(
                     f"join 0/{n_total}",
                     ha="center", va="center",
                     fontsize=7, color="#7a4f00", fontweight="bold",
+                )
+            elif cell is not None and cell.get("status") == "no_core_metrics":
+                # Light purple + dotted hatching → "joined but no
+                # recognized core metrics". Analyzer-side gap; the fix
+                # is to extend CORE_PREFIXES, not to investigate the
+                # data.
+                rect = plt.Rectangle(
+                    (j - 0.5, i - 0.5), 1, 1,
+                    facecolor=_NO_CORE_METRICS_COLOR,
+                    edgecolor="white", linewidth=0.5,
+                    hatch="....",
+                )
+                ax.add_patch(rect)
+                ax.text(
+                    j, i,
+                    "no core",
+                    ha="center", va="center",
+                    fontsize=7, color="#4a148c", fontweight="bold",
                 )
             else:
                 # Missing: solid darker gray + dash. Drawn explicitly so
@@ -607,20 +668,24 @@ def _render_heatmap(
     cbar.set_label("agree_ratio", fontsize=8)
     cbar.ax.tick_params(labelsize=7)
 
-    # Three-state legend just below the title.
+    # Four-state legend just below the title.
     from matplotlib.patches import Patch
     legend_handles = [
         Patch(facecolor=cmap(cmap_norm(0.5)), edgecolor="white",
               label="present (agree_ratio shown)"),
         Patch(facecolor=_JOIN_FAILED_COLOR, edgecolor="white",
-              hatch="////", label="join_failed (data, but 0 instances joined)"),
+              hatch="////",
+              label="join_failed (no hash overlap; upstream)"),
+        Patch(facecolor=_NO_CORE_METRICS_COLOR, edgecolor="white",
+              hatch="....",
+              label="no_core_metrics (joined; classifier gap)"),
         Patch(facecolor=_MISSING_COLOR, edgecolor="white",
               label="missing (no packet for this cell)"),
     ]
     ax.legend(
         handles=legend_handles,
         loc="upper center", bbox_to_anchor=(0.5, -0.08),
-        ncol=3, fontsize=7, frameon=False,
+        ncol=2, fontsize=7, frameon=False,
     )
 
     sub = subtitle if subtitle is not None else (
