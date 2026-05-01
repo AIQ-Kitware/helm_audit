@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -36,6 +37,10 @@ from loguru import logger
 
 from eval_audit.infra.fs_publish import write_text_atomic
 from eval_audit.infra.logging import rich_link, setup_cli_logging
+from eval_audit.infra.report_layout import (
+    portable_repo_root_lines,
+    write_reproduce_script,
+)
 
 # Zero-overhead in normal runs; line_profiler swaps in a real profiler when
 # the LINE_PROFILE env var is set.
@@ -560,7 +565,6 @@ def _render_heatmap(
     # actual data clustered in the green band where small differences
     # are imperceptible. Override per-render via env vars
     # EVAL_AUDIT_HEATMAP_VMIN / EVAL_AUDIT_HEATMAP_VMAX.
-    import os
     cmap_vmin = float(os.environ.get("EVAL_AUDIT_HEATMAP_VMIN", "0.7"))
     cmap_vmax = float(os.environ.get("EVAL_AUDIT_HEATMAP_VMAX", "1.0"))
     cmap = plt.get_cmap("RdYlGn")
@@ -930,6 +934,90 @@ def _save_cell_data(
 
 
 @profile
+def _write_redraw_plots_script(
+    out_dir: Path,
+    analysis_root: Path,
+    abs_tol: float,
+    title: str,
+    per_metric: bool,
+    include_bookkeeping: bool,
+) -> Path:
+    """Drop a self-contained ``redraw_plots.sh`` next to the heatmap outputs.
+
+    The script re-invokes ``python -m eval_audit.reports.eee_only_heatmap``
+    with the same arguments that produced the current outputs, so an
+    iteration loop on plot styling (color scale, legend, layout) is
+    just: edit ``eval_audit/reports/eee_only_heatmap.py`` and rerun
+    ``bash redraw_plots.sh`` from the heatmap output dir.
+
+    Captures the colormap env vars
+    (``EVAL_AUDIT_HEATMAP_VMIN`` / ``EVAL_AUDIT_HEATMAP_VMAX``) at
+    generation time so re-renders use the same color scale unless the
+    user explicitly overrides via the same env vars.
+    """
+    import shlex
+
+    # Mirror the invocation actually used.
+    cmd_parts = [
+        "-m", "eval_audit.reports.eee_only_heatmap",
+        "--analysis-root", str(analysis_root),
+        # Resolve out-dir at script-run time so this script is portable
+        # across moves/copies of the heatmap dir (the script lives next
+        # to its own outputs).
+        "--out-dir", '"$SCRIPT_DIR"',
+        "--abs-tol", str(abs_tol),
+        "--title", title,
+    ]
+    if per_metric:
+        cmd_parts.append("--per-metric")
+    if include_bookkeeping:
+        cmd_parts.append("--include-bookkeeping")
+
+    # Quote every fixed arg; the "$SCRIPT_DIR" placeholder must remain
+    # unquoted so the shell expands it.
+    quoted_parts: list[str] = []
+    for part in cmd_parts:
+        if part == '"$SCRIPT_DIR"':
+            quoted_parts.append(part)
+        else:
+            quoted_parts.append(shlex.quote(part))
+    cmd_str = " ".join(quoted_parts)
+
+    # Capture colormap env vars so the regenerated PNG matches the
+    # original styling unless the user explicitly overrides them. The
+    # vars hold short numeric strings like "0.7" / "1.0"; the
+    # ``${VAR:-default}`` indirection means a value already in the
+    # environment at run time still wins.
+    captured_env_lines: list[str] = []
+    for var in ("EVAL_AUDIT_HEATMAP_VMIN", "EVAL_AUDIT_HEATMAP_VMAX"):
+        v = os.environ.get(var)
+        if v is not None:
+            quoted = shlex.quote(v)
+            captured_env_lines.append(
+                f'export {var}="${{{var}:-$(echo {quoted})}}"'
+            )
+
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "# Regenerate the heatmap PNG + per-metric drill-down PNGs from",
+        "# the per-packet core_metric_report.json files this output was",
+        "# computed from. Use this when iterating on plot styling: edit",
+        "# eval_audit/reports/eee_only_heatmap.py and rerun.",
+        "#",
+        "# Output dir is resolved as the directory this script lives in,",
+        "# so the script remains valid if you copy/move the heatmap dir.",
+        "# Override REPO_ROOT to point at a different eval_audit checkout.",
+        "# Override EVAL_AUDIT_HEATMAP_VMIN / EVAL_AUDIT_HEATMAP_VMAX to",
+        "# adjust the color scale (defaults captured from generation).",
+        *portable_repo_root_lines(),
+        *captured_env_lines,
+        'cd "$REPO_ROOT"',
+        f'PYTHONPATH="$REPO_ROOT" "$PYTHON_BIN" {cmd_str} "$@"',
+    ]
+    return write_reproduce_script(out_dir / "redraw_plots.sh", lines)
+
+
 def main(argv: list[str] | None = None) -> None:
     setup_cli_logging()
     parser = argparse.ArgumentParser(
@@ -1016,6 +1104,20 @@ def main(argv: list[str] | None = None) -> None:
         )
 
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Drop a redraw_plots.sh next to the outputs so iterating on plot
+    # styling is "edit code → rerun this script". Written before the
+    # rest of the renders so even a partial render leaves a regen
+    # script behind.
+    redraw_path = _write_redraw_plots_script(
+        out_dir=out_dir,
+        analysis_root=analysis_root,
+        abs_tol=abs_tol,
+        title=title,
+        per_metric=args.per_metric,
+        include_bookkeeping=args.include_bookkeeping,
+    )
+    logger.info(f"Wrote regen script: {rich_link(redraw_path)}")
 
     # Text table
     text = _render_text_table(cells, models, benchmarks, abs_tol)
