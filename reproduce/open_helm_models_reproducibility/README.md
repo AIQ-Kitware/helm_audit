@@ -16,13 +16,13 @@ full Universe → Stage-1 gates → manifest scope → selected funnel.
 Five open-weight model families that we have local audit reproductions
 for AND that have at least one matching public HELM row:
 
-| model | benchmarks with overlap | unique keys |
-|---|---:|---:|
-| `eleutherai/pythia-2.8b-v0` | 2 | 3 |
-| `eleutherai/pythia-6.9b` | 14 | 41 |
-| `lmsys/vicuna-7b-v1.3` | 14 | 44 |
-| `qwen/qwen2.5-7b-instruct-turbo` | 7 | 24 |
-| `openai/gpt-oss-20b` | 2 | 2 |
+| model                            | benchmarks with overlap | unique keys |
+| -------------------------------- | ----------------------: | ----------: |
+| `eleutherai/pythia-2.8b-v0`      |                       2 |           3 |
+| `eleutherai/pythia-6.9b`         |                      14 |          41 |
+| `lmsys/vicuna-7b-v1.3`           |                      14 |          44 |
+| `qwen/qwen2.5-7b-instruct-turbo` |                       7 |          24 |
+| `openai/gpt-oss-20b`             |                       2 |           2 |
 
 Total potential reproducibility cases: 39 (model, benchmark) pairs over
 19 unique benchmarks; ~114 unique logical run-spec keys.
