@@ -41,10 +41,24 @@ echo "  output dir:    $HEATMAP_OUT"
 echo "  abs_tol:       $ABS_TOL"
 echo
 
+# Per-metric drill-down (off by default — produces a tall heatmap with
+# one row per (benchmark, metric) so the eye can spot which scoring
+# metric is dragging a benchmark's overall agree_ratio. Set
+# PER_METRIC=1 to enable, plus INCLUDE_BOOKKEEPING=1 to keep the
+# always-1.0 token-count / finish_reason metrics if you want them.)
+extra_args=()
+if [ "${PER_METRIC:-0}" = "1" ]; then
+  extra_args+=("--per-metric")
+fi
+if [ "${INCLUDE_BOOKKEEPING:-0}" = "1" ]; then
+  extra_args+=("--include-bookkeeping")
+fi
+
 python3 -m eval_audit.reports.eee_only_heatmap \
   --analysis-root "$FROM_EEE_OUT" \
   --out-dir "$HEATMAP_OUT" \
-  --abs-tol "$ABS_TOL"
+  --abs-tol "$ABS_TOL" \
+  "${extra_args[@]}"
 
 echo
 echo "Outputs:"

@@ -26,9 +26,16 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+import safer
+from loguru import logger
+
+from eval_audit.infra.fs_publish import write_text_atomic
+from eval_audit.infra.logging import rich_link, setup_cli_logging
 
 # ---------------------------------------------------------------------------
 # Display label tables
@@ -80,6 +87,37 @@ _MODEL_ORDER: list[str] = [
     "eleutherai/pythia-6.9b",
     "lmsys/vicuna-7b-v1.3",
 ]
+
+
+# Bookkeeping metrics: HELM emits these per-instance fields with
+# every run, but they're deterministic counts/labels (input length,
+# token counts, finish reason, etc.) that are uniformly reproducible
+# and don't carry information about the *model's* score agreement.
+# Filtered out of the per-metric heatmap by default so the picture
+# focuses on actual scoring metrics where reproducibility variation
+# lives. Override with ``--include-bookkeeping``.
+_BOOKKEEPING_METRICS: frozenset[str] = frozenset({
+    "batch_size",
+    "finish_reason_endoftext",
+    "finish_reason_length",
+    "finish_reason_stop",
+    "finish_reason_unknown",
+    "inference_runtime",
+    "logprob",
+    "max_prob",
+    "num_bytes",
+    "num_completion_tokens",
+    "num_output_tokens",
+    "num_perplexity_tokens",
+    "num_prompt_tokens",
+    "num_references",
+    "num_train_instances",
+    "num_train_trials",
+    "prompt_truncated",
+    # tokenization metrics also noise-free for reproducibility purposes
+    "training_co2_cost",
+    "training_energy_cost",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +277,111 @@ def _collect_cells(
     return result
 
 
+def _collect_cells_per_metric(
+    analysis_root: Path,
+    abs_tol: float,
+    *,
+    include_bookkeeping: bool = False,
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """Like :func:`_collect_cells` but split by metric.
+
+    Returns a dict keyed on ``(model_id, benchmark_family, metric_name)``.
+    Each per-pair report's ``instance_level.per_metric_agreement`` provides
+    the per-metric breakdown — the same shape as ``agreement_vs_abs_tol``
+    but one curve per metric. We micro-average ``matched`` / ``count``
+    across all ``official_vs_local`` pairs that contributed to that
+    (model, benchmark, metric) cell.
+
+    ``include_bookkeeping=False`` (default) drops metrics in
+    :data:`_BOOKKEEPING_METRICS` — counts/labels that are
+    deterministic by construction and uniformly reproducible, so they
+    don't tell us anything about the model's score-level reproducibility.
+    Set to True to include them (e.g. to verify that bookkeeping really
+    is uniform).
+    """
+    cells: dict[tuple[str, str, str], dict[str, Any]] = defaultdict(
+        lambda: {
+            "matched": 0,
+            "count": 0,
+            "n_pairs_with_data": 0,
+            "n_pairs_total": 0,
+            "n_packets": 0,
+        }
+    )
+
+    report_paths = sorted(analysis_root.rglob("core_metric_report.json"))
+    if not report_paths:
+        return {}
+
+    for rp in report_paths:
+        try:
+            report = json.loads(rp.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+
+        # Same model/benchmark resolution as the parent function.
+        model_id: str | None = None
+        benchmark: str | None = None
+        for comp in (report.get("components") or []):
+            lrk = (comp.get("logical_run_key") or "").strip()
+            if not lrk:
+                continue
+            m = _model_from_component(comp)
+            if m:
+                model_id = m
+            b = _benchmark_family(lrk)
+            if b:
+                benchmark = b
+            if model_id and benchmark:
+                break
+
+        if not model_id or not benchmark:
+            continue
+
+        for pair in (report.get("pairs") or []):
+            if pair.get("comparison_kind") != "official_vs_local":
+                continue
+            il = pair.get("instance_level") or {}
+            per_metric = il.get("per_metric_agreement") or {}
+            if not per_metric:
+                # Pair has no per-metric breakdown — likely an empty
+                # join. Don't count it; the (model, benchmark) overall
+                # heatmap captures the "packet exists but join failed"
+                # signal already.
+                continue
+            for metric, avs in per_metric.items():
+                if not avs:
+                    continue
+                if not include_bookkeeping and metric in _BOOKKEEPING_METRICS:
+                    continue
+                key = (model_id, benchmark, metric)
+                cells[key]["n_pairs_total"] += 1
+                best_row = _find_tol_row(avs, abs_tol)
+                if best_row is None or best_row.get("count", 0) == 0:
+                    continue
+                cells[key]["matched"] += best_row["matched"]
+                cells[key]["count"] += best_row["count"]
+                cells[key]["n_pairs_with_data"] += 1
+
+    result: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for key, cell in cells.items():
+        if cell["count"] > 0:
+            ratio: float | None = cell["matched"] / cell["count"]
+            status = "present"
+        else:
+            ratio = None
+            status = "join_failed"
+        result[key] = {
+            "matched": cell["matched"],
+            "count": cell["count"],
+            "agree_ratio": ratio,
+            "n_pairs_with_data": cell["n_pairs_with_data"],
+            "n_pairs_total": cell["n_pairs_total"],
+            "status": status,
+        }
+    return result
+
+
 def _find_tol_row(
     avs: list[dict[str, Any]],
     target: float,
@@ -328,6 +471,16 @@ def _render_text_table(
 # ---------------------------------------------------------------------------
 
 
+def _atomic_savefig(fig, fpath: Path, **kwargs) -> Path:
+    """``fig.savefig`` to ``fpath`` atomically via safer (parent dirs auto-
+    created). Format is inferred from the suffix; defaults to png."""
+    fpath = Path(fpath)
+    suffix = fpath.suffix.lstrip(".") or "png"
+    with safer.open(fpath, "wb", make_parents=True) as fp:
+        fig.savefig(fp, format=suffix, **kwargs)
+    return fpath
+
+
 def _render_heatmap(
     cells: dict[tuple[str, str], dict[str, Any]],
     models: list[str],
@@ -335,7 +488,10 @@ def _render_heatmap(
     abs_tol: float,
     title: str,
     out_dir: Path,
-) -> None:
+    *,
+    out_filename: str = "reproducibility_heatmap.png",
+    subtitle: str | None = None,
+) -> Path:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -456,18 +612,153 @@ def _render_heatmap(
         ncol=3, fontsize=7, frameon=False,
     )
 
+    sub = subtitle if subtitle is not None else (
+        f"instance-level agree_ratio at abs_tol={abs_tol}"
+    )
     ax.set_title(
-        f"{title}\n"
-        f"instance-level agree_ratio at abs_tol={abs_tol}",
+        f"{title}\n{sub}",
         fontsize=9, pad=8,
     )
 
     plt.tight_layout()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    png_path = out_dir / "reproducibility_heatmap.png"
-    fig.savefig(png_path, dpi=150, bbox_inches="tight")
+    png_path = out_dir / out_filename
+    _atomic_savefig(fig, png_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"Heatmap saved: {png_path}")
+    logger.info(f"Wrote heatmap: {rich_link(png_path)}")
+    return png_path
+
+
+# ---------------------------------------------------------------------------
+# Per-metric heatmaps (one figure per metric)
+# ---------------------------------------------------------------------------
+
+
+_FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_filename_part(name: str) -> str:
+    """Sanitize a metric name for use in a filename. Replaces any run of
+    non ``[A-Za-z0-9._-]`` characters with a single underscore so things
+    like ``exact_match@5`` become ``exact_match_5``."""
+    cleaned = _FILENAME_SAFE_RE.sub("_", name).strip("_")
+    return cleaned or "metric"
+
+
+def _render_per_metric_heatmaps(
+    cells: dict[tuple[str, str, str], dict[str, Any]],
+    models: list[str],
+    benchmarks: list[str],
+    metrics_in_order: list[str],
+    abs_tol: float,
+    title: str,
+    out_dir: Path,
+) -> list[Path]:
+    """Emit one ``model × benchmark`` heatmap per metric.
+
+    Each plot has the same shape as the main heatmap (rows = benchmarks
+    in canonical order, columns = models), so the eye can flip between
+    metrics without re-learning the layout. Plots land in
+    ``<out_dir>/reproducibility_heatmap_per_metric/<metric>.png``.
+
+    Cells where the metric isn't present for a (model, benchmark) pair
+    render as the standard "missing" gray — the per-metric coverage is
+    naturally sparse (e.g. ``exact_match@5`` only on retrieval-style
+    benchmarks) and the gray makes that visible.
+    """
+    sub_dir = out_dir / "reproducibility_heatmap_per_metric"
+    sub_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for metric in metrics_in_order:
+        # Filter to (model, benchmark) cells for this one metric.
+        per_metric_cells: dict[tuple[str, str], dict[str, Any]] = {
+            (m, b): cell
+            for (m, b, met), cell in cells.items()
+            if met == metric
+        }
+        if not per_metric_cells:
+            continue
+        # Drop benchmarks that don't use this metric — otherwise every
+        # plot shows a wall of gray "missing" rows for benchmarks that
+        # never report it (e.g. bleu_1 only applies to NarrativeQA, so
+        # the BoolQ/MMLU/IMDB/... rows are pure noise on that plot).
+        benchmarks_for_metric = [
+            b for b in benchmarks
+            if any((m, b) in per_metric_cells for m in models)
+        ]
+        if not benchmarks_for_metric:
+            continue
+        png_path = _render_heatmap(
+            per_metric_cells,
+            models,
+            benchmarks_for_metric,
+            abs_tol,
+            f"{title} — metric: {metric}",
+            sub_dir,
+            out_filename=f"{_safe_filename_part(metric)}.png",
+            subtitle=(
+                f"instance-level agree_ratio at abs_tol={abs_tol} "
+                f"(metric: {metric})"
+            ),
+        )
+        written.append(png_path)
+    return written
+
+
+def _render_per_metric_text_table(
+    cells: dict[tuple[str, str, str], dict[str, Any]],
+    models: list[str],
+    rows_in_order: list[tuple[str, str]],
+    abs_tol: float,
+) -> str:
+    """Plain-text equivalent of the per-metric heatmap. Useful for
+    grepping ("which metric is the WikiFact 0.92 floor?") and for
+    pasting into commit messages / paper drafts.
+    """
+    lines: list[str] = [
+        f"Per-metric reproducibility heatmap (abs_tol={abs_tol})",
+        f"Instance-level agree_ratio per (benchmark, metric)",
+        "",
+        "Cell legend:",
+        "  0.987    instance-level agree_ratio at the chosen abs_tol",
+        "  join0/N  packet exists; 0 of N official_vs_local pairs joined",
+        "  --       this metric not present for that (model, benchmark)",
+        "",
+    ]
+    col_w = 14
+    label_w = 48
+    header = f"{'Benchmark / metric':<{label_w}}" + "".join(
+        f"{_MODEL_DISPLAY.get(m, m)[:col_w]:>{col_w}}" for m in models
+    )
+    lines.append(header)
+    lines.append("-" * len(header))
+    prev_bench = None
+    for bench, metric in rows_in_order:
+        # Group separator
+        if prev_bench is not None and bench != prev_bench:
+            lines.append("")
+        prev_bench = bench
+        label = f"{_BENCHMARK_DISPLAY.get(bench, bench)}: {metric}"
+        row = f"{label[:label_w]:<{label_w}}"
+        for m in models:
+            cell = cells.get((m, bench, metric))
+            if cell is None:
+                row += f"{'--':>{col_w}}"
+            elif cell.get("status") == "present":
+                row += f"{cell['agree_ratio']:>{col_w}.3f}"
+            else:
+                marker = f"join0/{cell.get('n_pairs_total', 0)}"
+                row += f"{marker:>{col_w}}"
+        lines.append(row)
+
+    n_present = sum(1 for c in cells.values() if c.get("status") == "present")
+    n_join_failed = sum(1 for c in cells.values() if c.get("status") == "join_failed")
+    lines.append("")
+    lines.append(
+        f"Coverage: {n_present} present / {n_join_failed} join_failed "
+        f"(of {len(cells)} (model, benchmark, metric) cells with data)"
+    )
+    lines.append("")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -517,8 +808,11 @@ def _save_cell_data(
                     }
                 )
     out_path = out_dir / "cell_data.json"
-    out_path.write_text(json.dumps({"abs_tol": abs_tol, "cells": rows}, indent=2) + "\n")
-    print(f"Cell data saved: {out_path}")
+    write_text_atomic(
+        out_path,
+        json.dumps({"abs_tol": abs_tol, "cells": rows}, indent=2) + "\n",
+    )
+    logger.info(f"Wrote cell data: {rich_link(out_path)}")
 
 
 # ---------------------------------------------------------------------------
@@ -527,6 +821,7 @@ def _save_cell_data(
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -552,6 +847,29 @@ def main(argv: list[str] | None = None) -> None:
         default="EEE-only reproducibility heatmap",
         help="Figure title.",
     )
+    parser.add_argument(
+        "--per-metric",
+        action="store_true",
+        default=False,
+        help=(
+            "Also emit a per-(benchmark, metric) heatmap. Drills down "
+            "from the one-number-per-cell view to show which scoring "
+            "metric is responsible for a benchmark's agree_ratio. The "
+            "regular benchmark-level heatmap is still written."
+        ),
+    )
+    parser.add_argument(
+        "--include-bookkeeping",
+        action="store_true",
+        default=False,
+        help=(
+            "Include bookkeeping metrics (token counts, finish_reason, "
+            "inference_runtime, etc.) in the per-metric heatmap. Default "
+            "off because these are deterministic and uniformly "
+            "reproducible — they bury the interesting score-level "
+            "metrics under a sea of 1.0 cells."
+        ),
+    )
     args = parser.parse_args(argv)
 
     analysis_root = Path(args.analysis_root).expanduser().resolve()
@@ -562,9 +880,12 @@ def main(argv: list[str] | None = None) -> None:
     if not analysis_root.exists():
         raise SystemExit(f"FAIL: analysis-root does not exist: {analysis_root}")
 
-    print(f"Collecting cell data from {analysis_root} (abs_tol={abs_tol}) ...")
+    logger.info(
+        f"Collecting cell data from {rich_link(analysis_root)} "
+        f"(abs_tol={abs_tol}) ..."
+    )
     cells = _collect_cells(analysis_root, abs_tol)
-    print(f"  found {len(cells)} (model, benchmark) cells with data")
+    logger.info(f"  found {len(cells)} (model, benchmark) cells with data")
 
     # Determine which models / benchmarks appear in the data
     found_models = {m for (m, _) in cells}
@@ -589,9 +910,9 @@ def main(argv: list[str] | None = None) -> None:
     # Text table
     text = _render_text_table(cells, models, benchmarks, abs_tol)
     txt_path = out_dir / "reproducibility_heatmap.txt"
-    txt_path.write_text(text)
+    write_text_atomic(txt_path, text)
     print(text)
-    print(f"Text table saved: {txt_path}")
+    logger.info(f"Wrote text table: {rich_link(txt_path)}")
 
     # JSON cell data
     _save_cell_data(cells, models, benchmarks, abs_tol, out_dir)
@@ -600,7 +921,88 @@ def main(argv: list[str] | None = None) -> None:
     try:
         _render_heatmap(cells, models, benchmarks, abs_tol, title, out_dir)
     except ImportError as exc:
-        print(f"WARNING: matplotlib not available ({exc}); skipping PNG output.")
+        logger.warning(
+            f"matplotlib not available ({exc}); skipping PNG output."
+        )
+
+    # Optional per-metric drill-down: one figure per metric, each shaped
+    # like the main heatmap (rows = benchmarks, columns = models). The
+    # text table and JSON sidecar still list everything in one document
+    # so downstream scripts can grep/sort without walking the subdir.
+    if args.per_metric:
+        logger.info(
+            f"Collecting per-(model, benchmark, metric) cells "
+            f"(abs_tol={abs_tol}, include_bookkeeping={args.include_bookkeeping}) ..."
+        )
+        per_metric_cells = _collect_cells_per_metric(
+            analysis_root, abs_tol,
+            include_bookkeeping=args.include_bookkeeping,
+        )
+        logger.info(f"  found {len(per_metric_cells)} cells")
+
+        # Row order for the combined text/JSON: walk benchmarks in
+        # canonical order, within each benchmark sort metrics alphabetically.
+        rows_in_order: list[tuple[str, str]] = []
+        for bench in benchmarks:
+            metrics_for_bench = sorted({
+                metric for (_m, b, metric) in per_metric_cells if b == bench
+            })
+            rows_in_order.extend((bench, metric) for metric in metrics_for_bench)
+
+        # Plot order: alphabetical by metric name. One figure per metric,
+        # so cross-metric comparison is "open the next file" not "scroll
+        # the same figure."
+        metrics_in_order = sorted({
+            metric for (_m, _b, metric) in per_metric_cells
+        })
+
+        if not rows_in_order:
+            logger.warning("no per-metric cells found; skipping per-metric output.")
+        else:
+            text_pm = _render_per_metric_text_table(
+                per_metric_cells, models, rows_in_order, abs_tol,
+            )
+            txt_pm = out_dir / "reproducibility_heatmap_per_metric.txt"
+            write_text_atomic(txt_pm, text_pm)
+            print(text_pm)
+            logger.info(f"Wrote per-metric text table: {rich_link(txt_pm)}")
+
+            # Per-metric JSON sidecar — flat list of (model, benchmark,
+            # metric, agree_ratio, status, ...) so downstream scripts can
+            # filter/sort without re-walking the per-pair reports.
+            json_pm = out_dir / "cell_data_per_metric.json"
+            pm_rows = [
+                {
+                    "model": m,
+                    "benchmark": b,
+                    "metric": metric,
+                    "abs_tol": abs_tol,
+                    **per_metric_cells[(m, b, metric)],
+                }
+                for (b, metric) in rows_in_order
+                for m in models
+                if (m, b, metric) in per_metric_cells
+            ]
+            write_text_atomic(
+                json_pm,
+                json.dumps({"abs_tol": abs_tol, "cells": pm_rows}, indent=2) + "\n",
+            )
+            logger.info(f"Wrote per-metric cell data: {rich_link(json_pm)}")
+
+            try:
+                written = _render_per_metric_heatmaps(
+                    per_metric_cells, models, benchmarks, metrics_in_order,
+                    abs_tol, title, out_dir,
+                )
+                logger.info(
+                    f"Wrote {len(written)} per-metric heatmap(s) under "
+                    f"{rich_link(out_dir / 'reproducibility_heatmap_per_metric')}"
+                )
+            except ImportError as exc:
+                logger.warning(
+                    f"matplotlib not available ({exc}); "
+                    "skipping per-metric PNG output."
+                )
 
 
 if __name__ == "__main__":
