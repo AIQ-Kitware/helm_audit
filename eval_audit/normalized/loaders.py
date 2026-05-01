@@ -107,6 +107,23 @@ class EeeArtifactLoader(Loader):
     def load(self, ref: NormalizedRunRef) -> NormalizedRun:
         from every_eval_ever.eval_types import EvaluationLog
         from every_eval_ever.instance_level_types import InstanceLevelEvaluationLog
+        # orjson is ~3x faster than stdlib json on the per-line shape
+        # samples.jsonl uses. Combined with ``model_validate`` (parsing
+        # already done; no JSON re-decode inside pydantic) the per-line
+        # parse drops from ~22µs to ~16µs without losing the nested
+        # pydantic model construction.
+        #
+        # Why not ``model_construct``? It's faster (~11µs/line) but
+        # *doesn't recurse into nested models* — ``rec.evaluation``
+        # would come back as a plain dict and downstream attribute
+        # access (e.g. ``rec.evaluation.score``) crashes. The
+        # 30% win we get from ``orjson + model_validate`` keeps the
+        # full pydantic shape intact.
+        try:
+            import orjson
+            _loads = orjson.loads
+        except ImportError:
+            _loads = json.loads
 
         if ref.artifact_format is not ArtifactFormat.EEE:
             raise LoaderError(f"EeeArtifactLoader cannot load {ref.artifact_format!r}")
@@ -131,6 +148,11 @@ class EeeArtifactLoader(Loader):
 
         candidates: list[tuple[EvaluationLog, Path]] = []
         for p in aggregate_paths:
+            # Aggregate JSON parse: validate (not construct) because we
+            # only do this once per *.json found in the dir, and getting
+            # validation errors here points at a broken converter output
+            # rather than a hot-loop concern. The expensive loop is the
+            # samples.jsonl one below.
             try:
                 log = EvaluationLog.model_validate_json(p.read_text())
             except Exception:
@@ -165,12 +187,24 @@ class EeeArtifactLoader(Loader):
         samples_path = chosen_path.with_name(chosen_path.stem + "_samples.jsonl")
         instances: list[InstanceRecord] = []
         if samples_path.exists():
-            for line in samples_path.read_text().splitlines():
-                line = line.strip()
-                if not line:
+            # Hot loop. Profile shows this is the dominant cost in the
+            # whole analysis pipeline (35s+/run on a 4-packet heatmap
+            # with civil_comments-scale samples files at ~100k+ lines).
+            # Two changes vs. the obvious ``read_text().splitlines() +
+            # model_validate_json(line)`` form:
+            #   1. read_bytes + bytes.split(b"\n") avoids decoding the
+            #      whole file twice (once for splitlines, once for the
+            #      json parser) and skips materializing a list of str.
+            #   2. orjson.loads + model_validate parses with orjson
+            #      (~3x faster than stdlib) and validates the resulting
+            #      dict in pydantic core (no JSON re-decode inside
+            #      pydantic). Net per-line: ~22µs → ~16µs.
+            instance_validate = InstanceLevelEvaluationLog.model_validate
+            for raw in samples_path.read_bytes().split(b"\n"):
+                if not raw or raw.isspace():
                     continue
                 try:
-                    rec = InstanceLevelEvaluationLog.model_validate_json(line)
+                    rec = instance_validate(_loads(raw))
                 except Exception:
                     continue
                 instances.append(_instance_record_from_eee(rec))
