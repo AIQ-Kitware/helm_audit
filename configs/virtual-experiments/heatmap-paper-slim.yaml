@@ -1,0 +1,67 @@
+schema_version: 1
+name: heatmap-paper-slim
+description: >
+  Narrow slice of the open-HELM-models virtual experiment that only
+  composes the 4 paper-target models × 14 heatmap benchmarks. Same
+  index sources and stage-1 filter inventory as
+  open-helm-models-reproducibility.yaml; the difference is just a
+  tighter scope.models + an explicit scope.benchmarks list.
+
+  Use this manifest when you only want to refresh the heatmap and
+  don't need the full Qwen 2.5 / gpt-oss aggregate-summary surface.
+  Drop-in replacement at the wrapper layer:
+
+    MANIFEST_FPATH=configs/virtual-experiments/heatmap-paper-slim.yaml \
+      ./reproduce/open_helm_models_reproducibility/compose.sh
+    MANIFEST_FPATH=configs/virtual-experiments/heatmap-paper-slim.yaml \
+      ./reproduce/open_helm_models_reproducibility/build_summary.sh
+
+scope:
+  # 4 heatmap-paper model columns. Falcon-7B local artifacts will land
+  # under tiiuae/falcon-7b once the audit-falcon-7b-helm-grid HELM run
+  # is fully synced; until then the regex still matches the partial
+  # rows that have been indexed.
+  models:
+    - "regex:^eleutherai/pythia-(2\\.8b-v0|6\\.9b)$"
+    - "regex:^lmsys/vicuna-7b-v1\\.3$"
+    - "regex:^tiiuae/falcon-7b$"
+
+  # Paper's 14 benchmark families. Note the typo'd
+  # ``sythetic_reasoning_natural`` — preserved here because that's the
+  # logical key the heatmap uses internally; the run-dir on disk is
+  # the correctly-spelled ``synthetic_reasoning_natural``.
+  benchmarks:
+    - boolq
+    - civil_comments
+    - entity_data_imputation
+    - entity_matching
+    - gsm
+    - imdb
+    - lsat_qa
+    - mmlu
+    - narrative_qa
+    - quac
+    - synthetic_reasoning
+    - synthetic_reasoning_natural
+    - truthful_qa
+    - wikifact
+
+sources:
+  - kind: audit_index
+    fpath: /data/crfm-helm-audit-store/indexes/audit_results_index.csv
+
+  - kind: official_public_index
+    fpath: /data/crfm-helm-audit-store/indexes/official_public_index.csv
+    pre_filter:
+      kind: helm_stage1
+      inventory_fpath: /data/crfm-helm-audit-store/analysis/filter_inventory.json
+
+  - kind: external_eee
+    components: []
+
+output:
+  # Distinct from open-helm-models-reproducibility's output root so the
+  # paper-slim compose doesn't stomp on the broader experiment's
+  # artifacts (and vice versa). Re-running this manifest is idempotent
+  # and won't overwrite the wider compose's results.
+  root: /data/crfm-helm-audit-store/virtual-experiments/heatmap-paper-slim
