@@ -72,11 +72,15 @@ python -c "import helm; print(f'# helm import path: {helm.__file__}')" \
 LIVE_LOCAL_OUT="$OUT_DIR/live-current-vs-local.txt"
 echo "[em-helm-mwe] live (current venv)  vs  LOCAL scenario_state"
 if [[ -f "$LOCAL_SS" ]]; then
+    # Mismatch verdicts return exit 1 from the python script; that's a
+    # valid finding here, not a script error. Don't abort the orchestrator.
+    set +e
     python "$RUN_PY" \
         --scenario-output-path "$SCENARIO_CACHE" \
         --scenario-state "$LOCAL_SS" \
         --label local \
         | tee "$LIVE_LOCAL_OUT"
+    set -e
 else
     echo "  skipped (LOCAL_SS missing)"
 fi
@@ -88,11 +92,13 @@ echo
 LIVE_OFFICIAL_OUT="$OUT_DIR/live-current-vs-official.txt"
 echo "[em-helm-mwe] live (current venv)  vs  OFFICIAL scenario_state"
 if [[ -f "$OFFICIAL_SS" ]]; then
+    set +e
     python "$RUN_PY" \
         --scenario-output-path "$SCENARIO_CACHE" \
         --scenario-state "$OFFICIAL_SS" \
         --label official \
         | tee "$LIVE_OFFICIAL_OUT"
+    set -e
 else
     echo "  skipped (OFFICIAL_SS missing)"
 fi
@@ -135,11 +141,13 @@ mkdir -p "$SCENARIO_CACHE_OLD"
 LIVE_OLD_OFFICIAL_OUT="$OUT_DIR/live-helm0.3.0-vs-official.txt"
 echo "[em-helm-mwe] live (v0.3.0 venv)  vs  OFFICIAL scenario_state"
 if [[ -f "$OFFICIAL_SS" ]]; then
+    set +e
     "$HELM_OLD_VENV/bin/python" "$RUN_PY" \
         --scenario-output-path "$SCENARIO_CACHE_OLD" \
         --scenario-state "$OFFICIAL_SS" \
         --label official \
         | tee "$LIVE_OLD_OFFICIAL_OUT"
+    set -e
 else
     echo "  skipped (OFFICIAL_SS missing)"
 fi
@@ -148,11 +156,13 @@ echo
 LIVE_OLD_LOCAL_OUT="$OUT_DIR/live-helm0.3.0-vs-local.txt"
 echo "[em-helm-mwe] live (v0.3.0 venv)  vs  LOCAL scenario_state"
 if [[ -f "$LOCAL_SS" ]]; then
+    set +e
     "$HELM_OLD_VENV/bin/python" "$RUN_PY" \
         --scenario-output-path "$SCENARIO_CACHE_OLD" \
         --scenario-state "$LOCAL_SS" \
         --label local \
         | tee "$LIVE_OLD_LOCAL_OUT"
+    set -e
 else
     echo "  skipped (LOCAL_SS missing)"
 fi
