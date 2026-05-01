@@ -110,10 +110,27 @@ def packet_sample_artifact_name(comparison_id: str) -> str:
 
 
 def packet_sample_artifact_names(packet: dict[str, Any]) -> list[str]:
+    """Per-pair sample artifact filenames for *enabled* comparisons in a packet.
+
+    Disabled comparisons (e.g. ones the planner marked
+    ``enabled: false`` for "ambiguous official candidates", "missing
+    local component", etc.) never produce a per-pair sample artifact —
+    the renderer skips them. Including their would-be filename here was
+    a long-standing bug: ``_repair_prioritized_example_reports`` saw
+    them as "missing" and triggered a full ``rebuild_core_report_main``
+    re-render on every aggregate-summary run, which then produced the
+    same set of artifacts (still skipping the disabled comparisons),
+    so the next run repeated the cycle.
+
+    Filter by ``enabled`` (defaulting to True for back-compat with
+    older packet schemas that didn't carry the flag) so the required-
+    artifact set matches what the renderer actually emits.
+    """
     return [
         packet_sample_artifact_name(str(comparison.get("comparison_id")))
         for comparison in packet.get("comparisons", [])
         if comparison.get("comparison_id")
+        and comparison.get("enabled", True)
     ]
 
 
