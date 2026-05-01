@@ -214,54 +214,58 @@ class EeeArtifactLoader(Loader):
             _trust = os.environ.get(
                 "EVAL_AUDIT_TRUST_EEE_SCHEMA", ""
             ).strip().lower() in {"1", "true", "yes"}
-            # Read the file once outside the branches so the profile
-            # attributes disk I/O to its own line and the split() call
-            # to a separate line. Previously each branch had
-            # ``samples_path.read_bytes().split(b"\n")`` collapsed onto
-            # the for-loop line, which conflated three operations.
-            samples_bytes = samples_path.read_bytes()
-            samples_lines = samples_bytes.split(b"\n")
+            # Iterate the file object directly instead of
+            # ``read_bytes().split(b"\n")``: the bulk read +
+            # split materialized a 12.5M-entry bytes list before the
+            # loop even started (~44s on the previous profile).
+            # ``for raw in f`` returns one line at a time (with
+            # trailing ``\n``), keeps memory flat, and orjson tolerates
+            # the trailing newline.
+            #
+            # Positional InstanceRecord construction below — kwargs
+            # were costing ~200ns/instance × 12.5M ≈ 2.5s of pure
+            # kwargs-dict allocation. Field order matches the
+            # @dataclass declaration in eval_audit.normalized.model.
             if _trust:
-                for raw in samples_lines:
-                    if not raw or raw.isspace():
-                        continue
-                    try:
-                        d = _loads(raw)
-                        ev = d["evaluation"]
-                        # Pre-extract every dict field so the profile
-                        # can attribute the dict lookups independently
-                        # from the InstanceRecord construction.
-                        sample_id = d["sample_id"]
-                        sample_hash = d.get("sample_hash")
-                        metric_id = d.get("evaluation_result_id") or d.get("evaluation_name")
-                        score = float(ev["score"])
-                        is_correct = ev.get("is_correct")
-                        rec = InstanceRecord(
-                            sample_id=sample_id,
-                            sample_hash=sample_hash,
-                            metric_id=metric_id,
-                            metric_kind=None,
-                            score=score,
-                            is_correct=is_correct,
-                            record=None,
-                        )
-                        instances.append(rec)
-                    except Exception:
-                        continue
+                with samples_path.open("rb") as samples_fh:
+                    for raw in samples_fh:
+                        if not raw.strip():
+                            continue
+                        try:
+                            d = _loads(raw)
+                            ev = d["evaluation"]
+                            sample_id = d["sample_id"]
+                            sample_hash = d.get("sample_hash")
+                            metric_id = d.get("evaluation_result_id") or d.get("evaluation_name")
+                            score = float(ev["score"])
+                            is_correct = ev.get("is_correct")
+                            rec = InstanceRecord(
+                                sample_id,
+                                sample_hash,
+                                metric_id,
+                                None,           # metric_kind
+                                score,
+                                is_correct,
+                                None,           # record (dead-weight; trust mode)
+                            )
+                            instances.append(rec)
+                        except Exception:
+                            continue
             else:
                 instance_validate = InstanceLevelEvaluationLog.model_validate
-                for raw in samples_lines:
-                    if not raw or raw.isspace():
-                        continue
-                    try:
-                        # Split parse from validate so the profile
-                        # shows orjson cost independently from the
-                        # pydantic schema check.
-                        parsed = _loads(raw)
-                        rec = instance_validate(parsed)
-                    except Exception:
-                        continue
-                    instances.append(_instance_record_from_eee(rec))
+                with samples_path.open("rb") as samples_fh:
+                    for raw in samples_fh:
+                        if not raw.strip():
+                            continue
+                        try:
+                            # Split parse from validate so the profile
+                            # shows orjson cost independently from the
+                            # pydantic schema check.
+                            parsed = _loads(raw)
+                            rec = instance_validate(parsed)
+                        except Exception:
+                            continue
+                        instances.append(_instance_record_from_eee(rec))
 
         # HELM-origin EEE artifacts use the EEE aggregate as the run-level
         # source, but report drilldown still needs stable HELM sample ids.
