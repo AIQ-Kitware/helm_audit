@@ -38,7 +38,13 @@ from eval_audit.reports.core_packet_summary import (
 from eval_audit.utils.numeric import nested_get
 from eval_audit.utils.sankey import emit_sankey_artifacts
 from eval_audit.utils import sankey_builder
-from eval_audit.workflows.rebuild_core_report import main as rebuild_core_report_main
+# NOTE: ``rebuild_core_report.main`` used to be invoked from
+# ``_repair_prioritized_example_reports`` to regenerate per-pair reports
+# whose artifacts were missing. That layering violation is gone — the
+# aggregate-summary phase no longer regenerates per-pair output. If you
+# need to import the analyze-step main from here for a future use case,
+# put the import back, but think twice: aggregate-summary should be a
+# pure read-pass over already-rendered analyze artifacts.
 
 from loguru import logger
 
@@ -2672,6 +2678,48 @@ def _repair_prioritized_example_reports(
     summary: dict[str, Any],
     index_fpath: Path,
 ) -> list[dict[str, Any]]:
+    """Verify each prioritized example's report dir; **do not regenerate**.
+
+    History
+    -------
+    This function used to actually *repair* — it would shell back into
+    ``rebuild_core_report_main(argv)`` to re-render any per-pair report
+    whose dir was missing one of the artifact filenames listed by
+    ``prioritized_example_artifact_names``. That was always a layering
+    violation: aggregate-summary should be a pure read-pass over
+    artifacts the analyze step (rebuild_core_report) produced. If a
+    per-pair report is incomplete, that's an analyze-step bug, not
+    something the summary phase should hide by silently re-running the
+    same code on the fly. Worse, the disabled-comparison and cosmetic
+    artifact patterns made the "missing" check fire on every run, so
+    the summary did a full re-render of every prioritized example every
+    invocation — ``line_profiler`` showed this consuming 98% of
+    ``_render_scope_summary`` (~15 s/example × 6 examples = ~88 s of
+    a 88 s run for the EEE-only heatmap).
+
+    Current behavior
+    ----------------
+    Iterate the prioritized examples, classify each:
+
+      - ``already_ok``: report dir exists and the expected artifact
+        list matches what's on disk. Nothing to do.
+      - ``incomplete``: report dir exists but some expected artifacts
+        are absent. Recorded with the missing list so downstream
+        rendering and the README can flag it. **No regeneration.**
+      - ``missing_report_dir``: the report dir referenced by the
+        prioritized summary doesn't exist on disk. Recorded as such.
+
+    The publish step (`_publish_prioritized_examples_tree`) already
+    tolerates missing artifacts — it ``if exists()``-guards every
+    ``symlink_to`` call. So skipping regeneration here doesn't break
+    the navigation tree; it just leaves missing files genuinely
+    missing instead of papering over them.
+
+    The right place to fix incompleteness is the analyze step. If the
+    user wants to regenerate a specific per-pair report, the report
+    dir already contains a ``redraw_plots.sh`` and ``reproduce.sh`` for
+    exactly that purpose.
+    """
     repairs: list[dict[str, Any]] = []
     for example_row in _iter_prioritized_example_rows(summary):
         report_dir_text = _clean_optional_text(example_row.get("report_dir"))
@@ -2690,34 +2738,18 @@ def _repair_prioritized_example_reports(
             )
             continue
         missing = _prioritized_example_missing_artifacts(report_dir)
-        if not missing:
-            repairs.append(
-                {
-                    "report_dir": str(report_dir),
-                    "run_entry": run_entry,
-                    "status": "already_ok",
-                    "missing_artifacts": [],
-                }
+        if missing:
+            logger.warning(
+                "prioritized example {}: incomplete (missing artifacts: {}). "
+                "Run report_dir/redraw_plots.sh or reproduce.sh to regenerate.",
+                report_dir, missing,
             )
-            continue
-        argv = [
-            "--run-entry", run_entry,
-            "--report-dpath", str(report_dir),
-            "--index-fpath", str(index_fpath),
-        ]
-        experiment_name = _clean_optional_text(example_row.get("experiment_name"))
-        if experiment_name:
-            argv.extend(["--experiment-name", experiment_name])
-        if bool(example_row.get("analysis_single_run")):
-            argv.append("--allow-single-repeat")
-        rebuild_core_report_main(argv)
-        remaining = _prioritized_example_missing_artifacts(report_dir)
         repairs.append(
             {
                 "report_dir": str(report_dir),
                 "run_entry": run_entry,
-                "status": "repaired" if not remaining else "repair_incomplete",
-                "missing_artifacts": remaining,
+                "status": "already_ok" if not missing else "incomplete",
+                "missing_artifacts": missing,
             }
         )
     return repairs
