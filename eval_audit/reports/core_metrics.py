@@ -1366,13 +1366,24 @@ def _single_run_core_stat_index(
     run_path: str,
     *,
     component: dict[str, Any] | None = None,
+    component_cache: dict[str, NormalizedRun] | None = None,
 ) -> dict[str, _SimpleStatRow]:
     """Run-level core metric means keyed by stable metric handle.
 
     Stage-4: backed by ``ncompare.joined_metric_means`` over a normalized
     run instead of ``HelmRunAnalysis.stat_index``.
+
+    ``component_cache`` is the per-packet NormalizedRun memo populated by
+    ``_build_pair``. Threading it here avoids re-loading every official +
+    local artifact from disk a second time when the runlevel-table
+    writer asks for the per-run core stats — those artifacts were
+    already parsed for the agreement-curve computation.
     """
-    nrun = _load_component_run(component) if component is not None else _load_normalized(run_path)
+    nrun = (
+        _load_component_run(component, cache=component_cache)
+        if component is not None
+        else _load_normalized(run_path)
+    )
     out: dict[str, _SimpleStatRow] = {}
     for key in ncompare.core_metric_keys(nrun):
         means = {
@@ -1685,6 +1696,8 @@ def _write_comparison_runlevel_table(
     stamp: str,
     comparisons: list[dict[str, Any]],
     component_lookup: dict[str, dict[str, Any]],
+    *,
+    component_cache: dict[str, NormalizedRun] | None = None,
 ) -> tuple[Path, Path | None]:
     rows = []
     for comparison in comparisons:
@@ -1693,8 +1706,16 @@ def _write_comparison_runlevel_table(
             continue
         left_component = component_lookup[component_ids[0]]
         right_component = component_lookup[component_ids[1]]
-        idx_left = _single_run_core_stat_index(left_component['run_path'], component=left_component)
-        idx_right = _single_run_core_stat_index(right_component['run_path'], component=right_component)
+        idx_left = _single_run_core_stat_index(
+            left_component['run_path'],
+            component=left_component,
+            component_cache=component_cache,
+        )
+        idx_right = _single_run_core_stat_index(
+            right_component['run_path'],
+            component=right_component,
+            component_cache=component_cache,
+        )
         for key in sorted(set(idx_left) & set(idx_right)):
             left = idx_left[key]
             right = idx_right[key]
@@ -2464,6 +2485,7 @@ def main(argv: list[str] | None = None) -> None:
             stamp,
             comparisons,
             component_lookup,
+            component_cache=component_cache,
         )
         report = kwutil.Json.ensure_serializable(_strip_private(report))
         write_text_atomic(json_fpath, json.dumps(report, indent=2))
