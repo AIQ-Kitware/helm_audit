@@ -1,0 +1,35 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{xspace}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage[colorlinks=true]{hyperref}
+\usepackage{url}
+\usepackage{xurl}
+
+\lstdefinestyle{shell}{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+}
+
+\newcommand{\eee}{\textit{Every Eval Ever}\xspace}
+\newcommand{\eeeshort}{\textsc{EEE}\xspace}
+
+\begin{document}
+
+\input{case_study_3}
+
+\appendix
+\input{case_study_3_appendix}
+
+\end{document}

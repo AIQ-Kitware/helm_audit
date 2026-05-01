@@ -1,0 +1,103 @@
+\subsection{Case Study 3: HELM Instance-level Evals}
+\label{sec:cs3-helm}
+
+We audited a slim slice of the public HELM corpus by reproducing three
+  open-weight model families (Pythia~6.9B, Vicuna~7B v1.3, Falcon~7B) on
+  fourteen HELM Classic v0.3.0 benchmarks, totalling 42 \mbox{(model,
+  benchmark)} cells.
+The audit ran end-to-end through the \eee{} schema with the strict EEE-only
+  paper-validity guard active (\texttt{EVAL\_AUDIT\_EEE\_STRICT=1}); a runtime
+  audit hook installed via \texttt{sitecustomize} into every child Python
+  process recorded \emph{zero} HELM-shaped file opens across 88 worker
+  subprocesses and 205{,}798 total \texttt{open}/\texttt{os.open} events,
+  empirically validating that the published numbers were produced from EEE
+  artifacts alone.
+On the resulting heatmap, 39 of 42 cells have a micro-averaged instance-level
+  agree\_ratio in $[0.788, 1.000]$ at \texttt{abs\_tol=0}; the remaining 3 are
+  the \texttt{entity\_matching} cells across all three models, which produce
+  zero \texttt{sample\_hash} overlap between official and local sides.
+We use ``micro-averaged'' throughout this case study to mean the cell-level
+  number is computed as $\sum \text{matched} / \sum \text{count}$ across all
+  (sample, metric) rows in the cell, rather than as the unweighted mean of
+  per-metric agree\_ratios; this matters for two of the three failure modes
+  below, which the micro-average obscures unless the reader inspects the
+  per-metric breakdown alongside the cell value.
+
+The headline finding is that three independent reproducibility-failure
+  mechanisms surface naturally in the cell distribution, and \eee{}'s
+  content-addressed \texttt{sample\_hash} (sha256 of the rendered prompt +
+  correct reference) detects each of them while HELM's positional \texttt{id<i>}
+  comparison would silently miss two of the three.
+First, the \texttt{entity\_matching} \texttt{join\_failed} cells are caused by
+  \texttt{pd.merge} producing different row orderings between pandas~2.0.x (HELM
+  Classic v0.3.0 era) and pandas~2.2+ (current) on byte-identical input CSVs;
+  the same recipe and same \texttt{np.random.seed(0)} downsample at
+  \texttt{runner.py:downsample\_eval\_instances} therefore selects different
+  concrete examples under different pandas versions, and HELM's
+  \texttt{with\_instance\_ids} (which assigns identifiers positionally over the
+  merged list) silently rebinds id~$\leftrightarrow$~content.
+We close this loop empirically by reproducing the official v0.3.0
+  \texttt{scenario\_state.json} byte-for-byte from a \texttt{crfm-helm==0.3.0 +
+  pandas==2.0.3 + numpy==1.23.5} venv, and reproducing our local audit
+  \texttt{scenario\_state.json} byte-for-byte from the current venv
+  (pandas~2.3.3, numpy~2.2.6).
+Second, the \texttt{synthetic\_reasoning\_natural~$\times$~Pythia-6.9B} cell at
+  $0.788$ is the artifact of HELM's automatic deployment routing on the official
+  side: with \texttt{model\_deployment=None}, HELM v0.3.0's
+  \texttt{auto\_client.py} dispatches \texttt{eleutherai/*} models to
+  Together.ai's hosted API, where Pythia at temperature=0 emits a leading
+  \texttt{`\textbackslash n'} as its greedy first token; HELM's
+  \texttt{stop\_sequences=[`\textbackslash n']} then trims
+  \texttt{completion.text} to empty before scoring, and the resulting
+  HELM-published score is $0\%$ accuracy on every one of the 1000 evaluation
+  instances.
+Our local re-run, served via HuggingFace transformers, produces a greedy first
+  token of \texttt{`The'}, captures the model's actual answer, and recovers
+  $\approx 20\%$ accuracy on the same task; the $0\%$ figure on the public HELM
+  Classic v0.3.0 leaderboard\footnote{
+  \url{https://crfm.stanford.edu/helm/classic/latest/\#/groups/synthetic_reasoning_natural}
+  } is therefore an inference-stack artifact, not a model-capability
+  measurement.
+Third, the \texttt{wikifact} cells at $\approx 0.92$ across all three models
+  reflect HELM's recipe-level non-determinism: the benchmark pins
+  \texttt{temperature=1.0, num\_outputs=5}, and the expected agreement of two
+  independent stochastic runs on a benchmark with per-prompt
+  \texttt{exact\_match@5} hit rate $p_i$ decomposes as $\mathbb{E}_i[\,p_i^2 +
+  (1-p_i)^2\,] = \text{agree}(\bar p) + 2\,\mathrm{Var}_i(p_i)$ (formalized in
+  \texttt{wikifact\_consistency\_claim.lean}, theorem
+  \texttt{expectedAgreement\_eq\_uniformAgreement\_add\_variance}).
+The observed $\approx 0.92$ is consistent with prompt-level heterogeneity in
+  $p_i$ — what one would expect for a trained model on a benchmark with
+  prompt-dependent difficulty — and is uniform across all three serving stacks.
+This is the only one of the three mechanisms not visible by raising it as a
+  reproducibility bug; it is the design-baked floor that any honest
+  reproducibility audit needs to acknowledge.
+
+The three mechanisms span the layers a reproducibility audit must separate: an
+  upstream \emph{data-pipeline} non-determinism (pandas merge), an upstream
+  \emph{inference-backend} non-determinism (Together vs.\ HuggingFace serving
+  the same checkpoint), and an intentional \emph{recipe-level} stochasticity
+  (\texttt{temperature=1}).
+None of these is recorded directly in HELM's evaluation logs in a way that lets
+  a reader of a single run identify which mechanism produced the score.
+\eee{} surfaces (i)~the divergence itself via the content-addressed
+  \texttt{sample\_hash}, which catches both the pandas-merge content flip and
+  the Together stop-sequence trim that HELM's positional id comparison would
+  silently agree on; (ii)~the per-instance behaviour via \texttt{output.raw}
+  (whose multi-element diversity is itself the signal that
+  \texttt{temperature>0} sampling was active); and (iii)~the per-metric scores
+  via \texttt{evaluation.score}, separated from HELM's metric-aggregation logic.
+\eee{} does not preserve the upstream framework version, the inference backend
+  identity, or the floating-point precision of the generation kernel — that is a
+  deliberate scope decision, and surfacing the \emph{mechanism} of a divergence
+  (as opposed to the existence of one) requires walking back to the framework's
+  run-time artifacts (HELM \texttt{run\_spec.json},
+  \texttt{scenario\_state.json}, and the framework source).
+We argue this audit / forensics split is a feature, not a flaw: the audit layer
+  is small, framework-neutral, and stable across harness versions, while the
+  forensics layer is necessarily framework-specific and benefits from being kept
+  separate.
+The three case studies, full evidence chains, MWE reproducers, and the
+  systematic Pythia-Together-vs-HuggingFace pattern surfaced across the
+  remaining sub-0.98 cells are detailed in
+  Appendix~\ref{sec:app-helm-audit-v2}.
