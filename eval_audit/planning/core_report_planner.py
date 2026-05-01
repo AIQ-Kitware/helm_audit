@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import itertools
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 import re
@@ -765,7 +766,19 @@ def _packet_payload(
                         extra_fields={"candidate_reference_component_ids": candidate_official_ids},
                     )
                 )
-    if local_reference is not None:
+    # local_repeat comparisons (one local replica vs another, same model
+    # + benchmark) are useful for measuring intra-recipe noise but are
+    # not what the heatmap-paper analysis cares about. Set
+    # EVAL_AUDIT_SKIP_LOCAL_REPEAT={1,true,yes} to skip generating them
+    # entirely — saves compute on cells with many replicas (e.g.
+    # Pythia-6.9B mmlu has 15 local components, which would generate 14
+    # local_repeat pairs per cell). The official_vs_local comparisons
+    # are unaffected; reviewers can re-enable replicas by unsetting the
+    # env var.
+    _skip_local_repeat = os.environ.get(
+        "EVAL_AUDIT_SKIP_LOCAL_REPEAT", ""
+    ).strip().lower() in {"1", "true", "yes"}
+    if not _skip_local_repeat and local_reference is not None:
         for repeat_component in local_components[1:]:
             comparisons.append(
                 _comparison_payload(
