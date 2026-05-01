@@ -1540,3 +1540,116 @@ reproducibility problem.
 ``Idavidrein/gpqa`` back to ``02_warmup_data.sh``, uncomment the
 gpt-oss gpqa run_entry in ``adapter.py``, and remove the gpqa row
 from the README table.
+
+
+## 2026-05-01 03:13:00 +0000 — heatmap per-metric drill-down + LLaMA-2 vLLM profile
+
+**Model:** Claude Opus 4.7 (`claude-opus-4-7`).
+
+**Session intent.** Pick up the EEE-only reproducibility heatmap
+handoff (`paper_draft/2026-04-30_eee_heatmap_session_log.md`) and
+expand it: (a) ship the per-metric drill-down PNG that hadn't been
+rendered yet, (b) widen the model grid for the paper from
+"Pythia-2.8B + Pythia-6.9B + Vicuna-7B" (effectively 2 architectures)
+to a more credible 4+ open-weight architectures, (c) prepare the
+serving infrastructure for LLaMA-2-70B since the prior 7B/8B-class
+locals don't need vLLM.
+
+**Heatmap work (`eval_audit/reports/eee_only_heatmap.py`).**
+1. Replaced the tall single-figure per-metric view with one
+   `model × benchmark` figure per metric — same shape as the main
+   heatmap so the eye doesn't have to relearn the layout per metric.
+   Files land in `<out>/reproducibility_heatmap_per_metric/<metric>.png`.
+2. The text-table + JSON sidecar still flatten everything into one
+   document for grep / paper-pasting; only the PNG mode split.
+3. Per-metric plots now drop benchmarks that don't use the metric
+   (e.g. `bleu_1.png` shows only NarrativeQA, not a wall of gray
+   "missing" rows for BoolQ/MMLU/IMDB/...). The filter shrinks
+   per-figure footprint substantially on real data.
+4. Switched all path printouts to `rich_link()` via
+   `setup_cli_logging`, and switched all writes (text, JSON, PNG)
+   to `safer.open(..., make_parents=True)` via `write_text_atomic` /
+   a local `_atomic_savefig` helper that mirrors the one in
+   `core_metrics.py:1889`. Mid-write crash now leaves the previous
+   file content intact; matches the rest of the project.
+
+**Model-grid expansion research.** Walked
+`/data/crfm-helm-public/classic/benchmark_output/runs/v0.{2.4,3.0,4.0}`
+and the EEE-converted store
+`/data/crfm-helm-audit-store/crfm-helm-public-eee-test/classic/`
+to compute per-(model, benchmark, version) coverage for the heatmap's
+14-benchmark grid. Findings:
+
+- **v0.3.0 is the canonical broad-coverage version**: every realistic
+  candidate (LLaMA-1/2 7B/13B/70B, Falcon-7B base+instruct, GPT-J-6B,
+  GPT-NeoX-20B, MPT-30B, Alpaca-7B, RedPajama-INCITE-7B, etc.) has
+  full 14/14 coverage there.
+- **Mistral-7B-v0.1 only appears in v0.4.0** (alone) — adding it
+  would mix HELM minor versions in the grid.
+- **Pythia-2.8B-v0** (currently in heatmap) has only 2 benchmarks at
+  v0.2.4. It's a row of mostly-missing cells; dropping it or
+  upgrading would tighten the figure.
+- **Existing locals** (Pythia-6.9B, Vicuna-7B-v1.3) are at v0.3.0,
+  matching almost all candidates apples-to-apples.
+
+User picked **LLaMA-2-13B + Falcon-7B (HF backend) and LLaMA-2-70B
+(vLLM)** as the additions to try. LLaMA-2-13B and Falcon-7B fit on a
+single GPU and run via HELM's HuggingFace backend the same way the
+existing locals do (`inference_platform: "huggingface"` in the EEE
+artifacts confirmed Pythia-6.9B / Vicuna-7B were both run that way).
+LLaMA-2-70B at fp16 needs ~140 GB → tp=2 → must use vLLM with two
+GPUs.
+
+**vLLM serving profile.** LLaMA-2-70B's tp=2 layout evicts the
+gpt-oss-20b service that lives on GPU 0 in the existing
+`pythia-qwen25-gptoss-mixed-4x96` profile. User explicit decision:
+build a *new* profile (don't modify the existing one) and drop
+gpt-oss for this profile so the local recipe matches public HELM's
+fp16 (no INT4/AWQ confound). Wrote three new profiles + two new model
+entries in `submodules/vllm_service/vllm_service/templates/`:
+
+- `helm-llama-2-13b` — single-model, single GPU, completions protocol.
+- `helm-llama-2-70b` — single-model, tp=2 across 2 GPUs, completions.
+- `pythia-llama2-70b-mixed-4x96` — co-resident: GPUs 0+1 LLaMA-2-70B
+  fp16 tp=2, GPU 2 Pythia-6.9B, GPU 3 Pythia-2.8B-v0. Pythia GPU
+  pinning matches `pythia-qwen3.6-mixed-4x96` and
+  `pythia-qwen25-gptoss-mixed-4x96` so a host already running those
+  Pythia containers can switch to this profile without recreating
+  them.
+
+All 41 tests in `submodules/vllm_service/tests/test_serving_profiles.py`
+pass against the new YAML.
+
+**Runbook scaffold.** Wrote `reproduce/llama2_70b_helm_audit/README.md`
+documenting the GPU layout, the recipe-match decision (fp16 not
+INT4 to avoid quantization drift in the reproducibility comparison),
+and a clone-and-tweak path off the existing
+`reproduce/finish_qwen25_gptoss/` step scripts. Did not write the
+full step-script set yet — user signaled they want to try the
+HF-backend pair (LLaMA-2-13B + Falcon-7B) first, which doesn't need
+the vLLM scaffold at all.
+
+**Still open.**
+- Real per-metric heatmap render on toothbrush against the actual
+  `from_eee_out/` reports (smoke-tested on the demo fixture only).
+- New `reproduce/<extend_grid>/` runbook for LLaMA-2-13B + Falcon-7B
+  HF-backend runs, parallel to the LLaMA-2-70B one.
+- Full step-script set for `reproduce/llama2_70b_helm_audit/` with
+  curl tests of the LiteLLM router endpoints once the user has GPU
+  time to bring the profile up.
+- Likely typo in `eee_only_heatmap.py:_BENCHMARK_DISPLAY` —
+  `sythetic_reasoning_natural` (missing `n`) where the public store
+  uses `synthetic_reasoning_natural`. Worth verifying on the next
+  real render whether the row falls through to the raw key.
+
+**Design insight.** The heatmap module's "per-metric mode" had been
+designed as a single tall figure listing every (benchmark, metric)
+row. That's information-dense but visually unscannable — the eye
+has to track both axes and labels grow long ("MMLU: exact_match"
+etc.). Splitting one figure per metric trades page count for
+cognitive cost: each plot is now a clean
+`benchmark × model` heatmap matching the main figure's shape, and
+"compare exact_match vs. bleu_1" becomes "open the next file"
+rather than "scroll the same figure." The same trade probably
+applies elsewhere in the project where multi-axis condensation
+fights readability.
