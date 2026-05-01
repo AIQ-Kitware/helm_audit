@@ -599,15 +599,41 @@ def _component_source_kind(component: dict[str, Any] | None) -> SourceKind:
         return SourceKind.OFFICIAL
 
 
-def _load_component_run(component: dict[str, Any]) -> NormalizedRun:
-    return _load_normalized(
+def _load_component_run(
+    component: dict[str, Any],
+    *,
+    cache: dict[str, NormalizedRun] | None = None,
+) -> NormalizedRun:
+    """Load a component into a NormalizedRun, optionally memoizing.
+
+    When the same component_id appears in multiple comparisons within
+    a single packet (e.g. one official paired against N local replicas
+    plus N-1 local_repeat comparisons share the local components),
+    the loader was previously called once per pair — meaning the
+    official artifact got loaded N times and each local artifact got
+    loaded ~2x. Each load parses the EEE samples.jsonl from disk
+    (105k records for new-format civil_comments, etc.), which is
+    measurable wall-clock per call.
+
+    Pass a ``cache`` dict to memoize across calls. The cache is keyed
+    on ``component_id``; passing ``None`` preserves the original
+    no-cache behavior (used by call sites that don't have a packet-
+    scoped lifetime).
+    """
+    component_id = component.get("component_id")
+    if cache is not None and component_id and component_id in cache:
+        return cache[component_id]
+    run = _load_normalized(
         component["run_path"],
         source_kind=_component_source_kind(component),
         artifact_format=str(component.get("artifact_format") or "helm"),
         eee_artifact_path=component.get("eee_artifact_path"),
-        component_id=component.get("component_id"),
+        component_id=component_id,
         logical_run_key=component.get("logical_run_key"),
     )
+    if cache is not None and component_id:
+        cache[component_id] = run
+    return run
 
 
 def _build_pair(
@@ -618,6 +644,7 @@ def _build_pair(
     *,
     component_a: dict[str, Any] | None = None,
     component_b: dict[str, Any] | None = None,
+    component_cache: dict[str, NormalizedRun] | None = None,
 ) -> dict[str, Any]:
     # Stage-4 + Stage-5: the per-metric measurement core operates on the
     # EEE-normalized representation. When the planner has tagged a
@@ -626,11 +653,11 @@ def _build_pair(
     # HelmRunDiff is still used for the run-spec-semantic diagnosis (which
     # reads run_spec.json from the raw HELM JSONs cached on the run).
     if component_a is not None:
-        nrun_a = _load_component_run(component_a)
+        nrun_a = _load_component_run(component_a, cache=component_cache)
     else:
         nrun_a = _load_normalized(run_a, source_kind=SourceKind.OFFICIAL)
     if component_b is not None:
-        nrun_b = _load_component_run(component_b)
+        nrun_b = _load_component_run(component_b, cache=component_cache)
     else:
         nrun_b = _load_normalized(run_b, source_kind=SourceKind.LOCAL)
     diff = HelmRunDiff(
@@ -2075,6 +2102,16 @@ def main(argv: list[str] | None = None) -> None:
     component_lookup = {component['component_id']: component for component in components}
     run_spec_name = _infer_run_spec_name(*(component['run_path'] for component in components))
 
+    # Memoize NormalizedRun loads across the per-pair loop. A typical
+    # packet has one official component reused across N official_vs_local
+    # pairs and ~N local components each appearing twice (once in
+    # official_vs_local, once as the reference or repeat in
+    # local_repeat). Without caching the official artifact gets parsed
+    # ~N times. The cache is intentionally local to this packet
+    # invocation so memory doesn't accumulate when from_eee renders
+    # many packets in sequence (or in parallel via subprocess.run).
+    component_cache: dict[str, NormalizedRun] = {}
+
     pairs = []
     for comparison in comparisons:
         component_ids = comparison.get('component_ids') or []
@@ -2102,6 +2139,7 @@ def main(argv: list[str] | None = None) -> None:
             thresholds,
             component_a=component_a,
             component_b=component_b,
+            component_cache=component_cache,
         )
         pair['artifact_formats'] = {
             component_ids[0]: component_a.get('artifact_format') or 'helm',
