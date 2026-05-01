@@ -14,7 +14,15 @@ def _coerce_link_target(target: str | Path) -> str:
     parsed = urlparse(text)
     if parsed.scheme:
         return text
-    return Path(text).expanduser().resolve().as_uri()
+    # Make absolute (so as_uri works) but do NOT follow symlinks. Using
+    # ``.resolve()`` here historically meant a clickable "Write link"
+    # log line for a symlink would jump to the symlink's *target*
+    # rather than the symlink itself — making it impossible to verify
+    # the symlink wrote where we expected. ``.absolute()`` preserves
+    # the path verbatim while still satisfying ``as_uri``'s
+    # absolute-path requirement, and skips the extra ``realpath``
+    # syscall.
+    return Path(text).expanduser().absolute().as_uri()
 
 
 def rich_link(target: str | Path, label: str | None = None) -> str:
