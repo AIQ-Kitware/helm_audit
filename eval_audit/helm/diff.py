@@ -76,6 +76,14 @@ from eval_audit.helm.analysis import HelmRunAnalysis
 from eval_audit.utils.numeric import safe_float as _safe_float, quantile as _quantile
 from typing import Any, Callable, Iterable
 
+# Zero-overhead in normal runs; line_profiler swaps in a real profiler when
+# the LINE_PROFILE env var is set.
+try:
+    from line_profiler import profile  # type: ignore[import-not-found]
+except ImportError:
+    def profile(func):  # type: ignore[no-redef]
+        return func
+
 
 def _format_bool(ok: bool) -> str:
     return '✅' if ok else '❌'
@@ -755,6 +763,7 @@ class HelmRunDiff(ub.NiceRepr):
         Controls readability of hashed ids used in stat keys.
     """
 
+    @profile
     def __init__(
         self,
         run_a,
@@ -785,6 +794,7 @@ class HelmRunDiff(ub.NiceRepr):
     # ---------------------------------------------------------------------
     # Base summaries
 
+    @profile
     def summary_dict(self, *, level: int = 10) -> dict[str, Any]:
         """Programmatic run-to-run summary.
 
@@ -1348,6 +1358,7 @@ class HelmRunDiff(ub.NiceRepr):
             }
         )
 
+    @profile
     def dataset_overlap_summary(self, *, max_examples: int = 5) -> dict[str, Any]:
         """Compare scenario_state request datasets between runs.
 
@@ -1611,6 +1622,7 @@ class HelmRunDiff(ub.NiceRepr):
     # ---------------------------------------------------------------------
     # Run-level mean agreement
 
+    @profile
     def _value_agreement_summary(
         self,
         *,
@@ -1695,6 +1707,7 @@ class HelmRunDiff(ub.NiceRepr):
         self._cache[cache_key] = out
         return out
 
+    @profile
     def value_distance_profile(
         self,
         *,
@@ -1785,6 +1798,7 @@ class HelmRunDiff(ub.NiceRepr):
     # ---------------------------------------------------------------------
     # Instance-level agreement / drilldowns
 
+    @profile
     def instance_summary_dict(
         self,
         *,
@@ -2004,6 +2018,7 @@ class HelmRunDiff(ub.NiceRepr):
         self._cache[cache_key] = out
         return out
 
+    @profile
     def instance_distance_profile(
         self,
         *,
@@ -2159,6 +2174,7 @@ class HelmRunDiff(ub.NiceRepr):
         self._cache[cache_key] = out
         return out
 
+    @profile
     def instance_agreement_profile(
         self,
         *,
@@ -2299,6 +2315,7 @@ class HelmRunDiff(ub.NiceRepr):
         self._cache[cache_key] = out
         return out
 
+    @profile
     def tolerance_sweep_summary(
         self,
         *,
@@ -2347,6 +2364,7 @@ class HelmRunDiff(ub.NiceRepr):
             'instance_level': instance_results,
         })
 
+    @profile
     def summarize_instances(
         self,
         *,

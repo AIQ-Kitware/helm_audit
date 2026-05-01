@@ -26,6 +26,14 @@ from eval_audit.helm.hashers import stable_hash36
 from eval_audit.infra.paths import audit_store_root, repo_root
 from eval_audit.normalized.loaders import _eee_converter_name, _eee_converter_version
 
+# Zero-overhead in normal runs; line_profiler swaps in a real profiler when
+# the LINE_PROFILE env var is set.
+try:
+    from line_profiler import profile  # type: ignore[import-not-found]
+except ImportError:
+    def profile(func):  # type: ignore[no-redef]
+        return func
+
 
 def _atomic_write_text(fpath: Path, content: str) -> None:
     """Atomic write via :mod:`safer` so concurrent readers never see a partial file."""
@@ -63,6 +71,7 @@ def helm_raw_cache_parent(run_path: str | Path) -> Path:
     return default_helm_raw_cache_root() / digest
 
 
+@profile
 def convert_helm_run_to_cached_eee(
     run_path: str | Path,
     *,
@@ -317,6 +326,7 @@ def _official_sweep_results_by_run_path(root_text: str) -> dict[str, Path]:
     return out
 
 
+@profile
 def resolve_official_eee_artifact(
     row: dict[str, Any],
     *,
@@ -414,6 +424,7 @@ def local_eee_parent_for_row(
     return root / experiment / job_id / f"{_slugify(run_name)}--{digest}"
 
 
+@profile
 def resolve_local_eee_artifact(
     row: dict[str, Any],
     *,
@@ -500,6 +511,7 @@ def _aggregate_path_for_log(log: Any, artifact_path: Path, eval_uuid: str) -> Pa
     return out_dir / f"{eval_uuid}.json"
 
 
+@profile
 def convert_local_helm_run_to_eee(
     row: dict[str, Any],
     *,

@@ -45,6 +45,14 @@ from eval_audit.workflows.rebuild_core_report import (
     slugify_identifier,
 )
 
+# Zero-overhead in normal runs; line_profiler swaps in a real profiler when
+# the LINE_PROFILE env var is set.
+try:
+    from line_profiler import profile  # type: ignore[import-not-found]
+except ImportError:
+    def profile(func):  # type: ignore[no-redef]
+        return func
+
 
 def _load_json(fpath: Path) -> dict[str, Any]:
     return json.loads(fpath.read_text())
@@ -172,6 +180,7 @@ def _benchmark_completion_summary(rows: list[dict[str, Any]]) -> list[dict[str, 
     return summary_rows
 
 
+@profile
 def _summarize_core_report(report_json: Path, *, experiment_name: str) -> dict[str, Any]:
     bundle = {
         "report": _load_json(report_json),
@@ -224,6 +233,7 @@ def _summarize_core_report(report_json: Path, *, experiment_name: str) -> dict[s
     }
 
 
+@profile
 def main(argv: list[str] | None = None) -> None:
     setup_cli_logging()
     parser = argparse.ArgumentParser()

@@ -13,6 +13,14 @@ from eval_audit.normalized import SourceKind
 from eval_audit.normalized.helm_compat import helm_view_from_path
 from eval_audit.reports.core_packet import comparison_sample_latest_name
 
+# Zero-overhead in normal runs; line_profiler swaps in a real profiler when
+# the LINE_PROFILE env var is set.
+try:
+    from line_profiler import profile  # type: ignore[import-not-found]
+except ImportError:
+    def profile(func):  # type: ignore[no-redef]
+        return func
+
 
 def _infer_run_spec_name(*run_paths: str) -> str:
     names = [Path(p).name for p in run_paths if p]
@@ -25,6 +33,7 @@ def _infer_run_spec_name(*run_paths: str) -> str:
     return unique[0]
 
 
+@profile
 def write_pair_samples(
     *,
     run_a: str,
@@ -63,6 +72,7 @@ def write_pair_samples(
     return out_fpath
 
 
+@profile
 def main(argv: list[str] | None = None) -> None:
     setup_cli_logging()
     parser = argparse.ArgumentParser()

@@ -50,12 +50,21 @@ from eval_audit.infra.logging import setup_cli_logging
 from eval_audit.planning.core_report_planner import build_planning_artifact
 from eval_audit.workflows.plan_core_report_packets import write_planning_outputs
 
+# Zero-overhead in normal runs; line_profiler swaps in a real profiler when
+# the LINE_PROFILE env var is set. See the same shim in build_reports_summary.
+try:
+    from line_profiler import profile  # type: ignore[import-not-found]
+except ImportError:
+    def profile(func):  # type: ignore[no-redef]
+        return func
+
 
 # ---------------------------------------------------------------------------
 # EEE artifact discovery
 # ---------------------------------------------------------------------------
 
 
+@profile
 def _discover_eee_artifacts(root: Path) -> list[dict[str, Any]]:
     """Walk ``root`` for EEE aggregate files and return one row per artifact dir.
 
@@ -263,6 +272,7 @@ def _write_index_csv(rows: list[dict[str, Any]], fpath: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+@profile
 def _render_packet(
     *,
     packet: dict[str, Any],
@@ -355,6 +365,7 @@ def _packets_with_manifests(planning_artifact: dict[str, Any]) -> Iterable[dict[
 # ---------------------------------------------------------------------------
 
 
+@profile
 def _build_indexes(
     *,
     eee_root: Path,
@@ -405,6 +416,7 @@ def _build_indexes(
     return local_index_fpath, official_index_fpath, local_rows, official_rows
 
 
+@profile
 def main(argv: list[str] | None = None) -> None:
     setup_cli_logging()
     parser = argparse.ArgumentParser(

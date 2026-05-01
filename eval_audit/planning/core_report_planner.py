@@ -24,6 +24,14 @@ from eval_audit.normalized.eee_artifacts import (
 )
 from eval_audit.reports.core_packet import slugify_identifier
 
+# Zero-overhead in normal runs; line_profiler swaps in a real profiler when
+# the LINE_PROFILE env var is set.
+try:
+    from line_profiler import profile  # type: ignore[import-not-found]
+except ImportError:
+    def profile(func):  # type: ignore[no-redef]
+        return func
+
 
 PLANNER_VERSION = "core_report_packet_planner.v1"
 OFFICIAL_SELECTION_POLICY = "latest_suite_version_per_public_track"
@@ -168,6 +176,7 @@ class NormalizedPlannerComponent:
         }
 
 
+@profile
 def load_index_rows(index_fpath: str | Path) -> list[dict[str, Any]]:
     with Path(index_fpath).open(newline="") as file:
         return [{k: ("" if v is None else v) for k, v in row.items()} for row in csv.DictReader(file)]
@@ -183,6 +192,7 @@ def _row_logical_keys(row: dict[str, Any]) -> set[str]:
     return {key for key in keys if key}
 
 
+@profile
 def _prefilter_index_rows(
     *,
     local_rows: list[dict[str, Any]],
@@ -295,6 +305,7 @@ def _apply_eee_resolution(
     return artifact_format, eee_artifact_path, resolution
 
 
+@profile
 def normalize_local_index_rows(
     rows: list[dict[str, Any]],
     *,
@@ -384,6 +395,7 @@ def normalize_local_index_rows(
     return components
 
 
+@profile
 def normalize_official_index_rows(
     rows: list[dict[str, Any]],
     *,
@@ -462,6 +474,7 @@ def normalize_official_index_rows(
     return components
 
 
+@profile
 def normalize_index_rows(
     *,
     local_rows: list[dict[str, Any]],
@@ -891,6 +904,7 @@ def build_packet_intents(
     return packets
 
 
+@profile
 def build_planning_artifact(
     *,
     local_index_fpath: str | Path,

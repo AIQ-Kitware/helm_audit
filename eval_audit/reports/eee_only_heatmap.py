@@ -37,6 +37,14 @@ from loguru import logger
 from eval_audit.infra.fs_publish import write_text_atomic
 from eval_audit.infra.logging import rich_link, setup_cli_logging
 
+# Zero-overhead in normal runs; line_profiler swaps in a real profiler when
+# the LINE_PROFILE env var is set.
+try:
+    from line_profiler import profile  # type: ignore[import-not-found]
+except ImportError:
+    def profile(func):  # type: ignore[no-redef]
+        return func
+
 # ---------------------------------------------------------------------------
 # Display label tables
 # ---------------------------------------------------------------------------
@@ -45,6 +53,7 @@ _MODEL_DISPLAY: dict[str, str] = {
     "eleutherai/pythia-2.8b-v0": "Pythia-2.8B",
     "eleutherai/pythia-6.9b": "Pythia-6.9B",
     "lmsys/vicuna-7b-v1.3": "Vicuna-7B-v1.3",
+    "tiiuae/falcon-7b": "Falcon-7B",
 }
 
 _BENCHMARK_DISPLAY: dict[str, str] = {
@@ -86,6 +95,7 @@ _MODEL_ORDER: list[str] = [
     "eleutherai/pythia-2.8b-v0",
     "eleutherai/pythia-6.9b",
     "lmsys/vicuna-7b-v1.3",
+    "tiiuae/falcon-7b",
 ]
 
 
@@ -154,6 +164,7 @@ def _model_from_component(component: dict[str, Any]) -> str | None:
     return None
 
 
+@profile
 def _collect_cells(
     analysis_root: Path,
     abs_tol: float,
@@ -277,6 +288,7 @@ def _collect_cells(
     return result
 
 
+@profile
 def _collect_cells_per_metric(
     analysis_root: Path,
     abs_tol: float,
@@ -481,6 +493,7 @@ def _atomic_savefig(fig, fpath: Path, **kwargs) -> Path:
     return fpath
 
 
+@profile
 def _render_heatmap(
     cells: dict[tuple[str, str], dict[str, Any]],
     models: list[str],
@@ -644,6 +657,7 @@ def _safe_filename_part(name: str) -> str:
     return cleaned or "metric"
 
 
+@profile
 def _render_per_metric_heatmaps(
     cells: dict[tuple[str, str, str], dict[str, Any]],
     models: list[str],
@@ -820,6 +834,7 @@ def _save_cell_data(
 # ---------------------------------------------------------------------------
 
 
+@profile
 def main(argv: list[str] | None = None) -> None:
     setup_cli_logging()
     parser = argparse.ArgumentParser(

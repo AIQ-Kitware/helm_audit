@@ -18,6 +18,7 @@ scope:
     - "regex:^lmsys/vicuna-7b-v1\\.3$"
     - "regex:^qwen/qwen2\\.5-7b-instruct-turbo$"
     - "regex:^openai/gpt-oss-20b$"
+    - "regex:^tiiuae/falcon-7b$"
   # benchmarks: deliberately unset. Every benchmark we have a local
   # reproduction for is in scope; the include_experiments below
   # implicitly bounds the benchmark axis to whatever was actually run.

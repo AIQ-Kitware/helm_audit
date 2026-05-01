@@ -40,6 +40,14 @@ from eval_audit.utils.labels import emit_label_legend_artifacts, short_alias_map
 from eval_audit.reports.core_packet import load_packet_manifests
 from eval_audit.utils.numeric import quantile as _quantile
 
+# Zero-overhead in normal runs; line_profiler swaps in a real profiler when
+# the LINE_PROFILE env var is set.
+try:
+    from line_profiler import profile  # type: ignore[import-not-found]
+except ImportError:
+    def profile(func):  # type: ignore[no-redef]
+        return func
+
 
 MetricDomain = tuple[float, float]
 _PLOT_TARGETS = {
@@ -408,6 +416,7 @@ def _diagnostic_flags(
     return flags
 
 
+@profile
 def _group_quantiles(rows: list[dict[str, Any]]) -> dict[str, Any]:
     values = sorted(float(r['abs_delta']) for r in rows)
     # FIXME: calling quantile like this is likely inefficient and duplicating
@@ -425,6 +434,7 @@ def _group_quantiles(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+@profile
 def _metric_quantiles(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_metric: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
@@ -530,6 +540,7 @@ def _should_treat_as_discrete(values) -> bool:
     return len(unique_values) <= 8 and all(v in {0.0, 1.0} for v in unique_values)
 
 
+@profile
 def _agreement_curve(rows: list[dict[str, Any]], thresholds: list[float]) -> list[dict[str, Any]]:
     if not rows:
         return []
@@ -557,6 +568,7 @@ def _infer_run_spec_name(*run_paths: str) -> str:
     return unique[0]
 
 
+@profile
 def _load_normalized(
     run_path: str | Path,
     source_kind: SourceKind = SourceKind.OFFICIAL,
@@ -599,6 +611,7 @@ def _component_source_kind(component: dict[str, Any] | None) -> SourceKind:
         return SourceKind.OFFICIAL
 
 
+@profile
 def _load_component_run(
     component: dict[str, Any],
     *,
@@ -636,6 +649,7 @@ def _load_component_run(
     return run
 
 
+@profile
 def _build_pair(
     run_a: str,
     run_b: str,
@@ -706,6 +720,7 @@ def _build_pair(
     }
 
 
+@profile
 def _agreement_curve_rows(*pairs: dict[str, Any], level_key: str) -> list[dict[str, Any]]:
     rows = []
     for pair in pairs:
@@ -720,6 +735,7 @@ def _agreement_curve_rows(*pairs: dict[str, Any], level_key: str) -> list[dict[s
     return rows
 
 
+@profile
 def _plot_distribution(
     ax,
     *pairs: dict[str, Any],
@@ -753,6 +769,7 @@ def _plot_distribution(
     ax.legend(title='')
 
 
+@profile
 def _per_metric_agreement_curves(*pairs: dict[str, Any], level_key: str, thresholds: list[float]) -> dict[str, list[dict[str, Any]]]:
     """Calculate per-metric agreement curves from pair instance rows."""
     curves = {}
@@ -786,6 +803,7 @@ def _per_metric_agreement_curves(*pairs: dict[str, Any], level_key: str, thresho
     return curves
 
 
+@profile
 def _plot_per_metric_agreement(
     fig_dpath: Path,
     stamp: str,
@@ -891,6 +909,7 @@ def _plot_per_metric_agreement(
     return fig_fpath
 
 
+@profile
 def _plot_quantiles(ax, pair_a: dict[str, Any], pair_b: dict[str, Any], level_key: str, title: str) -> None:
     labels = ['p50', 'p90', 'p95', 'p99', 'max']
     x = list(range(len(labels)))
@@ -907,6 +926,7 @@ def _plot_quantiles(ax, pair_a: dict[str, Any], pair_b: dict[str, Any], level_ke
     ax.legend(title='')
 
 
+@profile
 def _distribution_rows(pair: dict[str, Any]) -> pd.DataFrame:
     rows = []
     for row in pair.get('_instance_rows', []):
@@ -925,10 +945,12 @@ def _distribution_rows(pair: dict[str, Any]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+@profile
 def _plot_metric_distributions(fig_dpath: Path, stamp: str, left: dict[str, Any], right: dict[str, Any], run_spec_name: str) -> Path | None:
     return _plot_pair_metric_distributions(fig_dpath, stamp, [left, right], run_spec_name)
 
 
+@profile
 def _plot_pair_metric_distributions(
     fig_dpath: Path,
     stamp: str,
@@ -1027,6 +1049,7 @@ def _plot_pair_metric_distributions(
 # axis title.
 
 
+@profile
 def _plot_run_metric_distributions(
     fig_dpath: Path,
     stamp: str,
@@ -1186,6 +1209,7 @@ def _normalize_plot_run_specs(
     return normalized
 
 
+@profile
 def _plot_three_run_metric_distributions(
     fig_dpath: Path,
     stamp: str,
@@ -1253,6 +1277,7 @@ def _plot_three_run_metric_distributions(
     return out_fpath
 
 
+@profile
 def _plot_overlay_metric_distributions(
     fig_dpath: Path,
     stamp: str,
@@ -1279,6 +1304,7 @@ def _plot_overlay_metric_distributions(
     )
 
 
+@profile
 def _plot_overlay_metric_ecdfs(
     fig_dpath: Path,
     stamp: str,
@@ -1343,6 +1369,7 @@ def _single_run_core_stat_index(
     return out
 
 
+@profile
 def _write_three_run_runlevel_table(
     out_dpath: Path,
     stamp: str,
@@ -1379,6 +1406,7 @@ def _write_three_run_runlevel_table(
     return csv_fpath, md_fpath
 
 
+@profile
 def _write_two_run_runlevel_table(
     out_dpath: Path,
     stamp: str,
@@ -1410,6 +1438,7 @@ def _write_two_run_runlevel_table(
     return csv_fpath, md_fpath
 
 
+@profile
 def _plot_single_pair_summary(
     fig_dpath: Path,
     stamp: str,
@@ -1545,6 +1574,7 @@ def _same_value_fact(values: list[Any]) -> dict[str, Any]:
     return {'status': 'no', 'values': unique}
 
 
+@profile
 def _comparability_summary(components: list[dict[str, Any]]) -> dict[str, Any]:
     metadata_by_component = {
         component['component_id']: _component_spec_metadata(component)
@@ -1563,6 +1593,7 @@ def _comparability_summary(components: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+@profile
 def _warnings_payload(report: dict[str, Any]) -> dict[str, Any]:
     comparisons = report.get("comparisons") or []
     return {
@@ -1633,6 +1664,7 @@ def _warning_summary_lines(report: dict[str, Any]) -> list[str]:
     return lines
 
 
+@profile
 def _write_comparison_runlevel_table(
     out_dpath: Path,
     stamp: str,
@@ -1675,6 +1707,7 @@ def _write_comparison_runlevel_table(
     return csv_fpath, md_fpath
 
 
+@profile
 def _write_text(report: dict[str, Any], out_fpath: Path) -> None:
     pairs = report['pairs']
     local_repeat = _find_pair(report, 'local_repeat')
@@ -1766,6 +1799,7 @@ def _find_curve_value(rows: list[dict[str, Any]], abs_tol: float) -> float | Non
     return None
 
 
+@profile
 def _write_management_summary(report: dict[str, Any], out_fpath: Path) -> None:
     pairs = report['pairs']
     local_repeat = _find_pair(report, 'local_repeat')
@@ -1896,6 +1930,7 @@ def _atomic_savefig(fig, fpath: Path, **kwargs) -> Path:
     return fpath
 
 
+@profile
 def main(argv: list[str] | None = None) -> None:
     setup_cli_logging()
     parser = argparse.ArgumentParser()
