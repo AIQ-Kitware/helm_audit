@@ -2151,6 +2151,32 @@ def main(argv: list[str] | None = None) -> None:
             'the default.'
         ),
     )
+    # Distinct from HELM_AUDIT_SKIP_PLOTLY (which only affects Plotly /
+    # Chromium PNG exports in build_reports_summary). All the heavyweight
+    # per-pair figures in core_metrics are matplotlib — they were not
+    # gated by the SKIP_PLOTLY env var and that's been a foot-gun for
+    # iteration. --no-plots / EVAL_AUDIT_NO_PLOTS={1,true,yes} skips
+    # every matplotlib plot block in core_metrics.main: the 2x2 summary
+    # panel, the per-pair distribution figures, the overlay/ECDF runs,
+    # and the per-metric agreement figures. JSON / TXT / management
+    # summaries / runlevel tables still write — only static figures are
+    # skipped.
+    _no_plots_default = os.environ.get(
+        'EVAL_AUDIT_NO_PLOTS', ''
+    ).strip().lower() in {'1', 'true', 'yes'}
+    parser.add_argument(
+        '--no-plots',
+        action='store_true',
+        default=_no_plots_default,
+        help=(
+            'Skip every matplotlib figure in core_metrics.main (summary '
+            'panel, pair distributions, overlays, ECDFs, per-metric '
+            'agreement). JSON/TXT/runlevel-table outputs are unaffected. '
+            'Distinct from HELM_AUDIT_SKIP_PLOTLY which only gates the '
+            'Plotly/Chromium PNG exports in build_reports_summary. '
+            'Also reads EVAL_AUDIT_NO_PLOTS={1,true,yes} as the default.'
+        ),
+    )
     args = parser.parse_args(argv)
     plot_layout = _plot_layout_from_cli(args)
     plot_target = args.plot_target
@@ -2281,7 +2307,13 @@ def main(argv: list[str] | None = None) -> None:
     if official_vs_local is None:
         raise SystemExit('No enabled comparisons were available to render a core metric report')
 
-    render_core_metric_report = (not args.plots_only) or _wants_plot(plot_target, 'core_metric_report')
+    # --no-plots is the master kill-switch: when set, no matplotlib
+    # block runs regardless of plots_only / render_heavy_pairwise_plots
+    # / plot_target.
+    render_core_metric_report = (
+        (not args.no_plots)
+        and ((not args.plots_only) or _wants_plot(plot_target, 'core_metric_report'))
+    )
     if render_core_metric_report and len(pairs) == 1:
         fig_fpath = _plot_single_pair_summary(
             history_dpath,
@@ -2360,7 +2392,7 @@ def main(argv: list[str] | None = None) -> None:
     else:
         fig_fpath = None
 
-    render_pairwise = args.render_heavy_pairwise_plots
+    render_pairwise = args.render_heavy_pairwise_plots and not args.no_plots
     if render_pairwise and _wants_plot(plot_target, 'core_metric_distributions'):
         dist_fig_fpath = _plot_pair_metric_distributions(
             history_dpath,
