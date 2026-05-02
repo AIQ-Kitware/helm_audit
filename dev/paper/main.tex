@@ -9,16 +9,30 @@
 \usepackage{amssymb}
 \usepackage{amsfonts}
 \usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{float}
 \usepackage{xcolor}
 \usepackage{listings}
-\usepackage[colorlinks=true]{hyperref}
+\usepackage[
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue
+]{hyperref}
+\usepackage{bookmark}
 \usepackage{url}
 \usepackage{xurl}
 
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
 \lstdefinestyle{shell}{
-  basicstyle=\ttfamily\footnotesize,
+  basicstyle=\ttfamily\scriptsize,
   breaklines=true,
+  breakatwhitespace=false,
   columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
   frame=single,
 }
 

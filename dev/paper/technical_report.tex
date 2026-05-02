@@ -9,27 +9,40 @@
 \usepackage{amssymb}
 \usepackage{amsfonts}
 \usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{float}
 \usepackage{xcolor}
 \usepackage{listings}
-\usepackage[colorlinks=true]{hyperref}
+\usepackage[
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue
+]{hyperref}
+\usepackage{bookmark}
 \usepackage{url}
 \usepackage{xurl}
 
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
 \lstdefinestyle{shell}{
-  basicstyle=\ttfamily\footnotesize,
+  basicstyle=\ttfamily\scriptsize,
   breaklines=true,
+  breakatwhitespace=false,
   columns=fullflexible,
-  frame=single,
   keepspaces=true,
   showstringspaces=false,
+  frame=single,
 }
 \lstdefinestyle{python}{
-  basicstyle=\ttfamily\footnotesize,
+  basicstyle=\ttfamily\scriptsize,
   breaklines=true,
+  breakatwhitespace=false,
   columns=fullflexible,
-  frame=single,
   keepspaces=true,
   showstringspaces=false,
+  frame=single,
   language=Python,
 }
 
@@ -290,7 +303,7 @@ We then converted those public HELM run dirs into \eee{} artifacts
   (schema version \texttt{0.2.2}), one EEE record set per
   HELM run dir.
 The converted public-side artifacts are stored under
-  \texttt{/data/crfm-helm-audit-store/crfm-helm-public-eee-test/<suite>/<version>/\dots},
+  \path{/data/crfm-helm-audit-store/crfm-helm-public-eee-test/<suite>/<version>/...},
   with \texttt{classic/v0.3.0/} the dominant suite/version for the
   slim heatmap but not the only public-store namespace.
 Every aggregate JSON in that tree records
@@ -314,7 +327,7 @@ Both experiments used HELM version \texttt{crfm-helm} 0.5.x
   \texttt{provenance.json} sibling files in each EEE conversion
   for exact per-run timestamps).
 Local HELM run dirs are at
-  \texttt{/data/crfm-helm-audit/<experiment\_name>/helm/helm\_id\_<id>/benchmark\_output/runs/<experiment\_name>/<run\_spec>/}.
+  \path{/data/crfm-helm-audit/<experiment_name>/helm/helm_id_<id>/benchmark_output/runs/<experiment_name>/<run_spec>/}.
 
 \paragraph{Local-side EEE conversion (ours).}
 We converted our own HELM run dirs into \eee{} artifacts with the
@@ -322,7 +335,7 @@ We converted our own HELM run dirs into \eee{} artifacts with the
   version) used on the public side, so the two sides go through the
   same conversion code path.
 Local EEE artifacts are at
-  \texttt{/data/crfm-helm-audit-store/eee/local/<experiment\_name>/helm\_id\_<id>/<run\_slug>/eee\_output/};
+  \path{/data/crfm-helm-audit-store/eee/local/<experiment_name>/helm_id_<id>/<run_slug>/eee_output/};
   each conversion is reproducible from a sidecar \texttt{reproduce.sh}
   alongside its \texttt{provenance.json}.
 
@@ -439,7 +452,7 @@ The slim-paper pipeline runs three stages:
 \end{enumerate}
 
 The output dir for the slim-paper run is at
-  \texttt{/data/crfm-helm-audit-store/eee-only-reproducibility-heatmap-paper-slim/}.
+  \path{/data/crfm-helm-audit-store/eee-only-reproducibility-heatmap-paper-slim/}.
 
 \subsection{Runtime EEE-only paper-validity guard}
 \label{sec:tr-paper-validity-guard}
@@ -512,7 +525,7 @@ The full implementation is at
   slim-paper run is reproduced in
   Table~\ref{tab:tr-audit-verdict}.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \caption{Runtime EEE-only paper-validity hook verdict for the slim
@@ -718,7 +731,7 @@ The pipeline distinguishes four cell statuses:
         pair has both sides.
 \end{itemize}
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \caption{Cell status distribution on the slim heatmap (3 models
@@ -751,7 +764,7 @@ Table~\ref{tab:tr-perbench} reports the cell-level micro-averaged
 The Pythia column is the systematic outlier on this slim grid; the
   pattern is the subject of Section~\ref{sec:tr-pythia-pattern}.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \caption{Per-benchmark micro-averaged instance-level agreement at
@@ -794,7 +807,7 @@ Entity-Matching              & --    & --    & --    \\
 
 
 % =====================================================================
-\section{Case Study A: \texttt{entity\_matching} pandas-merge ordering}
+\section{Case Study A: \texorpdfstring{\texttt{entity\_matching}}{entity\_matching} pandas-merge ordering}
 \label{sec:tr-case-a}
 % =====================================================================
 
@@ -977,7 +990,7 @@ Numpy is pinned to a single value within each pandas-version pair to
   \texttt{numpy~1.x} and \texttt{numpy~2.x} is also crossed inside the
   pandas-2.2.x rows to verify numpy version is irrelevant.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \caption{Pure-pandas merge MWE on the Abt-Buy \texttt{valid.csv}
@@ -1072,7 +1085,7 @@ The cleanly diagonal pattern is dispositive: under
   reproduces the public HELM Classic v0.3.0
   \texttt{scenario\_state.json} byte-for-byte.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \caption{End-to-end \texttt{entity\_matching} reproducer verdict
@@ -1203,8 +1216,7 @@ The \texttt{join\_failed} cell on the slim heatmap is therefore not a
 
 
 % =====================================================================
-\section{Case Study B: SR-Natural~$\times$~Pythia-6.9B (0.788) ---
-        broken official inference}
+\section{Case Study B: \texorpdfstring{SR-Natural~$\times$~Pythia-6.9B}{SR-Natural x Pythia-6.9B} (0.788) --- broken official inference}
 \label{sec:tr-case-b}
 % =====================================================================
 
@@ -1255,7 +1267,7 @@ Each layer was inspected independently; all four agree that the
   \texttt{completion.text} on every instance and scored 0 on every
   metric.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \caption{Four-layer cross-check that the SR-Natural~$\times$~Pythia
@@ -1276,32 +1288,27 @@ EEE conversion        & \texttt{answer\_attribution},
 \end{tabular}
 \end{table}
 
-A representative HELM token stream from the official side, for the
-  prompt
-  \texttt{...\textbackslash n The following can be determined about the dog:},
-  is shown in Listing~\ref{lst:tr-helm-tokens}.
-The model has clearly generated a coherent answer in tokens 2--6
-  (\texttt{`The dog is sad.'}); HELM's
+A representative HELM token stream from the official side, for a
+  prompt ending \texttt{...\textbackslash nThe following can be
+  determined about the dog:}, is shown in
+  Listing~\ref{lst:tr-helm-tokens}.
+The token-text fields show the GPT-NeoX BPE encoding.
+We render two BPE conventions as ASCII placeholders for readability:
+  \texttt{<newline-tok>} stands for the BPE token whose decoded form
+  is the newline character (raw bytes \texttt{0xC4 0x8A} in the
+  JSON, decoding to Unicode U+010A, which is HELM's BPE convention
+  for newline), and \texttt{<space-pfx>} stands for the BPE
+  leading-space-marker prefix (raw bytes \texttt{0xC4 0xA0},
+  U+0120, the BPE convention for a word-initial space).
+The model clearly generated a coherent answer in tokens 2--6
+  (\texttt{The dog is sad.}); HELM's
   \texttt{stop\_sequences=[`\textbackslash n']} truncates
-  \texttt{completion.text} at the first
-  \texttt{`\textbackslash n'} token, which is token 0, leaving
+  \texttt{completion.text} at the first \texttt{\textbackslash n}
+  token, which here is token~0, leaving
   \texttt{completion.text=""}.
 
 \begin{lstlisting}[style=shell, caption={First eight tokens of the
-  official Pythia-6.9B \texttt{completion} on a representative
-  SR-Natural prompt, as recorded in
-  \texttt{scenario\_state.json.request\_states[i].result.completions[0].tokens}.
-  Token-text fields show the GPT-NeoX BPE encoding;
-  \texttt{<newline-tok>} stands for the BPE token whose decoded form
-  is the newline character ASCII 0x0A (rendered as the byte
-  \texttt{0xC4 0x8A} pair in the raw JSON, which decodes to U+010A
-  Latin Capital Letter C with Caron, the BPE convention for newline).
-  \texttt{<space-pfx>} stands for the BPE leading-space-marker prefix
-  (raw byte \texttt{0xC4 0xA0}, U+0120, the BPE convention for a
-  word-initial space).
-  Tokens 2--6 contain the actual answer; HELM's stop\_sequence trim
-  at the leading newline (token 0) drops it from
-  \texttt{completion.text}.\label{lst:tr-helm-tokens}}]
+  official Pythia-6.9B SR-Natural \texttt{completion}.\label{lst:tr-helm-tokens}}]
 [
   {"text": "<newline-tok>"},      # token 0  (drives stop_sequence trim)
   {"text": "The"},                # token 1
@@ -1376,7 +1383,7 @@ The Pythia-6.9B $0\%$ accuracy on
   Classic v0.3.0 record itself --- not just on the live dashboard,
   which can change.
 The frozen record is in the public run dir at
-  \texttt{/data/crfm-helm-public/classic/benchmark\_output/runs/v0.3.0/synthetic\_reasoning\_natural:difficulty=easy,model=eleutherai\_pythia-6.9b/stats.json},
+  \path{/data/crfm-helm-public/classic/benchmark_output/runs/v0.3.0/synthetic_reasoning_natural:difficulty=easy,model=eleutherai_pythia-6.9b/stats.json},
   whose contents we summarized in
   Section~\ref{sec:tr-case-b-cross-check}: \texttt{f1\_set\_match},
   \texttt{iou\_set\_match}, and \texttt{exact\_set\_match} all have
@@ -1390,7 +1397,7 @@ The same $0\%$ figure surfaces on the Stanford-hosted Classic-v0.3.0
 The published number is therefore a real artifact of the published
   audit, not a measurement of the model's capability on the task.
 
-\subsection{Why the $0.788$ cell value understates the gap}
+\subsection{\texorpdfstring{Why the $0.788$ cell value understates the gap}{Why the 0.788 cell value understates the gap}}
 \label{sec:tr-case-b-understates}
 
 The headline cell-level agreement of $0.788$ is a micro-average over
@@ -1434,8 +1441,7 @@ The instance-level $0.788$ does not capture this gap.
 
 
 % =====================================================================
-\section{Case Study C: \texttt{wikifact} (~0.92 across all three
-        models) --- stochastic noise floor}
+\section{Case Study C: \texorpdfstring{\texttt{wikifact} ($\approx 0.92$ across all three models)}{wikifact (approx 0.92 across all three models)} --- stochastic noise floor}
 \label{sec:tr-case-c}
 % =====================================================================
 
@@ -1495,7 +1501,7 @@ $\text{agree}(p) = 2(p - \tfrac{1}{2})^2 + \tfrac{1}{2}$
   (Lean theorem \texttt{agree\_centered}).
 Concrete values:
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \caption{Homogeneous Bernoulli agreement
@@ -1557,7 +1563,7 @@ This supports the interpretation that recipe-induced stochasticity
   is the main driver of disagreement on this cell rather than any
   model-specific backend effect.
 
-\subsection{The 1-vs-5 EEE \texttt{output.raw} converter cosmetic}
+\subsection{\texorpdfstring{The 1-vs-5 EEE \texttt{output.raw} converter cosmetic}{The 1-vs-5 EEE output.raw converter cosmetic}}
 \label{sec:tr-case-c-cosmetic}
 
 On the public HELM side, EEE's \texttt{output.raw} is a 1-element
@@ -1594,7 +1600,7 @@ Three of the eleven are the \texttt{wikifact} stochastic-floor cells
   Pythia-6.9B at \texttt{temperature=0} on benchmarks where Vicuna
   and Falcon both achieve $\geq 0.98$.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \caption{Sub-0.98 cells in the slim heatmap, sorted by
@@ -1635,33 +1641,48 @@ A spot check on the disagreement set for each cell shows the model
   \texttt{temperature=0}; concrete examples are summarized in
   Table~\ref{tab:tr-pythia-examples}.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
-\caption{Representative per-instance disagreements on the
-  Pythia-6.9B sub-0.98 cells.
-For each cell we show one prompt where the recipe is identical, the
-  prompt input is identical, and yet the official-side and local-side
-  Pythia models emit different greedy completions at
-  \texttt{temperature=0}.
-The disagreement pattern depends on the scorer's sensitivity:
-  multiple-choice scorers see a clean letter flip; short-answer
-  scorers see a label flip; free-form scorers see an early
-  divergence that propagates through the chain of thought.}
+\caption{Representative per-instance disagreements on the Pythia-6.9B
+  sub-0.98 cells.
+Disagreement patterns depend on the scorer's sensitivity: multiple-choice
+  scorers see a clean letter flip; short-answer scorers see a label
+  flip; free-form scorers see an early divergence that propagates
+  through the chain of thought.
+Outputs in the right two columns are shown verbatim from
+  \texttt{output.raw[0]} (HELM stripped trailing whitespace from the
+  shown extract).}
 \label{tab:tr-pythia-examples}
-\begin{tabular}{p{2.5cm}p{4.5cm}p{3cm}p{3cm}}
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}p{1.9cm} Y p{2.2cm} p{2.2cm}}
 \toprule
 benchmark & prompt suffix & off output & loc output \\
 \midrule
-BoolQ          & ``\dots president and his advisers.\textbackslash nQuestion: Does the president live in the white house?\textbackslash nAnswer:'' & ` No' & ` Yes' \\
-CivilComments  & ``\dots let's stick to the subject here.\textbackslash nQuestion: Is the passage above toxic?\textbackslash nAnswer:'' & ` False' & ` True' \\
-LSAT-QA        & ``\dots A. one\textbackslash n B. two\textbackslash n C. three\textbackslash n D. four\textbackslash n E. five\textbackslash nAnswer:'' & ` C' & ` B' \\
-MMLU           & ``\dots despotic character, which is rooted in a sense of its special mission\textbackslash nAnswer:'' & ` A' & ` B' \\
-QuAC           & ``Q: Who took the title after?\textbackslash nAnswer:'' & ` Graham lost the title to Bruno Sammartino on April 30, 1977,\dots' & ` CANNOTANSWER' \\
-NarrativeQA    & ``Q: What does Fra Luca reveal\dots about his adoptive father?\textbackslash nAnswer:'' & ` Fra Luca reveals that Baldassarre is his father.' & ` Fra Luca reveals that Baldassarre is his adoptive father.' \\
-TruthfulQA     & ``\dots A. \dots\textbackslash n B. \dots\textbackslash n C. \dots\textbackslash n D. \dots\textbackslash nAnswer:'' & (single letter; flips on $\sim 2\%$) & (single letter) \\
+BoolQ
+  & ``\dots Does the president live in the white house?''
+  & \texttt{No} & \texttt{Yes} \\
+CivilComments
+  & ``\dots Is the passage above toxic?''
+  & \texttt{False} & \texttt{True} \\
+LSAT-QA
+  & ``\dots A. one B. two C. three D. four E. five Answer:''
+  & \texttt{C} & \texttt{B} \\
+MMLU
+  & ``\dots despotic character, which is rooted in a sense of its special mission Answer:''
+  & \texttt{A} & \texttt{B} \\
+QuAC
+  & ``Q: Who took the title after? Answer:''
+  & \texttt{Graham lost the title to Bruno Sammartino on April 30, 1977, \dots}
+  & \texttt{CANNOTANSWER} \\
+NarrativeQA
+  & ``Q: What does Fra Luca reveal\dots about his adoptive father? Answer:''
+  & \texttt{Fra Luca reveals that Baldassarre is his father.}
+  & \texttt{Fra Luca reveals that Baldassarre is his adoptive father.} \\
+TruthfulQA
+  & ``\dots Answer:''
+  & (single letter; flips on $\sim 2\%$) & (single letter) \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{table}
 
 \paragraph{Pattern.}
@@ -1766,7 +1787,7 @@ How often that happens depends on \emph{how peaked} the model's
 Table~\ref{tab:tr-pythia-factors} summarises the relevant axes for
   the three slim-heatmap models.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \caption{Factors plausibly relevant to inference-stack sensitivity
@@ -1972,7 +1993,7 @@ Each of the three case studies in this report made the
 \subsection{Per-question scope table}
 \label{sec:tr-scope-table}
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
 \small
 \caption{Per-question audit/forensics scope split for \eee{}.
@@ -2032,7 +2053,7 @@ The audit produced four reproducer tools and four code changes to the
 All deliverables are released alongside this report under
   \texttt{dev/oneoff/} and \texttt{eval\_audit/} in the repository.
 
-\subsection{\texttt{audit\_eee\_only\_run.py}}
+\subsection{\texorpdfstring{\texttt{audit\_eee\_only\_run.py}}{audit\_eee\_only\_run.py}}
 \label{sec:tr-tooling-audit-hook}
 
 The runtime EEE-only paper-validity hook described in
@@ -2047,7 +2068,7 @@ Wraps a command (typically \texttt{20\_run.sh}) under a
 Verdict for the slim-paper run: PASS, $0$ flagged opens of
   $205{,}798$ total events across $88$ child Python processes.
 
-\subsection{\texttt{em\_pandas\_mwe.sh} + \texttt{em\_pandas\_mwe\_run.py}}
+\subsection{\texorpdfstring{\texttt{em\_pandas\_mwe.sh} + \texttt{em\_pandas\_mwe\_run.py}}{em\_pandas\_mwe.sh + em\_pandas\_mwe\_run.py}}
 \label{sec:tr-tooling-em-pandas-mwe}
 
 The pure-pandas isolation reproducer for Case~A.
@@ -2063,7 +2084,7 @@ The grid is laid out so the pandas-version axis can be isolated from
   (Section~\ref{sec:tr-case-a-pure-pandas-mwe},
   Table~\ref{tab:tr-em-pandas-mwe}).
 
-\subsection{\texttt{em\_helm\_mwe.sh} + \texttt{em\_helm\_mwe\_run.py}}
+\subsection{\texorpdfstring{\texttt{em\_helm\_mwe.sh} + \texttt{em\_helm\_mwe\_run.py}}{em\_helm\_mwe.sh + em\_helm\_mwe\_run.py}}
 \label{sec:tr-tooling-em-helm-mwe}
 
 The end-to-end HELM-in-the-loop reproducer for Case~A.
@@ -2079,7 +2100,7 @@ Emits a 4-cell verdict matrix
   (Section~\ref{sec:tr-case-a-helm-mwe},
   Table~\ref{tab:tr-em-helm-mwe-matrix}).
 
-\subsection{\texttt{diagnose\_entity\_matching\_join.py}}
+\subsection{\texorpdfstring{\texttt{diagnose\_entity\_matching\_join.py}}{diagnose\_entity\_matching\_join.py}}
 \label{sec:tr-tooling-em-diagnose}
 
 The Q1--Q5 diagnostic for the entity\_matching join failure
@@ -2094,7 +2115,7 @@ Plus a cross-model diagnostic: whether \texttt{id<i>} on the
 The output of this diagnostic is what initially identified the
   pandas-merge mechanism.
 
-\subsection{Metric-classifier patch + \texttt{no\_core\_metrics} status}
+\subsection{\texorpdfstring{Metric-classifier patch + \texttt{no\_core\_metrics} status}{Metric-classifier patch + no\_core\_metrics status}}
 \label{sec:tr-tooling-classifier}
 
 \paragraph{Set-match metric registration.}
@@ -2135,7 +2156,7 @@ A subsequent commit (\texttt{77d90af}) propagated the field into
   \texttt{cell\_data.json} so downstream consumers can read it
   without re-walking the per-pair reports.
 
-\subsection{\texttt{redraw\_plots.sh} auto-generation}
+\subsection{\texorpdfstring{\texttt{redraw\_plots.sh}}{redraw\_plots.sh} auto-generation}
 \label{sec:tr-tooling-redraw-plots}
 
 The heatmap renderer
@@ -2235,7 +2256,7 @@ None of the audit stages require GPU access; the local-audit HELM
 
 \paragraph{Output artifacts.}
 The audit-hook report at
-  \texttt{\$OUT\_ROOT/audit/audit\_eee\_only\_run.report.json}
+  \path{$OUT_ROOT/audit/audit_eee_only_run.report.json}
   contains the per-PID file-open log and the verdict
   (\texttt{n\_flagged\_opens=0} on a successful EEE-only run).
 The Case~A reproducer outputs at
@@ -2243,7 +2264,7 @@ The Case~A reproducer outputs at
   contain the digest tables and the rank-by-rank verdict matrix
   respectively.
 The slim-paper heatmap PNG is at
-  \texttt{\$OUT\_ROOT/heatmap/reproducibility\_heatmap.png} with
+  \path{$OUT_ROOT/heatmap/reproducibility_heatmap.png} with
   per-metric drill-downs in the sibling
   \texttt{reproducibility\_heatmap\_per\_metric/} directory.
 The output dir also contains a self-emitted
