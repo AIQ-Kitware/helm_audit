@@ -38,18 +38,6 @@ first, expanding into the appendix, expanding into the tech report)
 would have meant repeatedly re-discovering the same findings in
 multiple drafts. The "write long, cut twice" order was efficient.
 
-`paper_draft/` is gitignored; `dev/paper/` is tracked. The user's
-mid-session pivot was to keep working drafts in `paper_draft/` but
-move the canonical released version into `dev/paper/`. The
-scaffold-vs-paper distinction is important: we maintain a
-self-contained `main.tex` in `dev/paper/` that compiles our section
-in isolation, but we deliberately do *not* commit any content from
-the broader \eee{} manuscript to `dev/paper/` — only our own
-contribution. The user re-emphasised this twice; one early commit
-that included a more elaborate scaffold + README was reset out of
-history (`git reset HEAD~1`) and recommitted with a slimmer
-preamble-only `main.tex`.
-
 ---
 
 ## Mathematical / formal verification

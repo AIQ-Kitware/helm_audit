@@ -1,0 +1,363 @@
+\section{HELM Instance-Level Reproducibility Audit (Case Study 3)}
+\label{sec:app-helm-audit-v2}
+
+This appendix supplies the evidence behind the three mechanisms in
+Section~\ref{sec:cs3-helm}. A self-contained technical report with
+full evidence chains, MWE reproducers, the runtime EEE-only
+paper-validity guard, and the analysis runbook is released
+alongside the paper; we summarise here only what a NeurIPS reader
+needs to evaluate the case study.
+
+\subsection{Scope and comparison metric}
+\label{sec:app-helm-scope-v2}
+
+The slim slice covers three open-weight models (Pythia~6.9B,
+Vicuna~7B v1.3, Falcon~7B) on the fourteen HELM Classic v0.3.0
+benchmarks for which all three models have both a public-HELM run
+and a local audit reproduction (BoolQ, CivilComments,
+Entity-DataImputation, Entity-Matching, GSM, IMDB, LSAT-QA, MMLU,
+NarrativeQA, QuAC, SyntheticReasoning, SyntheticReasoning-Natural,
+TruthfulQA, WikiFact), giving 42 \mbox{(model, benchmark)} cells.
+Per cell we report the micro-averaged instance-level agreement at
+\texttt{abs\_tol=1e-9}: the fraction of
+\mbox{(\texttt{sample\_hash}, \texttt{metric\_id})} rows on which the
+official and local \texttt{evaluation.score} values coincide to
+within $10^{-9}$. The \texttt{sample\_hash} is the sha256 of the
+rendered prompt and the correct reference, which makes the join
+robust to upstream changes that rebind HELM's positional
+\texttt{id<i>} to different content.
+
+\paragraph{Headline numbers.} 39 cells are \texttt{present} (joined
+with at least one matched metric row); the 3 \texttt{join\_failed}
+cells are exactly the Entity-Matching cells across all three
+models. No cell is \texttt{no\_core\_metrics} or \texttt{missing}.
+Per-benchmark agreement is in Table~\ref{tab:helm-perbench-v2}.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Micro-averaged instance-level agreement at
+  \texttt{abs\_tol=1e-9} on the slim heatmap, sorted by Pythia-6.9B
+  agreement ascending. Entity-Matching is undefined because the
+  \texttt{sample\_hash} sets do not overlap.}
+\label{tab:helm-perbench-v2}
+\begin{tabular}{lrrr}
+\toprule
+benchmark & Pythia-6.9B & Vicuna-7B-v1.3 & Falcon-7B \\
+\midrule
+SyntheticReasoning-Natural & 0.788 & 0.998 & 0.997 \\
+NarrativeQA                & 0.910 & 0.985 & 0.984 \\
+WikiFact                   & 0.922 & 0.920 & 0.927 \\
+BoolQ                      & 0.934 & 1.000 & 0.996 \\
+MMLU                       & 0.935 & 1.000 & 1.000 \\
+CivilComments              & 0.940 & 0.997 & 0.999 \\
+QuAC                       & 0.942 & 0.987 & 0.997 \\
+LSAT-QA                    & 0.960 & 0.998 & 0.998 \\
+TruthfulQA                 & 0.977 & 0.998 & 0.998 \\
+SyntheticReasoning         & 0.982 & 0.997 & 0.999 \\
+GSM                        & 0.983 & 0.990 & 0.996 \\
+IMDB                       & 0.991 & 1.000 & 1.000 \\
+Entity-DataImputation      & 1.000 & 1.000 & 1.000 \\
+\midrule
+Entity-Matching            & --    & --    & --    \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Case A: \texorpdfstring{\texttt{entity\_matching}}{entity\_matching} pandas-merge ordering}
+\label{sec:app-helm-em-v2}
+
+The two sides each expose 1000 instances drawn from the same
+Abt--Buy dataset, with byte-equivalent \texttt{run\_spec.json}
+adapter specs and exact split overlap (507 \texttt{valid} + 493
+\texttt{test}); the positional \texttt{id<i>} namespace overlaps
+$1000/1000$, but the \texttt{sample\_hash} sets are disjoint. The
+HELM downsampler at
+\path{helm/benchmark/runner.py:downsample_eval_instances} hardcodes
+\texttt{np.random.seed(0)} and is therefore deterministic given a
+fixed pool length, which both sides satisfy. The contents of
+\texttt{all\_eval\_instances} at each index, however, depend on the
+upstream \texttt{pd.merge} sequence inside
+\path{EntityMatchingScenario.read_blocked_pairs}, which emits
+different row orderings under different pandas versions even on
+byte-identical input CSVs; HELM's \texttt{with\_instance\_ids} then
+binds \texttt{id<i>} positionally, silently rebinding id
+$\leftrightarrow$ content.
+
+A pandas-only reproducer (\path{dev/oneoff/em_pandas_mwe.sh}) shows
+a sharp boundary: \texttt{pandas==2.0.3} produces row-order digest
+\texttt{d449ad71...} for any tested numpy; \texttt{pandas==2.2.3+}
+produces digest \texttt{77d68109...} for any tested numpy. An
+end-to-end HELM-scenario reproducer
+(\path{dev/oneoff/em_helm_mwe.sh}) closes the loop
+(Table~\ref{tab:helm-em-mwe-v2}): under \texttt{pandas==2.3.3} the
+HELM scenario chain reproduces the local audit
+\texttt{scenario\_state.json} byte-for-byte; under
+\texttt{pandas==2.0.3} it reproduces the public HELM Classic
+v0.3.0 \texttt{scenario\_state.json} byte-for-byte. The recipe,
+the dataset, the downsample seed, and the framework source are
+identical in both cases; only pandas changes.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{End-to-end Entity-Matching reproducer. ``EXACT MATCH''
+  indicates byte-for-byte reproduction of the captured
+  \texttt{scenario\_state.json} at every (rank, id, content\_sig)
+  row.}
+\label{tab:helm-em-mwe-v2}
+\begin{tabular}{l c c}
+\toprule
+live environment & vs.\ LOCAL captured & vs.\ OFFICIAL captured \\
+\midrule
+pandas~2.3.3, numpy~2.2.6, crfm-helm~0.5.x
+  & EXACT MATCH (1000/1000)
+  & 0/1000 sigs (1000/1000 ids) \\
+crfm-helm==0.3.0, pandas==2.0.3, numpy==1.23.5
+  & 0/1000 sigs (1000/1000 ids)
+  & EXACT MATCH (1000/1000) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A consumer who joined the two sides on \texttt{(sample\_id,
+metric\_id)} would observe perfect overlap and infer agreement.
+Joining on \texttt{sample\_hash} correctly rejects the join: the
+prompts under matching \texttt{id<i>} refer to different concrete
+product pairs.
+
+\subsection{Case B: SR-Natural~$\times$~Pythia-6.9B (0.788)}
+\label{sec:app-helm-srnat-v2}
+
+The recipe is bytewise-equivalent on both sides
+(\texttt{temperature=0.0, num\_outputs=1, max\_tokens=20,
+stop\_sequences=[`\textbackslash n']}) with HELM's
+\path{set_fixed_random_state_for_dataset} active, so at
+\texttt{temperature=0} the divergence must be at the inference
+stack. On the official side, \path{per_instance_stats.json}
+records score $0.0$ on every one of 1000 instances for all three
+set-match metrics, and \texttt{scenario\_state.json} records
+\texttt{completion.text=""} with \texttt{n\_tokens=20} on every
+instance. Inspecting the per-token output, \texttt{tokens[0]} is
+the newline encoding (\texttt{`\d{C}'}); tokens 2--6 contain the
+actual answer (e.g.\ \texttt{[`The', ` dog', ` is', ` sad', `.']});
+tokens 7--20 are further newlines. HELM's
+\texttt{stop\_sequences=[`\textbackslash n']} trims at the first
+newline, deleting the answer before scoring. The local re-run,
+served by HuggingFace transformers, produces a non-newline first
+token and recovers $\approx 0.20$ run-level accuracy.
+
+The mechanism is HELM v0.3.0's \texttt{auto\_client.py} routing
+unspecified \texttt{eleutherai/*} models to Together.ai when
+\texttt{model\_deployment} is unset (the official
+\texttt{run\_spec.json} has \texttt{model\_deployment=None} on every
+field); the local-audit \texttt{run\_spec.json} pins
+\path{model_deployment="huggingface/pythia-6.9b"}. The published
+Stanford HELM Classic v0.3.0 dashboard reports Pythia-6.9B at $0\%$
+accuracy on \path{synthetic_reasoning_natural}, consistent with this
+mechanism. The cell-level $0.788$ is also a property of
+micro-averaging: with one side at $0$ on every row, every $0=0$
+collision counts as agreement, so the headline reads as ``fraction
+of prompts on which the local side also scored zero'' rather than
+``fraction of cases where the two model behaviours agree''. The
+true output-divergence rate is $\sim$100\%.
+
+\subsection{Case C: \texorpdfstring{\texttt{wikifact} ($\approx 0.92$)}{wikifact (0.92)} stochastic noise floor}
+\label{sec:app-helm-wikifact-v2}
+
+The recipe pins \texttt{temperature=1.0, num\_outputs=5,
+max\_tokens=8, stop\_sequences=[`\textbackslash n']}; two
+independent runs are not bitwise reproducible by construction.
+For a binary metric with per-prompt hit rate $p_i$, the expected
+agreement of two independent stochastic runs is
+$\mathbb{E}_i[p_i^2 + (1-p_i)^2]$, which the Lean-verified
+identity
+\path{expectedAgreement_eq_uniformAgreement_add_variance}
+decomposes as
+\[
+  \mathbb{E}_i[\,p_i^2 + (1-p_i)^2\,]
+  \;=\;
+  \text{agree}(\bar p) \;+\; 2\,\mathrm{Var}_i(p_i),
+\]
+with $\text{agree}(\bar p) = \bar p^2 + (1-\bar p)^2$ a strict
+lower bound on the heterogeneous expectation. Solving the
+homogeneous equation $\bar p^2 + (1-\bar p)^2 = 0.92$ gives roots
+$\bar p \approx 0.9583$ or $0.0417$, so any $\bar p$ strictly
+inside that interval falls below $0.92$ in the homogeneous case;
+producing $\approx 0.92$ at moderate $\bar p$ requires non-trivial
+$\mathrm{Var}_i(p_i)$, which is the prompt-level heterogeneity
+expected for a trained model on a benchmark with prompt-dependent
+difficulty.
+
+The cross-model uniformity ($0.922 / 0.920 / 0.927$ for Pythia /
+Vicuna / Falcon) is itself diagnostic: Pythia is the systematic
+outlier elsewhere
+(Section~\ref{sec:app-helm-pythia-pattern-v2}) but converges to
+the same agreement floor here, supporting the
+recipe-stochasticity reading over any model-specific backend
+effect. The lean source
+\path{dev/paper/wikifact_consistency_claim.lean} (compiles against
+\texttt{Mathlib}) carries the supporting identities and bounds.
+
+\paragraph{1-vs-5 \texttt{output.raw} converter cosmetic.}
+On the public side EEE's \texttt{output.raw} is a 1-element list;
+on the local side it is 5-element. HELM computed the
+\texttt{*@5} metrics with all five outputs at run time and stored
+the resulting per-metric scores; the older
+\texttt{every\_eval\_ever} converter active when the public store
+was produced truncated \texttt{output.raw} for display. The
+diversity of the local list is itself the evidence that
+\texttt{temperature>0} sampling was active.
+
+\subsection{The Pythia--Together-vs-HuggingFace pattern}
+\label{sec:app-helm-pythia-pattern-v2}
+
+Eleven cells fall below $0.98$. Three are the \texttt{wikifact}
+stochastic-floor cells (Section~\ref{sec:app-helm-wikifact-v2});
+the remaining eight are all Pythia-6.9B at \texttt{temperature=0}
+on benchmarks where Vicuna and Falcon agree at $\geq 0.984$
+(Table~\ref{tab:helm-sub98-v2}). For each of the eight Pythia
+outliers the inputs are byte-identical on both sides and
+\texttt{output.raw} is non-empty on both, so the SR-Natural
+empty-completion mechanism does not apply. A spot-check on the
+disagreement set shows Pythia emitting different but valid greedy
+outputs across the two stacks (e.g.\ MMLU
+\texttt{`\textvisiblespace A'} vs.\
+\texttt{`\textvisiblespace B'}; BoolQ
+\texttt{`\textvisiblespace No'} vs.\
+\texttt{`\textvisiblespace Yes'}; NarrativeQA short paraphrases),
+consistent with the SR-Natural mechanism generalised: the greedy
+first token at \texttt{temperature=0} is sensitive to small
+differences in serving precision, attention kernel, or tokenizer
+interaction between Together and HuggingFace.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Sub-$0.98$ cells, sorted by agreement ascending. The three
+  \texttt{wikifact} cells are recipe-level stochastic (Case~C); the
+  remaining eight are Pythia-6.9B at \texttt{temperature=0} on
+  benchmarks where Vicuna and Falcon both agree at $\geq 0.98$.}
+\label{tab:helm-sub98-v2}
+\begin{tabular}{llll}
+\toprule
+benchmark & model & agreement & note \\
+\midrule
+SyntheticReasoning-Natural & Pythia-6.9B    & 0.788 & Case~B \\
+NarrativeQA                & Pythia-6.9B    & 0.910 & Pythia outlier \\
+WikiFact                   & Vicuna-7B-v1.3 & 0.920 & Case~C \\
+WikiFact                   & Pythia-6.9B    & 0.922 & Case~C \\
+WikiFact                   & Falcon-7B      & 0.927 & Case~C \\
+BoolQ                      & Pythia-6.9B    & 0.934 & Pythia outlier \\
+MMLU                       & Pythia-6.9B    & 0.935 & Pythia outlier \\
+CivilComments              & Pythia-6.9B    & 0.940 & Pythia outlier \\
+QuAC                       & Pythia-6.9B    & 0.942 & Pythia outlier \\
+LSAT-QA                    & Pythia-6.9B    & 0.960 & Pythia outlier \\
+TruthfulQA                 & Pythia-6.9B    & 0.977 & Pythia outlier \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The pattern is not present for Vicuna or Falcon, both of which were
+also Together-hosted in the public corpus and agree at $\geq
+0.984$ on every non-\texttt{wikifact} cell. We hypothesise that
+Pythia's higher inference-stack sensitivity reflects narrower
+per-token logit margins, consistent with its smaller
+training-compute budget ($\sim$300\,B tokens) and the absence of
+instruction tuning; both factors plausibly sharpen the next-token
+distribution and reduce close-margin greedy decisions in the other
+two models. Three confounds three-model evidence cannot rule out
+are a different served checkpoint or quantisation on Together's
+side, a different serving precision (\texttt{int8} would amplify
+the perturbation), and architecture-specific numerical stability
+(Falcon's multi-query attention is empirically more stable under
+\texttt{fp16} than standard MHA). Distinguishing among them
+requires A/B testing against Together's API at known precision,
+which we have not done; the audit-level claim --- that the
+divergence exists, is detected by \texttt{sample\_hash}, and
+disproportionately affects the model with the smallest training
+budget --- does not require resolving among them.
+
+\subsection{Methodological caveat: micro-averaging}
+\label{sec:app-helm-microavg-v2}
+
+The cell-level number is a micro-average over \mbox{(sample,
+metric)} rows: any identical-score collision (in particular
+$0=0$) counts as a match. Three failure modes follow.
+\emph{Degenerate-zero agreement}: when one side is degenerate
+(SR-Natural$\,\times\,$Pythia, every official row $=0$), every
+$0$-scoring local row counts as agreement and the headline reads
+``fraction of prompts on which the local side also scored zero'';
+the run-level means differ by the entire model accuracy.
+\emph{Both-wrong masking}: on
+SR$\,\times\,$Falcon-7B (cell $0.999$), $10/1000$ prompts have
+bytewise-different \texttt{output.raw} but only $3$ produce score
+disagreements --- the other $7$ both miss the gold reference, so
+the row counts as ``agreement'' on every metric. The cell hides a
+$\sim$10$\times$ larger output-divergence rate.
+\emph{Stochastic floor} (Case~C): for \texttt{temperature>0}
+recipes the cell value sits at the heterogeneity-corrected expected
+agreement, not at $1.0$. Honest reporting wants
+\texttt{agree\_ratio} alongside the run-level mean per side, the
+\texttt{temperature} setting, and the output-divergence rate, so
+that a reader can flag cells where the agreement reading is
+misleading.
+
+\subsection{EEE audit/forensics scope}
+\label{sec:app-helm-eee-scope-v2}
+
+EEE is sufficient for audit: detecting whether two runs agree, on
+how many instances, and at what cell-level granularity. Identifying
+\emph{why} the disagreement occurred typically requires the
+upstream framework's run-time artifacts. Case~A required HELM's
+\texttt{run\_spec.json}, \texttt{scenario\_state.json}, and the
+\path{entity_matching_scenario.py} source; Case~B required HELM's
+\texttt{auto\_client.py} dispatch logic; Case~C required the
+\texttt{run\_spec.json} \texttt{temperature} field. EEE preserves
+the divergence signal on all three; it does not preserve the
+upstream framework version, the inference backend identity, or the
+precision and kernel of the generation step. The split is
+deliberate: a version of \eee{} that pinned the framework
+run-time artifacts would replicate the provenance fragility the
+case studies surface --- the \texttt{run\_spec.json} schema evolves
+across HELM releases, and the field that determines deployment
+routing today may not exist a year from now. The HELM-EEE field
+mapping and per-question scope distinctions are documented in
+\texttt{docs/eee-vs-helm-metadata.md}.
+
+\subsection{Reproducing this report}
+\label{sec:app-helm-reproduce-v2}
+
+The full audit is three shell scripts plus an audit-hook wrapper
+that injects a \texttt{sys.addaudithook} into every child Python
+process and verifies that no HELM-shaped file
+(\texttt{run\_spec.json}, \texttt{scenario.json},
+\texttt{scenario\_state.json}, \texttt{stats.json},
+\path{per_instance_stats.json}, or any path under
+\texttt{benchmark\_output/runs/}) is read during analysis. On the
+slim-paper run the harness records zero HELM-shaped opens across
+$88$ child processes, $6{,}902$ unique paths, and $205{,}798$ total
+open events, empirically attributing the published agreement
+numbers to EEE artifacts alone.
+
+\begin{lstlisting}[style=shell, caption={Reproducing the slim-paper
+  EEE-only HELM audit.\label{lst:helm-audit-reproduce-v2}}]
+export EVAL_AUDIT_EEE_STRICT=1
+export OUT_ROOT=/data/crfm-helm-audit-store/eee-only-reproducibility-heatmap-paper-slim
+
+bash reproduce/eee_only_reproducibility_heatmap/10_link_tree.sh
+
+python3 dev/oneoff/audit_eee_only_run.py \
+    --log-dir "$OUT_ROOT/audit" --require-strict-flag \
+    -- bash reproduce/eee_only_reproducibility_heatmap/20_run.sh
+
+bash reproduce/eee_only_reproducibility_heatmap/30_heatmap.sh
+
+bash dev/oneoff/em_pandas_mwe.sh   # Case A pandas digest table
+bash dev/oneoff/em_helm_mwe.sh     # Case A end-to-end verdict matrix
+\end{lstlisting}
+
+The accompanying technical report contains the full evidence
+chains, the four-layer SR-Natural cross-check, the runtime
+EEE-only validation in detail, and the per-cell sub-$0.98$
+breakdown that this appendix summarises.
