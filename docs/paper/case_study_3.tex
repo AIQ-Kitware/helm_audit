@@ -1,87 +1,66 @@
-\subsection{Case Study 3: EEE Captures HELM Reproducibility Gaps}
+\subsection{Case Study 3: EEE Separates Reproducibility Failures from Non-Comparable Runs}%
 \label{sec:cs3-helm}
 
-We re-executed three open-weight models (Pythia~6.9B, Vicuna~7B~v1.3,
-Falcon~7B) on fourteen HELM Classic v0.3.0 benchmarks and compared
-the public HELM scores to a local re-execution under the same
-recipe. Both sides are exposed to the analysis pipeline as \eee{}
-artifacts and joined on \eee{}'s \texttt{sample\_hash} (sha256 of
-the rendered prompt and the correct reference). The per-cell
-instance-level agreement at \texttt{abs\_tol=1e-9} is shown in
-Figure~\ref{fig:cs3_heatmap}; three mechanisms drive the structure
-of that figure, each diagnosed from \eee{} fields. Full evidence
-chains, MWE reproducers, and the systematic Pythia outlier across
-the remaining sub-$0.98$ cells are deferred to
-Appendix~\ref{sec:app-helm-audit-v2}.
+We use HELM to test whether \eee{} supports instance-level reproducibility
+  analysis beyond aggregate score comparison.
+We re-executed Pythia-6.9B, Vicuna-7B v1.3, and Falcon-7B on fourteen
+  single-turn HELM benchmarks and compared public records to local
+  reproductions~\citep{helm,pmlr-v202-biderman23a,vicuna2023,almazrouei2023falcon}.
+We converted both sides to \eee{} and joined records by \texttt{sample\_hash}, a
+  hash of the rendered prompt and reference.
+Each cell reports the micro-average agreement: the fraction of matched
+  \mbox{(instance, core metric)} score pairs for which the public and local
+  scores are equal up to \texttt{abs\_tol=1e-9}.
+Figure~\ref{fig:cs3-helm-heatmap} reveals four non-reproducibility patterns:
+  non-comparability, serving artifacts, stochastic disagreement, and residual
+  answer differences.
 
-\begin{figure}[h]
+\paragraph{Entity-Matching is non-comparable, not disagreeing.}
+Each side contains 1{,}000 Abt--Buy~\cite{kopcke2010evaluation} examples, but
+  the \texttt{sample\_hash} sets differ, meaning each run was scored on a
+  different subset despite using the same recipe.
+A pandas merge row-order change in HELM scenario
+  construction~\citep{mckinney2010data,pandas_merge_docs} permuted the candidate
+  set before fixed-seed downsampling, selecting different prompts.
+Because the rendered prompts and references do not match, \eee{} rejects the
+  comparison and reports the cell as \texttt{join\_failed}.
+
+\paragraph{SyntheticReasoning-Natural exposes a Pythia serving artifact.}
+This discrepancy emerges because the \texttt{output.raw} field in the public
+  HELM results is always empty, and thus the score is always zero.
+In contrast, our reproduction of this benchmark shows completions with low but
+  non-zero scores.
+Lower-level HELM artifacts show that the public run produced outputs, but each
+  began with the newline stop sequence and was trimmed before scoring.
+This likely reflects a deployment difference: HELM v0.3.0 routed the public
+  Pythia run through Together.ai, whereas ours was run locally via the Hugging
+  Face deployment.
+\eee{} does not encode the historical serving stack, but it surfaces the
+  symptom: empty completions in the scored records.
+
+\paragraph{WikiFact disagreement is recipe-level stochasticity.}
+The WikiFact cells cluster near 0.92 because the recipe uses
+  \texttt{temperature=1.0} and \texttt{num\_outputs=5}.
+This is slightly above the homogeneous-Bernoulli prediction at the mean accuracy
+  (Appendix~\ref{sec:app-helm-wikifact}), consistent with prompt-dependent
+  difficulty.
+
+\paragraph{Residual disagreements are real but smaller.}
+For the remaining cells below one, the runs usually evaluate the same instances
+  and mostly agree but differ on a small number of generated answers,
+  concentrated in Pythia-6.9B.
+Pythia may be more sensitive to serving-stack changes, but the audit cannot
+  separate model weakness from deployment details.
+Thus, \eee{} detects several failure modes and provides forensic leads, but does
+  not replace framework-level provenance.
+
+\begin{figure}[t]
   \centering
-  \includegraphics[width=0.85\textwidth]{/data/crfm-helm-audit-store/eee-only-reproducibility-heatmap-paper-slim/heatmap/reproducibility_heatmap.png}
-  \caption{Instance-level agreement between public HELM Classic
-  v0.3.0 and a local re-execution at \texttt{abs\_tol=1e-9}, joined
-  on \eee{}'s \texttt{sample\_hash}. The Entity-Matching row is
-  \texttt{join\_failed} (zero \texttt{sample\_hash} overlap); the
-  $0.788$ outlier is SR-Natural$\,\times\,$Pythia; the three
-  \texttt{wikifact} cells at $\approx 0.92$ are recipe-level
-  stochastic.}
-  \label{fig:cs3_heatmap}
+  %% CITATION/ASSET NOTE: replace with the final camera-ready figure path.
+  \includegraphics[width=0.66\linewidth]{/data/crfm-helm-audit-store/eee-only-reproducibility-heatmap-paper-slim/heatmap/reproducibility_heatmap.png}
+  \caption{Instance-level agreement between public HELM records and local reproductions
+after conversion to \eee{}. Entity-Matching is non-comparable; WikiFact reflects
+stochastic decoding; the largest post-join discrepancy is
+SyntheticReasoning-Natural with Pythia-6.9B.}%
+  \label{fig:cs3-helm-heatmap}
 \end{figure}
-
-\paragraph{Entity-Matching: a pandas-version reshuffle.}
-For all three models the official and local sides each expose 1000
-instances from the Abt--Buy dataset and the positional
-\texttt{id<i>} namespace overlaps perfectly, yet zero
-\texttt{sample\_hash} values match. The mechanism, isolated by two
-stand-alone reproducers, is that \texttt{pd.merge} emits different
-row orderings under \texttt{pandas==2.0.x} (HELM v0.3.0 era) and
-\texttt{pandas==2.2+}; the same \texttt{np.random.seed(0)}
-downsample then selects different rows, and HELM's
-\texttt{with\_instance\_ids} silently rebinds id $\leftrightarrow$
-content. A consumer who joined on \texttt{(sample\_id, metric\_id)}
-would observe perfect overlap and infer agreement; the
-prompt-and-reference hash refuses the join and the cell renders
-\texttt{join\_failed} --- the audit correctly reporting that the
-two sides are not comparable.
-
-\paragraph{SR-Natural$\,\times\,$Pythia: stop-sequence trim.}
-On the $0.788$ cell every official record's \texttt{output.raw} is
-the empty string and the run-level mean is $0.000$ across all three
-set-match metrics, while the local side recovers $\approx 0.20$ on
-real completions. \eee{} surfaces the lead by itself; tracing back
-to HELM v0.3.0's \texttt{auto\_client.py} attributes the empty
-completions to deployment routing to Together.ai, where Pythia at
-\texttt{temperature=0} emits a leading \texttt{`\textbackslash n'}
-that HELM's \texttt{stop\_sequences=[`\textbackslash n']} trims
-before any real token is captured. The published HELM Classic
-v0.3.0 number ($0\%$ accuracy) is therefore an artifact of the
-serving stack, not a measurement of capability.
-
-\paragraph{WikiFact: a stochastic noise floor.}
-The three \texttt{wikifact} cells cluster at $0.920$--$0.927$. The
-recipe pins \texttt{temperature=1.0, num\_outputs=5}, preserved by
-\eee{} in \texttt{generation\_config.generation\_args} and visibly
-reflected in the multi-element \texttt{output.raw} list. For a
-per-prompt Bernoulli model with hit rate $p_i$ the expected
-agreement decomposes (Lean-verified in
-\path{wikifact_consistency_claim.lean}) as $\mathbb{E}_i[p_i^2 +
-(1-p_i)^2] = \text{agree}(\bar p) + 2\,\mathrm{Var}_i(p_i)$, where
-the homogeneous prediction $\text{agree}(\bar p) = \bar p^2 +
-(1-\bar p)^2$ is a strict lower bound. The observed $\approx 0.92$
-sits slightly above that bound at the corresponding $\bar p$ ---
-the prompt-level heterogeneity expected for a trained model on a
-benchmark with prompt-dependent difficulty. Pythia, the systematic
-outlier elsewhere, converges to the same floor here, supporting the
-recipe-stochasticity reading over any model-specific effect.
-
-\paragraph{What EEE captures and what it does not.}
-The three mechanisms span data-pipeline non-determinism (pandas
-merge), inference-backend non-determinism (Together vs.\
-HuggingFace), and recipe-level stochasticity
-(\texttt{temperature=1}). \eee{} surfaces the divergence on all
-three through \texttt{sample\_hash}, instance-level
-\texttt{output.raw}, per-metric \texttt{evaluation.score}, and
-\texttt{generation\_config}. It does not preserve the upstream
-framework version, the inference backend identity, or the
-floating-point precision of the generation kernel; identifying
-\emph{which} of those produced a given divergence is forensics,
-which we treat as a separate scope.

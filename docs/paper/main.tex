@@ -18,12 +18,13 @@
 \usepackage[
   colorlinks=true,
   linkcolor=black,
-  citecolor=black,
+  citecolor=green!50!black,
   urlcolor=blue
 ]{hyperref}
 \usepackage{bookmark}
 \usepackage{url}
 \usepackage{xurl}
+\usepackage[round]{natbib}
 
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
 
@@ -44,7 +45,10 @@
 
 \input{case_study_3}
 
-\appendix
+\bibliographystyle{abbrvnat}
+\bibliography{citations}
+
+%\appendix
 \input{case_study_3_appendix}
 
 \end{document}
