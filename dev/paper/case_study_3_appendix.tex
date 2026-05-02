@@ -20,7 +20,7 @@ The artifacts in this appendix were regenerated end-to-end by the
   and the local audit runs; the runbook is three thin shell scripts,
   \texttt{10\_link\_tree.sh} / \texttt{20\_run.sh} / \texttt{30\_heatmap.sh}
   under
-  \texttt{reproduce/eee\_only\_reproducibility\_heatmap/}.
+  \path{reproduce/eee_only_reproducibility_heatmap/}.
 
 \subsection{Motivating Question}
 \label{sec:app-helm-question-v2}
@@ -73,14 +73,14 @@ A reviewer concerned with the \eee{} sufficiency claim will reasonably
   silently fall back to HELM run-dir reads when those happen to be on
   disk?
 We resolved this two ways.
-At the code level, \texttt{EVAL\_AUDIT\_EEE\_STRICT=1} disables a
+At the code level, \path{EVAL_AUDIT_EEE_STRICT=1} disables a
   legacy fallback in the EEE artifact loader that would otherwise
   overwrite EEE-derived per-instance records with
-  \texttt{per\_instance\_stats.json}-derived records when the latter is
+  \path{per_instance_stats.json}-derived records when the latter is
   on disk; this is the behavioural guarantee.
 At the runtime level, we wrap \texttt{20\_run.sh} with a small audit
   harness
-  (\texttt{dev/oneoff/audit\_eee\_only\_run.py}) that injects a
+  (\path{dev/oneoff/audit_eee_only_run.py}) that injects a
   \texttt{sitecustomize.py} into every child Python process via a
   \texttt{PYTHONPATH} prefix; the injected module installs a
   \texttt{sys.addaudithook} that records every \texttt{open} and
@@ -88,7 +88,7 @@ At the runtime level, we wrap \texttt{20\_run.sh} with a small audit
   classifier flags any path whose basename is one of HELM's canonical
   artifact filenames (\texttt{run\_spec.json}, \texttt{scenario.json},
   \texttt{scenario\_state.json}, \texttt{stats.json},
-  \texttt{per\_instance\_stats.json}) or whose path contains
+  \path{per_instance_stats.json}) or whose path contains
   \texttt{benchmark\_output/runs/} (HELM's run-dir signature).
 On the slim-paper run, the audit harness produced
   \emph{zero} HELM-shaped opens across 88 child Python processes,
@@ -253,16 +253,16 @@ The two sides therefore agree on \emph{which positional indices into
 
 \paragraph{Mechanism.}
 The HELM downsampler at
-  \texttt{helm/benchmark/runner.py:downsample\_eval\_instances}
+  \path{helm/benchmark/runner.py:downsample_eval_instances}
   hardcodes \texttt{np.random.seed(0)} and calls
-  \texttt{np.random.choice(all\_eval\_instances, max\_eval\_instances,
+  \path{np.random.choice(all_eval_instances, max_eval_instances,
   replace=False)}; given a fixed pool length, the sampled index
   sequence is therefore deterministic.
 Both sides have the same pool length and produce the same sampled
   indices.
 What differs is the \emph{contents} of \texttt{all\_eval\_instances} at
   each index: the upstream pandas \texttt{pd.merge} sequence inside
-  \texttt{EntityMatchingScenario.read\_blocked\_pairs} produces
+  \path{EntityMatchingScenario.read_blocked_pairs} produces
   different row orderings under different pandas versions, even on
   byte-identical input CSVs.
 HELM's \texttt{with\_instance\_ids} subsequently assigns
@@ -270,7 +270,7 @@ HELM's \texttt{with\_instance\_ids} subsequently assigns
   literally reads \texttt{``Note: order of instances matters.''}), so
   any upstream ordering instability silently rebinds id $\leftrightarrow$ content.
 The downstream \texttt{sample\_hash}, computed by the EEE converter as
-  \texttt{sha256(rendered\_prompt + correct\_reference)}, then differs
+  \path{sha256(rendered_prompt + correct_reference)}, then differs
   on a per-id basis between the two pandas regimes — precisely the
   behaviour that produces the observed zero overlap.
 
@@ -278,9 +278,9 @@ The downstream \texttt{sample\_hash}, computed by the EEE converter as
 We isolated the mechanism with two stand-alone reproducers checked into
   the released code.
 The first
-  (\texttt{dev/oneoff/em\_pandas\_mwe.sh}) runs only the
+  (\path{dev/oneoff/em_pandas_mwe.sh}) runs only the
   \texttt{pd.merge} sequence from
-  \texttt{EntityMatchingScenario.read\_blocked\_pairs} against the
+  \path{EntityMatchingScenario.read_blocked_pairs} against the
   byte-identical Abt-Buy deepmatcher CSVs across five
   \mbox{(pandas, numpy)} version combos, and computes a
   \texttt{full\_order\_digest} of the resulting row sequence.
@@ -292,10 +292,10 @@ The result is a sharp boundary: \texttt{pandas==2.0.3} (with either
 Numpy version is irrelevant; pandas $2.0 \rightarrow 2.2$ is the
   inflection.
 The second reproducer
-  (\texttt{dev/oneoff/em\_helm\_mwe.sh}) runs the full HELM scenario
-  pipeline end-to-end (\texttt{EntityMatchingScenario.get\_instances}
+  (\path{dev/oneoff/em_helm_mwe.sh}) runs the full HELM scenario
+  pipeline end-to-end (\path{EntityMatchingScenario.get_instances}
   $\rightarrow$ \texttt{with\_instance\_ids} $\rightarrow$
-  \texttt{downsample\_eval\_instances}) and diffs the resulting
+  \path{downsample_eval_instances}) and diffs the resulting
   ordered \mbox{(rank, id, content\_sig)} sequence against captured
   \texttt{scenario\_state.json} files from the actual HELM runs.
 The verdict matrix is in Table~\ref{tab:helm-em-mwe-v2}.
@@ -356,7 +356,7 @@ A consumer who joins the two sides on \texttt{(sample\_id, metric\_id)}
   agree on which examples were evaluated.
 Joining on the content-addressed \texttt{sample\_hash} (which the EEE
   converter computes as
-  \texttt{sha256(rendered\_prompt + correct\_reference)}) correctly
+  \path{sha256(rendered_prompt + correct_reference)}) correctly
   rejects the join, because the prompts, although under the same
   \texttt{id<i>}, refer to different concrete product pairs.
 The \texttt{join\_failed} cell is therefore not a flaw in the audit: it
@@ -374,23 +374,23 @@ Vicuna and Falcon are at $0.998$ and $0.997$ respectively on the same
 The recipe is bytewise-equivalent on both sides:
   \texttt{temperature=0.0, num\_outputs=1, max\_tokens=20,
   stop\_sequences=[`\textbackslash n']}, and
-  \texttt{set\_fixed\_random\_state\_for\_dataset} is active.
+  \path{set_fixed_random_state_for_dataset} is active.
 At \texttt{temperature=0} the model should be deterministic, so the
   divergence is at the inference-stack layer.
 
 \paragraph{Symptom.}
 On the public HELM side, the per-instance scoring file
-  (\texttt{per\_instance\_stats.json}) records score $0.0$ on every
+  (\path{per_instance_stats.json}) records score $0.0$ on every
   one of the 1000 instances for all three set-match metrics
   (\texttt{f1\_set\_match}, \texttt{iou\_set\_match},
   \texttt{exact\_set\_match}), and the run-level mean across each
   metric is $0.000$.
 Cross-checked against \texttt{scenario\_state.json}, every
-  \texttt{request\_state[i].result.completions[0].text} is the empty
+  \path{request_state[i].result.completions[0].text} is the empty
   string, with \texttt{n\_tokens=20} (i.e., the model always hits
   \texttt{max\_tokens} and never emits EOS).
 The EEE conversion faithfully mirrors HELM:
-  \texttt{answer\_attribution[*].extracted\_value=""} for all 20{,}000
+  \path{answer_attribution[*].extracted_value=""} for all 20{,}000
   EEE records (1000 instances $\times$ 20 metric ids), and
   \texttt{evaluation.score=0.0} for the three set-match metric ids.
 Our local re-run, in contrast, produces \texttt{n\_tokens$\approx$5} on
@@ -409,7 +409,7 @@ The official \texttt{run\_spec.json} for the slim-heatmap Pythia runs
   (\texttt{adapter\_spec}, \texttt{request}, top-level), so the
   official runs were inferenced via Together.ai.
 Our local-audit \texttt{run\_spec.json} pins
-  \texttt{model\_deployment="huggingface/pythia-6.9b"}, so the local
+  \path{model_deployment="huggingface/pythia-6.9b"}, so the local
   runs use HuggingFace transformers locally.
 On Together's hosted Pythia at \texttt{temperature=0}, the greedy first
   token after a prompt ending in \texttt{:} is the newline token
@@ -438,7 +438,7 @@ Table~\ref{tab:helm-srnat-evidence-v2} summarizes the per-layer
   divergence originates at HELM inference, not at EEE conversion.
 Each layer was inspected independently; all four agree that the
   official Pythia-6.9B run on
-  \texttt{synthetic\_reasoning\_natural} produced empty
+  \path{synthetic_reasoning_natural} produced empty
   \texttt{completion.text} on every instance and scored 0 on every
   metric.
 The EEE conversion is a faithful mirror.}
@@ -447,10 +447,10 @@ The EEE conversion is a faithful mirror.}
 \toprule
 layer & artifact & finding \\
 \midrule
-HELM run-time scoring   & \texttt{per\_instance\_stats.json}  & 1000/1000 score=0.0 for f1/iou/exact set\_match \\
+HELM run-time scoring   & \path{per_instance_stats.json}  & 1000/1000 score=0.0 for f1/iou/exact set\_match \\
 HELM raw output         & \texttt{scenario\_state.json}       & 1000/1000 \texttt{completion.text=""} with \texttt{n\_tokens=20} \\
 HELM token stream       & \texttt{scenario\_state.json} (tokens) & first token = \texttt{`\d{C}'} ($\backslash$n); answer present in tokens 2--6 \\
-EEE conversion          & \texttt{answer\_attribution}, \texttt{evaluation.score} & 20000/20000 \texttt{extracted\_value=""}, all metric scores 0 \\
+EEE conversion          & \texttt{answer\_attribution}, \texttt{evaluation.score} & 20000/20000 \path{extracted_value=""}, all metric scores 0 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -459,7 +459,7 @@ EEE conversion          & \texttt{answer\_attribution}, \texttt{evaluation.score
 The published Stanford HELM Classic v0.3.0 dashboard at
   \texttt{crfm.stanford.edu/helm/classic/latest/\#/groups/synthetic\_reasoning\_natural}
   reports Pythia-6.9B at $0\%$ accuracy on
-  \texttt{synthetic\_reasoning\_natural} for the three set-match
+  \path{synthetic_reasoning_natural} for the three set-match
   metrics, consistent with the empty-completion mechanism documented
   here.
 The published number is therefore a real artifact of the published
@@ -506,7 +506,7 @@ For a binary metric with per-prompt hit rate $p_i$ (defined as the
   \mathbb{E}_i[\,p_i^2 + (1-p_i)^2\,].
 \]
 The Lean-verified identity at the heart of our analysis (theorem
-  \texttt{expectedAgreement\_eq\_uniformAgreement\_add\_variance})
+  \path{expectedAgreement_eq_uniformAgreement_add_variance})
   decomposes this as
 \[
   \mathbb{E}_i[\,\text{agree}(p_i)\,]
@@ -520,7 +520,7 @@ The first term is the homogeneous-Bernoulli prediction one would make
   non-negative variance term that captures prompt-level
   heterogeneity.
 Together they imply (theorem
-  \texttt{uniformAgreement\_le\_expectedAgreement}) that
+  \path{uniformAgreement_le_expectedAgreement}) that
   $\text{agree}(\bar p) \le \mathbb{E}_i[\text{agree}(p_i)]$: the
   homogeneous prediction at the mean is a lower bound on the
   heterogeneous expected agreement.
@@ -550,7 +550,7 @@ Our observed $\approx 0.92$ across all three models is consistent with
   effect (Section~\ref{sec:app-helm-pythia-pattern-v2}).
 \footnote{The supporting Bernoulli identities and bound theorems
   cited above are formalized in
-  \texttt{dev/paper/wikifact\_consistency\_claim.lean}, which
+  \path{dev/paper/wikifact_consistency_claim.lean}, which
   compiles against \texttt{Mathlib} and is verified independently of
   this manuscript.}
 
@@ -742,7 +742,7 @@ Each of the three case studies above made this audit/forensics split
   visible in concrete terms: Case~A's pandas-merge mechanism required
   inspecting HELM's \texttt{run\_spec.json} adapter spec, the
   \texttt{scenario\_state.json} per-instance ordering, and the
-  \texttt{entity\_matching\_scenario.py} source; Case~B's
+  \path{entity_matching_scenario.py} source; Case~B's
   Together-hosted-Pythia mechanism required HELM's
   \texttt{auto\_client.py} dispatch logic; Case~C's noise-floor
   diagnosis required the \texttt{run\_spec.json} \texttt{temperature}
@@ -811,7 +811,7 @@ On SR~$\times$~Falcon-7B (cell agree\_ratio $0.999$), $10$ of $1000$
 But of those $10$ output-divergent prompts, only $3$ produce score
   disagreements across the four core metrics
   (\texttt{exact\_match}, \texttt{prefix\_exact\_match},
-  \texttt{quasi\_exact\_match}, \texttt{quasi\_prefix\_exact\_match})
+  \texttt{quasi\_exact\_match}, \path{quasi_prefix_exact_match})
   $\times$ $1000$ prompts $=$ $4000$ score rows, because the other $7$
   output-divergent prompts produce outputs that both miss the gold
   reference, so the score is $0=0$ on every metric and the row counts
@@ -941,7 +941,7 @@ bash dev/oneoff/em_helm_mwe.sh
 \end{lstlisting}
 
 The audit-hook report at
-  \texttt{\$OUT\_ROOT/audit/audit\_eee\_only\_run.report.json}
+  \path{$OUT_ROOT/audit/audit_eee_only_run.report.json}
   contains the per-PID file-open log and the verdict
   (\texttt{n\_flagged\_opens=0} on a successful EEE-only run); the
   Case~A reproducer outputs at
@@ -949,9 +949,9 @@ The audit-hook report at
   \texttt{em\_helm\_mwe\_out/} contain the digest tables and the
   rank-by-rank verdict matrix respectively.
 The slim-paper heatmap PNG is at
-  \texttt{\$OUT\_ROOT/heatmap/reproducibility\_heatmap.png} with
+  \path{$OUT_ROOT/heatmap/reproducibility_heatmap.png} with
   per-metric drill-downs in the sibling
-  \texttt{reproducibility\_heatmap\_per\_metric/} directory.
+  \path{reproducibility_heatmap_per_metric/} directory.
 
 \paragraph{Time and resource budget.}
 Stage 1 (link tree) takes seconds.
