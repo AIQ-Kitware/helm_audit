@@ -2206,30 +2206,70 @@ The \texttt{present} legend swatch uses \texttt{cmap(vmax)} (deep
 \subsection{Versions used for the final reproduction}
 \label{sec:tr-versions}
 
-The published artifacts cited throughout this report
-  (the slim heatmap PNG, \texttt{cell\_data.json}, the audit-hook
-  verdict, the per-pair core-metric reports, the pandas-merge MWE
-  digests, and the end-to-end HELM-in-loop verdict matrix) were
-  produced from the following pinned versions.
-For exact byte-for-byte reproduction of any single artifact, check out
-  the corresponding repository state below.
-The local-side HELM runs that produced the local EEE artifacts were
-  performed at earlier submodule pins than the current pin; the
-  per-conversion \texttt{provenance.json} sidecar in each EEE
-  conversion records the exact run-time state, and the slim heatmap's
-  three local-side experiments
-  (\path{audit-historic-grid}, \path{audit-falcon-7b-helm-grid})
-  are dated 2026-03-28 to 2026-04-30.
+\paragraph{Honesty caveat: these SHAs are not stable across the
+  investigation history.}
+The pinned SHAs we record in Table~\ref{tab:tr-versions} below are the
+  repository state \emph{at the time of writing this report}
+  (2026-05-02), not a single static state under which every artifact
+  in the report was produced.
+The investigation evolved over the course of $\sim 60$~commits
+  between the first slim-heatmap render and this final report,
+  during which the audit pipeline, the heatmap renderer, the metric
+  classifier, the reproducer scripts, and the runtime audit hook
+  were all built or amended.
+Specifically:
+\begin{itemize}
+  \item The local-side HELM runs that produced the local EEE
+        artifacts were performed at \emph{earlier} \path{submodules/helm}
+        pins than the pin recorded below; Pythia and Vicuna runs
+        were dated 2026-03-28/29 under the
+        \path{audit-historic-grid} experiment, and Falcon-7B runs
+        were dated 2026-04-30 under the
+        \path{audit-falcon-7b-helm-grid} experiment.
+        Per-conversion \texttt{provenance.json} sidecars in each EEE
+        conversion record the exact run-time state, including
+        machine host (\texttt{aiq-gpu} for the slim grid).
+  \item The audit-hook verdict
+        (Table~\ref{tab:tr-audit-verdict}) was generated at
+        2026-05-01 19:29 UTC and the slim-heatmap PNG was last
+        re-rendered at 2026-05-01 21:53 UTC.
+        Several intermediate commits between those two times added
+        the metric-classifier registration of the
+        \texttt{*\_set\_match} family, the \texttt{no\_core\_metrics}
+        cell status, the \texttt{n\_joined\_pairs} field, the
+        heatmap colour-scale and legend tightening, and the
+        \texttt{redraw\_plots.sh} auto-emission.
+  \item Each tooling deliverable in
+        Section~\ref{sec:tr-tooling} landed at its own commit during
+        the investigation; commit IDs are visible from
+        \texttt{git log dev/oneoff/audit\_eee\_only\_run.py},
+        \texttt{git log dev/oneoff/em\_pandas\_mwe.sh}, etc.
+\end{itemize}
+
+\paragraph{What the table records.}
+The pinned SHAs below are what a reviewer would check out today to
+  re-run the audit end-to-end against the released code, and to read
+  the released text of this report.
+They are not a record of the investigation's history.
+A reviewer interested in the per-finding investigation chain can
+  walk the commit history; the relevant tooling commits are linked
+  by name in Section~\ref{sec:tr-tooling}, and the per-conversion
+  \texttt{provenance.json} sidecars give the exact local-side run-time
+  state.
 
 \begin{table}[htbp]
 \centering
 \small
-\caption{Pinned versions used for the final reproduction.
-Repository SHA is the head of the \path{eval_audit} repository at
-  the time the slim-heatmap PNG was last re-rendered
-  (2026-05-01 21:53 UTC) and at which all release artifacts in this
-  report were produced; submodule SHAs are the corresponding
-  submodule pins at that repository state.
+\caption{Pinned versions at the time of writing
+  (2026-05-02), recording the repository state a reviewer can check
+  out to re-run the audit end-to-end against the released code.
+These SHAs were \emph{not} stable across the investigation: the
+  local-side HELM runs were performed at earlier
+  \path{submodules/helm} pins (per per-conversion
+  \texttt{provenance.json} sidecars), and the analysis pipeline
+  evolved over $\sim 60$~commits during the investigation, with
+  individual tooling and pipeline-fix commits documented in
+  Section~\ref{sec:tr-tooling}.
 \path{HELM-suite-name@version} encodes the public-side suite anchor
   (the slim heatmap pulls from \texttt{classic} at \texttt{v0.3.0}).}
 \label{tab:tr-versions}
