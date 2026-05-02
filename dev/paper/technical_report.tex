@@ -64,16 +64,28 @@ The audit operates entirely through the \eee{} schema and is
 
 \paragraph{Headline numbers.}
 On the resulting heatmap, 39 of 42 cells have a micro-averaged
-  instance-level agree\_ratio in $[0.788, 1.000]$ at \texttt{abs\_tol=0};
+  instance-level agree\_ratio in $[0.788, 1.000]$ at \texttt{abs\_tol=1e-9};
   the remaining 3 are the \texttt{entity\_matching} cells across all
   three models, where official-side and local-side \texttt{sample\_hash}
   sets have zero overlap.
 
-\paragraph{Three reproducibility-failure mechanisms identified.}
-Each illustrates a different layer at which HELM-side reproducibility
-  can leak, and each is detected by EEE's content-addressed
-  \texttt{sample\_hash} while HELM's positional \texttt{id<i>}-based
-  comparison would silently agree on different examples.
+\paragraph{Three reproducibility-disagreement mechanisms identified.}
+Each illustrates a different layer at which two runs of nominally
+  the same recipe can disagree.
+Two of the three (Cases~A and~B below) are upstream issues that we
+  attribute to the HELM serving and data-pipeline stack;
+  the third (Case~C) is intentional recipe-level stochasticity that
+  the benchmark explicitly enables and that any honest audit must
+  treat as the design-baked floor, not as a reproducibility bug.
+Each is detected by EEE's content-derived \texttt{sample\_hash}
+  (a SHA-256 hash over the rendered prompt and the first correct
+  reference, computed at conversion time; see
+  Section~\ref{sec:tr-eee-format}) while HELM's positional
+  \texttt{id<i>}-based comparison would silently agree on different
+  examples on the upstream-issue cases.
+The hash validates whether two records describe the same
+  prompt-reference pair; it does not retrieve or address the
+  underlying content.
 
 \begin{enumerate}
   \item \textbf{Data-pipeline non-determinism (Case~A).}
@@ -224,6 +236,83 @@ A mismatch that comes from \texttt{temperature=1} stochastic sampling
 Both are present in the slim-paper grid we audit; both are detected
   by \eee{}; the mechanisms are completely different.
 
+\subsection{Artifact provenance: who produced what}
+\label{sec:tr-artifact-provenance}
+
+The audit compares two sides per \mbox{(model, benchmark)} cell.
+What we did, and what we relied on others to have done, matters for
+  every claim in this report; we lay it out explicitly here.
+
+\paragraph{Public-side HELM artifacts (CRFM-published, not ours).}
+The official side of every comparison is anchored in the public
+  HELM~Classic suite at version \texttt{v0.3.0}, hosted by
+  Stanford CRFM at the canonical
+  \texttt{benchmark\_output/runs/v0.3.0/<run\_spec>/} layout.
+We did not run those evaluations; CRFM did, on whatever hardware and
+  HELM version they used at the time the v0.3.0 results were
+  published.
+We mirror those run dirs locally at
+  \texttt{/data/crfm-helm-public/classic/benchmark\_output/runs/v0.3.0/}
+  and treat their contents
+  (\texttt{run\_spec.json}, \texttt{scenario\_state.json},
+   \texttt{stats.json}, \texttt{per\_instance\_stats.json})
+  as the authoritative published record.
+
+\paragraph{Public-side EEE conversion (ours).}
+We then converted those public HELM run dirs into \eee{} artifacts
+  using our \texttt{every\_eval\_ever.converters.helm} converter
+  (schema version \texttt{0.2.2}), one EEE record set per
+  HELM run dir.
+The converted artifacts are stored at
+  \texttt{/data/crfm-helm-audit-store/crfm-helm-public-eee-test/classic/v0.3.0/};
+  every aggregate JSON in that tree records
+  \texttt{source\_metadata.evaluator\_relationship="third\_party"}
+  and \texttt{source\_metadata.source\_organization\_name="CRFM"}
+  to mark the underlying evaluation as published-by-CRFM but
+  EEE-converted-by-us.
+
+\paragraph{Local-side HELM runs (ours).}
+For each \mbox{(model, benchmark)} pair on the slim grid we re-ran
+  HELM ourselves under the matching recipe.
+Pythia-6.9B and Vicuna-7B v1.3 runs were performed under the
+  \texttt{audit-historic-grid} experiment on
+  \texttt{aiq-gpu} between 2026-03-28 and 2026-03-29;
+  Falcon-7B runs were performed under the
+  \texttt{audit-falcon-7b-helm-grid} experiment on the same host
+  on 2026-04-30.
+Both experiments used HELM version \texttt{crfm-helm} 0.5.x
+  (specifically the head of the \texttt{submodules/helm/} checkout
+  in this repository at the time of run, dated 2026-04-03; see
+  \texttt{provenance.json} sibling files in each EEE conversion
+  for exact per-run timestamps).
+Local HELM run dirs are at
+  \texttt{/data/crfm-helm-audit/<experiment\_name>/helm/helm\_id\_<id>/benchmark\_output/runs/<experiment\_name>/<run\_spec>/}.
+
+\paragraph{Local-side EEE conversion (ours).}
+We converted our own HELM run dirs into \eee{} artifacts with the
+  same \texttt{every\_eval\_ever.converters.helm} converter (same
+  version) used on the public side, so the two sides go through the
+  same conversion code path.
+Local EEE artifacts are at
+  \texttt{/data/crfm-helm-audit-store/eee/local/<experiment\_name>/helm\_id\_<id>/<run\_slug>/eee\_output/};
+  each conversion is reproducible from a sidecar \texttt{reproduce.sh}
+  alongside its \texttt{provenance.json}.
+
+\paragraph{Why this matters.}
+This audit's claims are claims about the \emph{four} artifact sets
+  above (public HELM run dirs, public EEE conversion, local HELM run
+  dirs, local EEE conversion).
+We do not have access to whatever Together.ai-side serving
+  configuration produced the public HELM completions
+  (relevant to Case~B; see Section~\ref{sec:tr-case-b}); we have only
+  the resulting completion text and tokens that CRFM committed to the
+  public run dirs.
+The audit therefore reasons about \emph{output behaviour} of
+  Together-served Pythia (visible in CRFM's
+  \texttt{scenario\_state.json}) versus HuggingFace-served Pythia
+  (visible in our local \texttt{scenario\_state.json}); it does not
+  reason about Together's internal serving stack.
+
 
 % =====================================================================
 \section{Audit Pipeline Architecture}
@@ -251,27 +340,38 @@ For each evaluation run, \eee{} stores:
         \texttt{evaluation.score} (the per-metric score the harness
         recorded),
         \texttt{sample\_id} (the harness's per-record identifier),
-        and \texttt{sample\_hash} (a content-addressed identifier
-        we compute at conversion time).
+        and \texttt{sample\_hash} (a content-derived hash we compute
+        at conversion time; the formula is given below).
 \end{itemize}
 
 The \texttt{sample\_hash} is the central identity primitive on which
   the audit depends.
-For HELM-converted records, it is computed as
-\[
-  \texttt{sample\_hash}
-  = \mathrm{sha256}(\texttt{state.request.prompt}
-    \;\Vert\; \texttt{correct\_refs[0]}),
-\]
+For HELM-converted records, the converter at
+  \texttt{every\_eval\_ever/converters/helm/instance\_level\_adapter.py:231--233}
+  computes it as
+\begin{lstlisting}[style=python, caption={\eee{} HELM converter
+  \texttt{sample\_hash} formula (excerpt; verbatim from
+  \texttt{instance\_level\_adapter.py:231--233}).\label{lst:tr-sample-hash}}]
+sample_hash=sha256_string(
+    state.request.prompt + (correct_refs[0] if correct_refs else '')
+)
+\end{lstlisting}
 where \texttt{state} is HELM's per-instance \texttt{request\_state},
-  \texttt{request.prompt} is the rendered prompt the model saw, and
-  \texttt{correct\_refs[0]} is the first gold reference for the
+  \texttt{state.request.prompt} is the rendered prompt the model saw
+  (instructions plus any fewshot exemplars plus the test instance),
+  and \texttt{correct\_refs[0]} is the first gold reference for the
   instance.
-The hash is content-derived: two records with identical rendered
-  prompt and gold reference produce identical hashes; any drift in
-  prompt construction (e.g.\ a different fewshot exemplar, a
-  different newline pattern, a different gold reference) produces a
-  different hash.
+The hash is content-derived over the prompt and first reference:
+  two records with identical \texttt{request.prompt} and identical
+  first \texttt{correct\_ref} produce identical hashes; any drift in
+  prompt construction (a different fewshot exemplar, a different
+  newline pattern, a different gold reference) produces a different
+  hash.
+We use the hash for join-key purposes only --- to validate that two
+  records describe the same prompt-reference pair.
+It does not retrieve or address the underlying content; a record's
+  prompt and reference fields are the addressable surface, and the
+  hash is the validation primitive over them.
 
 For a comparison of two evaluations of nominally the same recipe
   (e.g., the published HELM run and our local re-run), the audit
@@ -485,7 +585,7 @@ They span:
 \label{sec:tr-comparison-metric}
 
 For each cell we compute the \emph{micro-averaged} instance-level
-  agreement at \texttt{abs\_tol=0}: the fraction of
+  agreement at \texttt{abs\_tol=1e-9}: the fraction of
   \mbox{(\texttt{sample\_hash}, \texttt{evaluation\_result\_id})}
   rows whose per-metric \texttt{evaluation.score} is bit-identical
   between the public-HELM-side and local-side records.
@@ -509,13 +609,21 @@ The micro-average means a cell with multiple metric kinds is
   failure modes we report and that we discuss in detail in
   Section~\ref{sec:tr-microavg}.
 
-We deliberately use \texttt{abs\_tol=0} as the headline tolerance:
-  looser tolerances erase the per-instance flips this audit is
-  designed to detect, and a relaxed tolerance hides the
-  upstream effects we want to surface.
+We deliberately use \texttt{abs\_tol=1e-9} as the headline tolerance:
+  for the binary-valued metrics that dominate the slim grid
+  (\texttt{exact\_match}, the \texttt{*\_set\_match} family, etc.,
+  whose per-row scores are $0$ or $1$), $10^{-9}$ is operationally
+  indistinguishable from ``exact match'' --- the score gap between $0$
+  and $1$ is $1.0$, far above any plausible floating-point drift ---
+  and for continuous-valued metrics it pins any sub-$10^{-9}$
+  numerical drift to ``agreement'' while still catching real
+  per-instance flips.
+Looser tolerances erase the per-instance flips this audit is
+  designed to detect, and a relaxed tolerance hides the upstream
+  effects we want to surface.
 Per-cell tolerance sweeps are computed by the pipeline and are
   available in the cell-level JSON output, but the headline number is
-  always at \texttt{abs\_tol=0}.
+  always at \texttt{abs\_tol=1e-9}.
 
 \subsection{Validation strategy}
 \label{sec:tr-validation}
@@ -619,7 +727,7 @@ The Pythia column is the systematic outlier on this slim grid; the
 \centering
 \small
 \caption{Per-benchmark micro-averaged instance-level agreement at
-  \texttt{abs\_tol=0} on the slim heatmap, sorted by Pythia-6.9B
+  \texttt{abs\_tol=1e-9} on the slim heatmap, sorted by Pythia-6.9B
   agreement ascending.
 Three observations are visible at this granularity:
   (i)~Pythia is the dominant outlier on every cell except
@@ -848,8 +956,14 @@ Numpy is pinned to a single value within each pandas-version pair to
   split.
 \texttt{full\_order\_digest} is sha256 of the merged row sequence
   (\texttt{ltable\_id, rtable\_id, label}) in pandas-returned order.
-The digest collapses to two distinct values across the five combos;
-  the boundary is purely pandas (numpy version is irrelevant).
+\textbf{Pandas is the only causally-relevant variable here; the
+  numpy column is varied deliberately to isolate it as noise.}
+  Rows~1--2 hold pandas at 2.0.3 while sweeping numpy from 1.23.5 to
+  1.26.4 (digest unchanged); rows~3--5 hold pandas at 2.2.3+ while
+  sweeping numpy from 1.26.4 through 2.0.0 to 2.4.4 (digest
+  unchanged within the group, distinct from rows~1--2).
+The boundary is purely pandas $2.0.x \to 2.2.x$; numpy version is
+  irrelevant on this dataset.
 First-divergence row index is row 1 (i.e., the second emitted row)
   for every cross-boundary pair.}
 \label{tab:tr-em-pandas-mwe}
@@ -1049,7 +1163,7 @@ A consumer who joins the two sides on
   on which examples were evaluated.
 That inference is wrong: the prompts under each id are completely
   different.
-Joining on the content-addressed
+Joining on the content-derived
   \mbox{(\texttt{sample\_hash}, \texttt{evaluation\_result\_id})}
   correctly rejects the join, because the prompts, although under the
   same \texttt{id<i>}, refer to different concrete product pairs and
@@ -1147,19 +1261,28 @@ The model has clearly generated a coherent answer in tokens 2--6
 
 \begin{lstlisting}[style=shell, caption={First eight tokens of the
   official Pythia-6.9B \texttt{completion} on a representative
-  SR-Natural prompt.
+  SR-Natural prompt, as recorded in
+  \texttt{scenario\_state.json.request\_states[i].result.completions[0].tokens}.
+  Token-text fields show the GPT-NeoX BPE encoding;
+  \texttt{<newline-tok>} stands for the BPE token whose decoded form
+  is the newline character ASCII 0x0A (rendered as the byte
+  \texttt{0xC4 0x8A} pair in the raw JSON, which decodes to U+010A
+  Latin Capital Letter C with Caron, the BPE convention for newline).
+  \texttt{<space-pfx>} stands for the BPE leading-space-marker prefix
+  (raw byte \texttt{0xC4 0xA0}, U+0120, the BPE convention for a
+  word-initial space).
   Tokens 2--6 contain the actual answer; HELM's stop\_sequence trim
   at the leading newline (token 0) drops it from
   \texttt{completion.text}.\label{lst:tr-helm-tokens}}]
 [
-  {"text": "\\u010A"},   # 'Ċ', the BPE encoding of newline
-  {"text": "The"},
-  {"text": "\\u0120dog"},  # 'Ġdog', leading-space-marker + dog
-  {"text": "\\u0120is"},
-  {"text": "\\u0120sad"},
-  {"text": "."},
-  {"text": "\\u010A"},
-  {"text": "\\u010A"},
+  {"text": "<newline-tok>"},      # token 0  (drives stop_sequence trim)
+  {"text": "The"},                # token 1
+  {"text": "<space-pfx>dog"},     # token 2
+  {"text": "<space-pfx>is"},      # token 3
+  {"text": "<space-pfx>sad"},     # token 4
+  {"text": "."},                  # token 5
+  {"text": "<newline-tok>"},      # token 6
+  {"text": "<newline-tok>"},      # token 7
   ...
 ]
 \end{lstlisting}
@@ -1217,17 +1340,25 @@ On HuggingFace transformers locally, Pythia's greedy first token
   \texttt{`\textbackslash n'}), so the trim happens after a real
   answer is captured.
 
-\subsection{Independent verification: the Stanford HELM dashboard}
+\subsection{Independent verification: the published HELM v0.3.0 record}
 \label{sec:tr-case-b-dashboard}
 
-The published Stanford HELM Classic v0.3.0 dashboard at
-\begin{quote}\small
-  \url{https://crfm.stanford.edu/helm/classic/latest/\#/groups/synthetic_reasoning_natural}
-\end{quote}
-reports Pythia-6.9B at $0\%$ accuracy on
-  \texttt{synthetic\_reasoning\_natural} for the three set-match
-  metrics, consistent with the empty-completion mechanism documented
-  here.
+The Pythia-6.9B $0\%$ accuracy on
+  \texttt{synthetic\_reasoning\_natural} appears in the public HELM
+  Classic v0.3.0 record itself --- not just on the live dashboard,
+  which can change.
+The frozen record is in the public run dir at
+  \texttt{/data/crfm-helm-public/classic/benchmark\_output/runs/v0.3.0/synthetic\_reasoning\_natural:difficulty=easy,model=eleutherai\_pythia-6.9b/stats.json},
+  whose contents we summarized in
+  Section~\ref{sec:tr-case-b-cross-check}: \texttt{f1\_set\_match},
+  \texttt{iou\_set\_match}, and \texttt{exact\_set\_match} all have
+  \texttt{mean=0.0} on both \texttt{test} and \texttt{valid} splits.
+The same $0\%$ figure surfaces on the Stanford-hosted Classic-v0.3.0
+  dashboard at the time of writing
+  (\url{https://crfm.stanford.edu/helm/classic/v0.3.0/}, group
+  \texttt{synthetic\_reasoning\_natural}); we cite the on-disk
+  \texttt{stats.json} as the version-stable record because the live
+  dashboard URL may be re-anchored over time.
 The published number is therefore a real artifact of the published
   audit, not a measurement of the model's capability on the task.
 
@@ -1251,7 +1382,7 @@ This is not the dominant problem.
 
 Second, \emph{degenerate-zero agreement} is the dominant effect.
 With the official run scoring $0.0$ on every row, every $\text{LOCAL}=0$
-  outcome counts as a $0=0$ agreement at \texttt{abs\_tol=0}.
+  outcome counts as a $0=0$ agreement at \texttt{abs\_tol=1e-9}.
 The $0.788$ thus reads as ``fraction of prompts on which the local
   side also scored zero'', not ``fraction of cases where the two model
   behaviours agree''.
@@ -1365,9 +1496,18 @@ $p$ & $\text{agree}(p)$ \\
 \end{tabular}
 \end{table}
 
-The implication is sharp: producing a heterogeneous expected
-  agreement of $\approx 0.92$ requires either extreme $\bar p$
-  (greater than $0.92$ or less than $0.08$) or non-trivial
+The implication is sharp.
+The homogeneous Bernoulli equation $p^2 + (1-p)^2 = 0.92$ has roots
+\[
+  p = \tfrac{1}{2}\bigl(1 \pm \sqrt{0.84}\bigr)
+    \approx 0.9583 \;\text{or}\; 0.0417,
+\]
+so any $\bar p \in (0.0417, 0.9583)$ falls strictly below the
+  observed $0.92$ in the homogeneous case.
+Producing a heterogeneous expected agreement of exactly $\approx 0.92$
+  therefore requires either $\bar p \approx 0.958$ (or its symmetric
+  twin $\approx 0.042$, equally well-supported by the formula but
+  unrealistic for trained models on this benchmark) or non-trivial
   $\mathrm{Var}_i(p_i)$.
 The latter --- prompt-level heterogeneity, with many prompts being
   near-deterministic --- is what one would expect for a trained model
@@ -1697,7 +1837,7 @@ But three failure modes of this micro-average are visible in the slim
 When one side's run is degenerate
   (e.g., the SR-Natural~$\times$~Pythia broken official run scoring
   $0$ on every row), every \mbox{(sample, metric)} row where the
-  other side also scores $0$ counts as agreement at \texttt{abs\_tol=0}.
+  other side also scores $0$ counts as agreement at \texttt{abs\_tol=1e-9}.
 The agreement rate then reads as ``fraction of prompts on which the
   non-degenerate side also failed'', not ``fraction of cases where
   the two model behaviours agree''.
@@ -1858,9 +1998,11 @@ The audit/forensics split protects \eee{} consumers from that
 \label{sec:tr-tooling}
 % =====================================================================
 
-The audit produced five reusable tools, all released alongside this
-  report under \texttt{dev/oneoff/} and \texttt{eval\_audit/} in the
-  repository.
+The audit produced four reproducer tools and four code changes to the
+  audit pipeline, consistent with the executive-summary count
+  (Section~\ref{sec:tr-summary}).
+All deliverables are released alongside this report under
+  \texttt{dev/oneoff/} and \texttt{eval\_audit/} in the repository.
 
 \subsection{\texttt{audit\_eee\_only\_run.py}}
 \label{sec:tr-tooling-audit-hook}
