@@ -4,12 +4,13 @@
 We use HELM to test whether \eee{} supports instance-level reproducibility
   analysis beyond aggregate score comparison.
 We re-executed Pythia-6.9B, Vicuna-7B v1.3, and Falcon-7B on fourteen
-  single-turn HELM benchmarks and compared public records to local
+  single-turn HELM benchmarks and compared HELM-released records, which we call
+  \emph{official}, to local
   reproductions~\citep{helm,pmlr-v202-biderman23a,vicuna2023,almazrouei2023falcon}.
-We converted both sides to \eee{} and joined records by \texttt{sample\_hash}, a
-  hash of the rendered prompt and reference.
+We converted both sides to \eee{} and joined by \texttt{sample\_hash}, which
+  hashes the rendered prompt and reference.
 Each cell reports the micro-average agreement: the fraction of matched
-  \mbox{(instance, core metric)} score pairs for which the public and local
+  \mbox{(instance, core metric)} score pairs for which the official and local
   scores are equal up to \texttt{abs\_tol=1e-9}.
 Figure~\ref{fig:cs3-helm-heatmap} reveals four non-reproducibility patterns:
   non-comparability, serving artifacts, stochastic disagreement, and residual
@@ -21,44 +22,39 @@ Each side contains 1{,}000 Abt--Buy~\cite{kopcke2010evaluation} examples, but
   different subset despite using the same recipe.
 A pandas merge row-order change in HELM scenario
   construction~\citep{mckinney2010data,pandas_merge_docs} permuted the candidate
-  set before fixed-seed downsampling, selecting different prompts.
-Because the rendered prompts and references do not match, \eee{} rejects the
-  comparison and reports the cell as \texttt{join\_failed}.
+  set before fixed-seed sampling, selecting different prompts.
+Because prompts and references do not match, \eee{} reports
+  \texttt{join\_failed}.
 
 \paragraph{SyntheticReasoning-Natural exposes a Pythia serving artifact.}
-This discrepancy emerges because the \texttt{output.raw} field in the public
-  HELM results is always empty, and thus the score is always zero.
-In contrast, our reproduction of this benchmark shows completions with low but
-  non-zero scores.
-Lower-level HELM artifacts show that the public run produced outputs, but each
+Here, official \texttt{output.raw} fields are empty and scores are zero, whereas
+  our reproduction records completions with low but non-zero scores.
+Lower-level artifacts show that the official run produced outputs, but each
   began with the newline stop sequence and was trimmed before scoring.
-This likely reflects a deployment difference: HELM v0.3.0 routed the public
-  Pythia run through Together.ai, whereas ours was run locally via the Hugging
-  Face deployment.
-\eee{} does not encode the historical serving stack, but it surfaces the
-  symptom: empty completions in the scored records.
+This likely reflects deployment differences: HELM v0.3.0 used Together.ai,
+  whereas ours used local Hugging Face inference.
+\eee{} does not encode the historical serving stack, but surfaces the empty
+  scored completions.
 
 \paragraph{WikiFact disagreement is recipe-level stochasticity.}
 The WikiFact cells cluster near 0.92 because the recipe uses
   \texttt{temperature=1.0} and \texttt{num\_outputs=5}.
-This is slightly above the homogeneous-Bernoulli prediction at the mean accuracy
+This slightly exceeds the homogeneous-Bernoulli prediction
   (Appendix~\ref{sec:app-helm-wikifact}), consistent with prompt-dependent
   difficulty.
 
 \paragraph{Residual disagreements are real but smaller.}
-For the remaining cells below one, the runs usually evaluate the same instances
-  and mostly agree but differ on a small number of generated answers,
-  concentrated in Pythia-6.9B.
-Pythia may be more sensitive to serving-stack changes, but the audit cannot
-  separate model weakness from deployment details.
-Thus, \eee{} detects several failure modes and provides forensic leads, but does
-  not replace framework-level provenance.
+The remaining sub-unit cells mostly agree, with small answer differences
+  concentrated in Pythia-6.9B, which may be more sensitive to serving-stack
+  changes, but the audit cannot separate model weakness from deployment details.
+Thus, \eee{} detects failure modes and provides forensics, but does not replace
+  framework-level provenance.
 
 \begin{figure}[t]
   \centering
   %% CITATION/ASSET NOTE: replace with the final camera-ready figure path.
   \includegraphics[width=0.66\linewidth]{/data/crfm-helm-audit-store/eee-only-reproducibility-heatmap-paper-slim/heatmap/reproducibility_heatmap.png}
-  \caption{Instance-level agreement between public HELM records and local reproductions
+  \caption{Instance-level agreement between official records and local reproductions
 after conversion to \eee{}. Entity-Matching is non-comparable; WikiFact reflects
 stochastic decoding; the largest post-join discrepancy is
 SyntheticReasoning-Natural with Pythia-6.9B.}%
