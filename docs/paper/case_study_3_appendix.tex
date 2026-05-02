@@ -1,227 +1,94 @@
 \section{HELM Reproducibility Audit Details}
 \label{sec:app-helm-audit}
 
-This appendix gives the technical evidence for
-Section~\ref{sec:cs3-helm}.  The goal is to keep the paper-level case study
-focused on the scientific point---\eee{} separates invalid comparisons,
-diagnostic discrepancies, and expected stochastic disagreement---while retaining
-enough detail for a reader to evaluate the audit.
+This appendix gives the technical evidence for Section~\ref{sec:cs3-helm}. We
+compare HELM-released records, called \emph{official}, to local re-executions
+for Pythia-6.9B, Vicuna-7B v1.3, and Falcon-7B on fourteen single-turn HELM
+benchmarks. Both sides are converted to \eee{} and aligned by
+\texttt{sample\_hash}, the SHA-256 hash of the rendered prompt and reference.
+Each heatmap cell reports the fraction of aligned \mbox{(instance, core metric)}
+score pairs that match within \texttt{abs\_tol=1e-9}. Of the 42
+\mbox{(model, benchmark)} cells, 39 align and three fail to join; all three
+failures are Entity-Matching.
 
-\subsection{Audit scope and agreement metric}
-\label{sec:app-helm-scope}
-
-We compared public HELM records against local re-executions for three
-open-weight models (Pythia-6.9B, Vicuna-7B v1.3, Falcon-7B) on fourteen
-single-turn benchmarks drawn from the relevant HELM suites for each model
-(including HELM Classic where applicable): BoolQ, CivilComments, Entity-DataImputation,
-Entity-Matching, GSM, IMDB, LSAT-QA, MMLU, NarrativeQA, QuAC,
-SyntheticReasoning, SyntheticReasoning-Natural, TruthfulQA, and WikiFact.  The
-comparison covers 42 \mbox{(model, benchmark)} cells.  Both sides are converted
-to \eee{} aggregate and instance-level records.  We align instances by
-\texttt{sample\_hash}, the SHA-256 hash of the rendered prompt and reference,
-and compute the per-cell agreement as the fraction of aligned instances on
-which the official and local scores match within \texttt{abs\_tol=1e-9},
-micro-averaged over instances and over the benchmark's canonical core-metric
-set (rather than over every recorded metric).
-
-This metric is intentionally stricter than comparing aggregate scores.  It asks
-whether the same prompt-reference pair received the same metric value on each
-side.  It also intentionally refuses to produce a number when the prompt sets do
-not overlap.  In the heatmap, 39 cells have aligned instances and three cells
-are \texttt{join\_failed}; the failed joins are exactly the three
-Entity-Matching cells.
-
-\subsection{Entity-Matching: identical ids, different examples}
+\subsection{Entity-Matching}
 \label{sec:app-helm-entity-matching}
 
-The Entity-Matching result is a non-comparability failure, not a model failure.
-The public and local records each contain 1,000 Abt--Buy examples, and HELM's
-positional identifiers overlap 1,000/1,000.  Nevertheless, the
-\texttt{sample\_hash} sets have zero overlap.  Inspecting the upstream scenario
-construction isolates the cause: \texttt{EntityMatchingScenario} forms a merged
-candidate table with \texttt{pd.merge}; HELM then applies a fixed-seed
-\texttt{np.random.seed(0)} downsample and assigns ids positionally.  A version
-change in pandas changes the order of the merged table, so the fixed downsample
-selects different product pairs even though the input CSVs, seed, and HELM
-recipe are the same.
+Entity-Matching is a non-comparability failure. Official and local records each
+contain 1,000 Abt--Buy examples, and HELM positional identifiers overlap
+1,000/1,000, but the \texttt{sample\_hash} sets have zero overlap.
+\texttt{EntityMatchingScenario} constructs a candidate table with
+\texttt{pd.merge}, then applies fixed-seed sampling and assigns ids
+positionally. A pandas row-order change permutes the candidate table before
+sampling, so the same input files, seed, and HELM recipe select different
+product pairs.
 
-Two reproducer checks close the loop.  First, a pandas-only reproducer applies
-the exact merge sequence to the Abt--Buy CSVs and hashes the resulting row order:
-pandas 2.0.3 yields one stable digest, while pandas 2.2.3 and newer yield a
-different stable digest.  Sweeping numpy versions while holding pandas fixed
-does not change the digest.  Second, an end-to-end HELM-scenario reproducer
-shows that the current environment reproduces the local
-\texttt{scenario\_state.json} byte-for-byte, whereas a HELM v0.3.0-era
-environment reproduces the public \texttt{scenario\_state.json} byte-for-byte
-(Table~\ref{tab:app-helm-em-mwe}).  The only load-bearing difference is the
-pandas regime.
-%% CITATION NOTE: the pandas API/documentation citation supports the library/API
-%% reference; the version-boundary claim is audit evidence from the released
-%% reproducer and should be cited to the artifact repository if one is public.
+End-to-end reproduction confirms the split: the audit environment
+(pandas 2.3.3, numpy 2.2.6) exactly matches the local
+\texttt{scenario\_state.json} and has 0/1000 content matches with the official
+capture, while the HELM v0.3.0-era environment (pandas 2.0.3, numpy 1.23.5)
+exactly matches the official capture and has 0/1000 content matches with the
+local capture. Thus an id-based join would align different prompts, while the
+\eee{} content join correctly reports \texttt{join\_failed}.
 
-\begin{table}[t]
-\centering
-\small
-\caption{End-to-end Entity-Matching reproducer.  ``Exact'' means byte-for-byte
-agreement with the captured \texttt{scenario\_state.json}.}
-\label{tab:app-helm-em-mwe}
-\begin{tabular}{lcc}
-\toprule
-live environment & local capture & public capture \\
-\midrule
-pandas 2.3.3, numpy 2.2.6, current HELM & exact & 0/1000 content matches \\
-crfm-helm 0.3.0, pandas 2.0.3, numpy 1.23.5 & 0/1000 content matches & exact \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The failure mode is precisely the one a unified record should prevent.  Joining
-on \texttt{(sample\_id, metric\_id)} would align records with the same string id
-but different prompts.  Joining on \texttt{sample\_hash} rejects the comparison
-because the underlying prompt-reference content is different.
-
-\subsection{SyntheticReasoning-Natural: an empty-completion artifact}
+\subsection{SyntheticReasoning-Natural}
 \label{sec:app-helm-sr-natural}
 
-The SyntheticReasoning-Natural $\times$ Pythia-6.9B cell is the largest
-post-join discrepancy.  Unlike Entity-Matching, the prompt-reference hashes
-match: the two sides are evaluating the same instances.  The discrepancy appears
-after alignment.  The public-side records have \texttt{output.raw=""} and score
-0.0 on every instance for the set-match metrics; the local records have
-non-empty completions and recover non-zero accuracy.
+SyntheticReasoning-Natural $\times$ Pythia-6.9B is the largest post-join
+discrepancy. The prompt-reference hashes match, but official records have
+\texttt{output.raw=""} and score 0.0 on every instance under the set-match
+metrics, while local records contain non-empty completions and recover non-zero
+accuracy.
 
-The HELM recipe is deterministic on paper:
+The recipe is deterministic on paper:
 \texttt{temperature=0.0}, \texttt{num\_outputs=1}, \texttt{max\_tokens=20}, and
-\texttt{stop\_sequences=[``\textbackslash n'']}.  The audit trail indicates that
-HELM v0.3.0 routed the public Pythia call through Together.ai when
-\texttt{model\_deployment} was unset, while the local run used HuggingFace
-transformers.  In the public artifacts, the first generated token is a newline
-and the following tokens contain the substantive answer.  HELM applies the
-newline stop sequence before scoring, so the recorded completion becomes empty.
-The local HuggingFace run does not start with a newline and therefore preserves
-the answer.
-%% CITATION NOTE: this paragraph should cite either the exact HELM v0.3.0 source
-%% lines/release artifact for deployment routing or the audit repository.  If the
-%% public HELM dashboard score is referenced in the main text, cite the archived
-%% dashboard or include it as a reproducibility artifact.
+\texttt{stop\_sequences=[``\textbackslash n'']}. Lower-level official artifacts
+show that the model produced outputs, but each output began with the newline
+stop sequence and HELM applied that stop sequence before scoring. The audit
+trail indicates that HELM v0.3.0 routed the official Pythia call through
+Together.ai when \texttt{model\_deployment} was unset, whereas the local run
+used Hugging Face transformers. Thus, \eee{} exposes the decisive symptom---same
+prompt, same reference, empty official output, non-empty local output,
+divergent scores---but the historical backend must be recovered from HELM
+runtime artifacts or source code.
 
-This example illustrates the boundary between audit and forensics.  \eee{}
-contains enough information to identify the aligned-run symptom---same prompt,
-same reference, empty official output, non-empty local output, divergent scores.
-The historical backend routing is not part of the current \eee{} record and must
-be recovered from HELM runtime artifacts or source code.
-
-\subsection{WikiFact: expected agreement under stochastic decoding}
+\subsection{WikiFact}
 \label{sec:app-helm-wikifact}
 
-WikiFact behaves differently from the previous two cases.  The three WikiFact
-cells have similar agreement for all models: 0.922 for Pythia, 0.920 for
-Vicuna, and 0.927 for Falcon.  The recipe uses \texttt{temperature=1.0},
-\texttt{num\_outputs=5}, \texttt{max\_tokens=8}, and a newline stop sequence.
-Therefore independent executions of the same recipe are not expected to be
-bitwise identical.
+WikiFact has similar agreement for all models: 0.922 for Pythia, 0.920 for
+Vicuna, and 0.927 for Falcon. Its recipe uses \texttt{temperature=1.0},
+\texttt{num\_outputs=5}, \texttt{max\_tokens=8}, and a newline stop sequence, so
+independent executions need not match bitwise.
 
-A simple Bernoulli model explains why agreement can stabilize below one without
-indicating a reproducibility bug.  Let $p_i$ be the probability that a single
-stochastic execution scores 1 on prompt $i$.  The probability that two
-independent executions agree on that prompt is
-\[
-  p_i^2 + (1-p_i)^2.
-\]
-Averaging over prompts gives
+A simple independent Bernoulli model for binary per-instance scores explains
+why agreement can stabilize below one without indicating a bug. Let $p_i$ be
+the probability that one stochastic execution scores 1 on prompt $i$. Then two
+independent executions agree with probability $p_i^2 + (1-p_i)^2$, and
 \[
   \mathbb{E}_i[p_i^2 + (1-p_i)^2]
-  = \bar p^2 + (1-\bar p)^2 + 2\,\mathrm{Var}_i(p_i),
+  = \bar p^2 + (1-\bar p)^2 + 2\,\mathrm{Var}_i(p_i).
 \]
-where $\bar p=\mathbb{E}_i[p_i]$.  The homogeneous Bernoulli agreement
-$\bar p^2 + (1-\bar p)^2$ is therefore a lower bound on the heterogeneous
-expected agreement.  The observed WikiFact values sit slightly above this lower
-bound at the corresponding run-level accuracies, which is consistent with
-prompt-dependent difficulty: some prompts are almost always answered correctly,
-some almost always incorrectly, and some are genuinely variable.
+Thus the homogeneous Bernoulli agreement
+$\bar p^2 + (1-\bar p)^2$ is a lower bound on heterogeneous expected agreement.
+The observed WikiFact values sit slightly above this bound, consistent with
+prompt-dependent difficulty rather than a reproduction bug. \eee{} makes this
+visible by preserving decoding parameters, per-instance scores, and raw outputs.
 
-The \eee{} fields are sufficient to make this interpretation visible.  The
-records preserve the non-zero temperature, the number of sampled completions,
-the per-instance scores, and the raw output structure.  A scalar leaderboard
-score alone would obscure the distinction between stochastic recipe behavior and
-a broken reproduction.
-%% CITATION NOTE: if the Bernoulli identity remains Lean-verified in a public
-%% artifact, cite the artifact.  Otherwise this can stand as a derivation without
-%% an external citation.
+\subsection{Residual disagreements and scope}
+\label{sec:app-helm-residual}
 
-\subsection{Residual sub-unit agreement and the Pythia pattern}
-\label{sec:app-helm-pythia-pattern}
+Several other cells fall below perfect agreement without exhibiting
+non-comparability, empty completions, or stochastic decoding. Spot checks show
+aligned instances and mostly matching answers; the residual differences are
+genuine answer changes on a minority of prompts, concentrated in Pythia-6.9B. A
+plausible lead is serving-stack sensitivity, but the evidence cannot separate
+model weakness from served checkpoint, quantization, precision, tokenizer, or
+generation-kernel differences.
 
-Several additional cells fall below perfect agreement but do not exhibit the
-Entity-Matching or empty-completion failure modes.  Spot checks show that the
-same instances are being evaluated and that most answers agree; the residual
-disagreements are genuine answer differences on a minority of prompts.  These
-cells are concentrated in Pythia-6.9B, whereas Vicuna and Falcon are nearly
-identical on the same non-WikiFact tasks.
-
-\begin{table}[t]
-\centering
-\small
-\caption{Cells below 0.98 agreement.  Entity-Matching is excluded because no
-content join exists.  WikiFact is recipe stochasticity; the remaining low cells
-are concentrated in Pythia-6.9B.}
-\label{tab:app-helm-sub98}
-\begin{tabular}{llcl}
-\toprule
-benchmark & model & agreement & interpretation \\
-\midrule
-SyntheticReasoning-Natural & Pythia-6.9B & 0.788 & empty-completion artifact \\
-NarrativeQA                & Pythia-6.9B & 0.910 & Pythia residual divergence \\
-WikiFact                   & Vicuna-7B v1.3 & 0.920 & stochastic recipe \\
-WikiFact                   & Pythia-6.9B & 0.922 & stochastic recipe \\
-WikiFact                   & Falcon-7B & 0.927 & stochastic recipe \\
-BoolQ                      & Pythia-6.9B & 0.934 & Pythia residual divergence \\
-MMLU                       & Pythia-6.9B & 0.935 & Pythia residual divergence \\
-CivilComments              & Pythia-6.9B & 0.940 & Pythia residual divergence \\
-QuAC                       & Pythia-6.9B & 0.942 & Pythia residual divergence \\
-LSAT-QA                    & Pythia-6.9B & 0.960 & Pythia residual divergence \\
-TruthfulQA                 & Pythia-6.9B & 0.977 & Pythia residual divergence \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The most plausible explanation is serving-stack sensitivity.  The public runs
-and local runs use different inference stacks, and small numerical differences
-can flip greedy decoding when the top two next-token logits are close.  Pythia
-may be more sensitive because it is a weaker base model than the instruction-tuned
-Vicuna and the more heavily trained Falcon model; however, this is only a
-hypothesis.  The present evidence cannot rule out a different served checkpoint,
-quantization, precision, tokenizer implementation, or generation kernel.
-Accordingly, the paper should phrase this as a lead generated by the \eee{}
-audit rather than as a causal conclusion.
-%% CITATION NOTE: cite Pythia, Vicuna, Falcon, and optionally LLaMA if retaining
-%% the training-budget/model-strength comparison.  Avoid claiming a proven
-%% logit-margin mechanism unless a dedicated experiment is added.
-
-\subsection{Methodological caveat: agreement is not behavioral identity}
-\label{sec:app-helm-microaverage}
-
-The heatmap reports micro-averaged agreement over per-instance metric rows.  A
-row counts as agreement whenever the scores match, including when both sides are
-wrong.  Consequently, high agreement does not imply identical text outputs, and
-low agreement does not always mean that the evaluation was invalid.  The three
-main cases occupy different regimes: Entity-Matching is an invalid comparison
-because the content sets do not overlap; SyntheticReasoning-Natural with Pythia
-is a valid content join with a broken official completion pattern; and WikiFact
-is a valid content join whose non-unit agreement is expected from stochastic
-decoding.  A reproducibility report should therefore present agreement together
-with run-level scores, decoding parameters, and, when available, output-level
-divergence.
-
-\subsection{What EEE captures}
-\label{sec:app-helm-eee-scope}
-
-This case study should be read as an audit of evaluation records, not as a claim
-that \eee{} replaces the original framework logs.  \eee{} captures the fields
-needed to detect and localize discrepancies: content-derived instance identity,
-per-instance outputs, per-metric scores, and generation parameters.  It does not
-currently capture all runtime facts needed for complete forensics, such as the
-exact pandas version, inference backend, served checkpoint revision, numerical
-precision, or generation kernel.  The resulting division of labor is appropriate:
-\eee{} makes invalid or suspicious comparisons visible at scale, while targeted
-framework artifacts explain the mechanism once a suspicious cell has been found.
+The heatmap is an audit of evaluation records, not proof of behavioral identity.
+A row agrees whenever metric scores match, including when both sides are wrong;
+high agreement does not imply identical text outputs, and low agreement does not
+necessarily imply invalidity. \eee{} captures content-derived instance identity,
+per-instance outputs, per-metric scores, and generation parameters. It makes
+invalid or suspicious comparisons visible at scale, while targeted framework
+artifacts explain the mechanism.
