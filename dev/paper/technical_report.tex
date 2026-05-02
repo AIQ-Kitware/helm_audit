@@ -53,8 +53,9 @@
 
 This technical report documents an end-to-end reproducibility audit of
   three open-weight model families
-  (Pythia-6.9B, Vicuna-7B v1.3, Falcon-7B) against the public HELM
-  Classic v0.3.0 corpus on fourteen single-turn benchmarks, totalling
+  (Pythia-6.9B, Vicuna-7B v1.3, Falcon-7B) against public HELM run
+  artifacts from the relevant HELM suites, including HELM Classic
+  where applicable, on fourteen single-turn benchmarks, totalling
   42 \mbox{(model, benchmark)} cells.
 The audit operates entirely through the \eee{} schema and is
   empirically validated --- via a runtime audit hook installed into
@@ -77,12 +78,30 @@ Two of the three (Cases~A and~B below) are upstream issues that we
   the third (Case~C) is intentional recipe-level stochasticity that
   the benchmark explicitly enables and that any honest audit must
   treat as the design-baked floor, not as a reproducibility bug.
-Each is detected by EEE's content-derived \texttt{sample\_hash}
+EEE's role differs across the three.
+Case~A is detected directly by EEE's content-derived
+  \texttt{sample\_hash}
   (a SHA-256 hash over the rendered prompt and the first correct
   reference, computed at conversion time; see
-  Section~\ref{sec:tr-eee-format}) while HELM's positional
-  \texttt{id<i>}-based comparison would silently agree on different
-  examples on the upstream-issue cases.
+  Section~\ref{sec:tr-eee-format}): the hash sets fail to overlap
+  between sides, so the join itself rejects the comparison and the
+  cell renders as \texttt{join\_failed}.
+HELM's positional \texttt{id<i>}-based comparison, in contrast, would
+  silently agree on Case~A's mismatched examples.
+Cases~B and~C, however, do \emph{not} fail at the hash-join layer ---
+  the prompts and references are byte-equivalent on both sides, so
+  the hashes match and the join succeeds.
+They are surfaced \emph{after} alignment: Case~B via
+  \texttt{evaluation.score} divergence per (sample, metric) row,
+  combined with the empty \texttt{output.raw} pattern on the official
+  side, and Case~C via the run-level mean accuracy gap and
+  cross-model uniformity diagnostic on the joined data
+  (\texttt{evaluation.score} variance under the recipe's stochastic
+  sampling).
+\eee{} preserves the data needed for both forms of detection ---
+  prompt and reference for the hash-join, and raw output and per-metric
+  score for the post-join score comparison --- but the hash is
+  load-bearing only for Case~A.
 The hash validates whether two records describe the same
   prompt-reference pair; it does not retrieve or address the
   underlying content.
@@ -244,31 +263,40 @@ What we did, and what we relied on others to have done, matters for
   every claim in this report; we lay it out explicitly here.
 
 \paragraph{Public-side HELM artifacts (CRFM-published, not ours).}
-The official side of every comparison is anchored in the public
-  HELM~Classic suite at version \texttt{v0.3.0}, hosted by
-  Stanford CRFM at the canonical
-  \texttt{benchmark\_output/runs/v0.3.0/<run\_spec>/} layout.
-We did not run those evaluations; CRFM did, on whatever hardware and
-  HELM version they used at the time the v0.3.0 results were
-  published.
-We mirror those run dirs locally at
-  \texttt{/data/crfm-helm-public/classic/benchmark\_output/runs/v0.3.0/}
-  and treat their contents
+The official side of each comparison is anchored in public HELM run
+  artifacts published by Stanford CRFM, drawn from the relevant
+  HELM suite for that benchmark, including HELM Classic v0.3.0 where
+  applicable.
+We did not run those official evaluations; CRFM did, on whatever
+  hardware, serving stack, and HELM version they used at publication
+  time.
+We mirror those public run dirs locally and treat their contents
   (\texttt{run\_spec.json}, \texttt{scenario\_state.json},
-   \texttt{stats.json}, \texttt{per\_instance\_stats.json})
-  as the authoritative published record.
+  \texttt{stats.json}, \texttt{per\_instance\_stats.json}) as the
+  authoritative published record.
+For the slim heatmap exercised in this report, every cell happens to
+  draw from \texttt{classic/v0.3.0/}, but the audit pipeline is
+  suite-agnostic: the public-store namespace also contains
+  \texttt{lite/}, \texttt{mmlu/}, \texttt{capabilities/},
+  \texttt{long-context/}, \texttt{safety/}, \texttt{medhelm/},
+  \texttt{finance/}, \texttt{heim/}, \texttt{image2struct/},
+  \texttt{ewok/}, \texttt{speech/}, and other suites at their own
+  released versions, all of which the same audit pipeline can
+  consume.
 
 \paragraph{Public-side EEE conversion (ours).}
 We then converted those public HELM run dirs into \eee{} artifacts
   using our \texttt{every\_eval\_ever.converters.helm} converter
   (schema version \texttt{0.2.2}), one EEE record set per
   HELM run dir.
-The converted artifacts are stored at
-  \texttt{/data/crfm-helm-audit-store/crfm-helm-public-eee-test/classic/v0.3.0/};
-  every aggregate JSON in that tree records
+The converted public-side artifacts are stored under
+  \texttt{/data/crfm-helm-audit-store/crfm-helm-public-eee-test/<suite>/<version>/\dots},
+  with \texttt{classic/v0.3.0/} the dominant suite/version for the
+  slim heatmap but not the only public-store namespace.
+Every aggregate JSON in that tree records
   \texttt{source\_metadata.evaluator\_relationship="third\_party"}
-  and \texttt{source\_metadata.source\_organization\_name="CRFM"}
-  to mark the underlying evaluation as published-by-CRFM but
+  and \texttt{source\_metadata.source\_organization\_name="CRFM"} to
+  mark the underlying evaluation as published-by-CRFM but
   EEE-converted-by-us.
 
 \paragraph{Local-side HELM runs (ours).}
